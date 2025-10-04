@@ -1,0 +1,98 @@
+<!-- MODIFIED FILE: templates/index.html -->
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Thư viện Nhân vật</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <script>
+      (function() {
+        const theme = localStorage.getItem('yuuka-theme');
+        if (theme === 'dark') {
+          document.documentElement.classList.add('dark-mode');
+        }
+      })();
+    </script>
+    <div id="error-popup"></div>
+
+    <header>
+        <div id="tabs">
+            <button class="tab-btn active" data-tab="browse">Browse</button>
+            <button class="tab-btn" data-tab="favourite">Favourite</button>
+            <button class="tab-btn" data-tab="album">Album</button>
+            <button class="tab-btn" data-tab="scene">Scene</button>
+            <button class="tab-btn" data-tab="blacklist">Blacklist</button>
+        </div>
+        
+        <div class="custom-select-container" id="main-tabs-select">
+            <button class="custom-select-trigger" id="tabs-select-trigger">Browse</button>
+            <div class="custom-select-options">
+                <div class="custom-select-option" data-value="browse">Browse</div>
+                <div class="custom-select-option" data-value="favourite">Favourite</div>
+                <div class="custom-select-option" data-value="album">Album</div>
+                <div class="custom-select-option" data-value="scene">Scene</div>
+                <div class="custom-select-option" data-value="blacklist">Blacklist</div>
+            </div>
+        </div>
+
+        <div class="header-spacer"></div>
+
+        <form id="search-form" action="javascript:void(0);">
+             <input type="text" id="search-box" placeholder="Tìm kiếm hoặc gõ /rm <từ khóa>">
+        </form>
+
+        <div id="album-selectors-container"></div>
+
+        <button id="back-btn">Back</button>
+    </header>
+
+    <div class="container">
+        <div id="gallery"></div>
+        <div id="album-container"></div>
+        <div id="scene-container"></div>
+        <div id="loader">Đang tải...</div>
+    </div>
+
+    <div id="context-footer"></div>
+    
+    <div id="scene-controls" class="scene-controls">
+        <button data-action="play" title="Bắt đầu gen từ mục được chọn">▶️</button>
+        <button data-action="stop" title="Dừng quá trình gen">⏹️</button>
+        <button data-action="bypass" title="Bỏ qua/Kích hoạt lại mục được chọn">🔆</button>
+        <button data-action="settings" title="Cấu hình">⚙️</button>
+        <button data-action="delete" title="Xóa mục được chọn">🗑️</button>
+    </div>
+
+    <div id="modal">
+        <span id="modal-close">&times;</span>
+        <div id="modal-content">
+            <img id="modal-image">
+            <div id="modal-caption"></div>
+            <div id="modal-actions">
+                <button id="modal-fav-btn" class="modal-action-btn"></button>
+                <button id="modal-album-btn" class="modal-action-btn">🖼️</button>
+                <button id="modal-search-btn" class="modal-action-btn">🔎</button>
+                <button id="modal-blacklist-btn" class="modal-action-btn"></button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- NEW: Modal for managing tag groups, initially hidden -->
+    <div id="tag-group-modal" class="modal-backdrop" style="display: none;">
+        <div class="modal-dialog">
+            <div id="tag-group-modal-content">
+                <!-- Content will be injected by scene.js -->
+            </div>
+        </div>
+    </div>
+
+
+    <script src="{{ url_for('static', filename='api.js') }}"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='album.js') }}"></script>
+    <script src="{{ url_for('static', filename='scene.js') }}"></script>
+</body>
+</html>

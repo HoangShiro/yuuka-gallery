@@ -1,0 +1,857 @@
+# --- MODIFIED FILE: app.py ---
+import csv
+import io
+import hashlib
+import base64
+import gzip
+import requests
+import os
+import time
+import json
+import ipaddress
+import uuid
+import threading
+from flask import Flask, render_template, jsonify, Response, abort, request, send_from_directory
+from flask_cors import CORS
+
+# Yuuka: Import các module mới từ thư mục comfyui_integration
+from comfyui_integration.workflow_builder_service import WorkflowBuilderService
+from comfyui_integration import comfy_api_client
+
+# --- Constants ---
+CSV_CHARACTERS_URL = "https://raw.githubusercontent.com/mirabarukaso/character_select_stand_alone_app/refs/heads/main/data/wai_characters.csv"
+JSON_THUMBNAILS_URL = "https://huggingface.co/datasets/flagrantia/character_select_stand_alone_app/resolve/main/wai_character_thumbs.json"
+COMFYUI_DEFAULT_ADDRESS = "127.0.0.1:8888"
+BOT_API_DEFAULT_ADDRESS = "http://127.0.0.1:5500" # Yuuka: Địa chỉ cho Bot API
+
+# --- Cache Configuration ---
+CACHE_DIR = "data_cache"
+USER_IMAGES_DIR = "user_images"
+CACHE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
+CHARACTERS_CACHE_FILENAME = "wai_characters.csv"
+THUMBNAILS_CACHE_FILENAME = "wai_character_thumbs.json"
+USER_DATA_FILENAME = "user_data.json"
+ALBUM_DATA_FILENAME = "album_data.json"
+COMFYUI_CONFIG_FILENAME = "comfyui_config.json" # Yuuka: File để lưu config ComfyUI
+TAGS_FILENAME = "tags.csv" # Yuuka: File cho tag predictions
+SCENE_DATA_FILENAME = "scene_data.json" # Yuuka: File mới cho dữ liệu tab Scene
+TAG_GROUPS_FILENAME = "tags_group.json" # Yuuka: File mới cho dữ liệu Tag Group
+
+# --- Flask App Initialization ---
+app = Flask(__name__)
+CORS(app)
+
+# --- In-memory Data Cache ---
+ALL_CHARACTERS_LIST = []
+ALL_CHARACTERS_DICT = {}
+THUMBNAILS_DATA_DICT = {}
+USER_DATA = {}
+ALBUM_DATA = {}
+COMFYUI_CONFIG = {} 
+TAG_PREDICTIONS = []
+SCENE_DATA = {} # Yuuka: Biến mới để lưu dữ liệu tab Scene
+TAG_GROUPS_DATA = [] # Yuuka: Biến mới để lưu dữ liệu Tag Group
+
+# Yuuka: State cho việc gen ảnh nền, chi tiết hơn
+SCENE_GENERATION_STATE = {
+    "is_running": False, 
+    "cancel_requested": False, 
+    "current_job": None,
+    "user_hash": None,
+    "current_scene_id": None, # Yuuka: ID của Scene đang chạy để làm hiệu ứng
+    "current_stage_id": None, # Yuuka: ID của Stage đang chạy để làm hiệu ứng
+    "progress": {
+        "current": 0,
+        "total": 0,
+        "message": "Chưa bắt đầu"
+    }
+}
+scene_generation_lock = threading.Lock()
+
+# Yuuka: Khởi tạo service xây dựng workflow cho ComfyUI
+workflow_builder = WorkflowBuilderService()
+
+# === Helper functions ===
+
+def _get_api_key_from_request(req):
+    auth_header = req.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        abort(401, description="Authorization header is missing or invalid.")
+    return auth_header.split(' ')[1]
+
+def _get_api_key_hash(api_key: str) -> str:
+    return hashlib.sha256(api_key.encode('utf-8')).hexdigest()
+
+def is_lan_ip(ip_str: str) -> bool:
+    try:
+        if ip_str in ('127.0.0.1', '::1'): return True
+        return ipaddress.ip_address(ip_str).is_private
+    except ValueError:
+        return False
+
+def get_data_path(filename: str) -> str:
+    return os.path.join(CACHE_DIR, filename)
+
+def load_json_data(filename, default_value={}):
+    path = get_data_path(filename)
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print(f"⚠️ [Server] Warning: Could not decode {path}. Starting fresh.")
+    else:
+        print(f"[Server] No {filename} file found. A new one will be created on first save.")
+    return default_value
+
+def save_json_data(data, filename):
+    path = get_data_path(filename)
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+        print(f"[Server] Saved data to: {path}")
+    except IOError as e:
+        print(f"💥 CRITICAL ERROR: Could not write data to {path}. Error: {e}")
+
+def get_md5_hash(tag: str) -> str:
+    tag_for_md5 = tag.replace('(', '\\(').replace(')', '\\)')
+    return hashlib.md5(tag_for_md5.encode('utf-8')).hexdigest()
+
+def _fetch_or_read_from_cache(data_name: str, remote_url: str, local_filename: str) -> str:
+    local_path = os.path.join(CACHE_DIR, local_filename)
+    should_download = False
+    if os.path.exists(local_path):
+        if (time.time() - os.path.getmtime(local_path)) > CACHE_TTL_SECONDS:
+            print(f"[Server Cache] Cache for {data_name} is stale. Refreshing.")
+            should_download = True
+        else:
+            print(f"[Server Cache] Loading {data_name} from fresh cache file: {local_path}")
+    else:
+        print(f"[Server Cache] No cache found for {data_name}. Downloading for the first time.")
+        should_download = True
+    if should_download:
+        print(f"[Server] Fetching {data_name} from: {remote_url}")
+        try:
+            response = requests.get(remote_url, timeout=60)
+            response.raise_for_status()
+            content = response.text
+            with open(local_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"[Server] Successfully updated cache file: {local_path}")
+        except requests.RequestException as e:
+            print(f"⚠️ [Server] Failed to fetch {data_name}: {e}. Will use existing cache if available.")
+    if os.path.exists(local_path):
+        with open(local_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    else:
+        raise RuntimeError(f"CRITICAL: No local cache for {data_name} and download failed.")
+
+def load_and_prepare_data():
+    global ALL_CHARACTERS_LIST, THUMBNAILS_DATA_DICT, ALL_CHARACTERS_DICT, USER_DATA, ALBUM_DATA, COMFYUI_CONFIG, TAG_PREDICTIONS, SCENE_DATA, TAG_GROUPS_DATA
+    print("[Server] Starting to load and process data...")
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        os.makedirs(USER_IMAGES_DIR, exist_ok=True)
+        USER_DATA = load_json_data(USER_DATA_FILENAME)
+        ALBUM_DATA = load_json_data(ALBUM_DATA_FILENAME)
+        COMFYUI_CONFIG = load_json_data(COMFYUI_CONFIG_FILENAME)
+        SCENE_DATA = load_json_data(SCENE_DATA_FILENAME) # Yuuka: Tải dữ liệu Scene
+        TAG_GROUPS_DATA = load_json_data(TAG_GROUPS_FILENAME, default_value=[]) # Yuuka: Tải dữ liệu Tag Group
+        
+        tags_path = get_data_path(TAGS_FILENAME)
+        if os.path.exists(tags_path):
+            try:
+                with open(tags_path, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    tags_with_popularity = []
+                    for row in reader:
+                        if len(row) >= 2:
+                            try:
+                                tags_with_popularity.append((row[0].strip(), int(row[1])))
+                            except ValueError:
+                                continue
+                    tags_with_popularity.sort(key=lambda x: x[1], reverse=True)
+                    TAG_PREDICTIONS = [tag for tag, pop in tags_with_popularity]
+                    print(f"[Server] Loaded and sorted {len(TAG_PREDICTIONS)} tags for prediction.")
+            except Exception as e:
+                print(f"⚠️ [Server] Warning: Could not load or process {TAGS_FILENAME}. Error: {e}")
+        else:
+            print(f"[Server] No {TAGS_FILENAME} found. Tag prediction will be disabled.")
+
+        thumbnails_content = _fetch_or_read_from_cache("Thumbnails JSON", JSON_THUMBNAILS_URL, THUMBNAILS_CACHE_FILENAME)
+        THUMBNAILS_DATA_DICT = json.loads(thumbnails_content)
+        print(f"[Server] Loaded {len(THUMBNAILS_DATA_DICT)} thumbnails into memory.")
+        characters_content = _fetch_or_read_from_cache("Characters CSV", CSV_CHARACTERS_URL, CHARACTERS_CACHE_FILENAME)
+        reader = csv.reader(io.StringIO(characters_content))
+        next(reader, None)
+        temp_char_list = []
+        for row in reader:
+            if len(row) >= 2 and row[1] and row[1].strip():
+                original_name = row[1].strip()
+                md5_hash = get_md5_hash(original_name)
+                if md5_hash in THUMBNAILS_DATA_DICT:
+                    char_data = {"name": original_name, "hash": md5_hash}
+                    temp_char_list.append(char_data)
+                    ALL_CHARACTERS_DICT[md5_hash] = char_data
+        ALL_CHARACTERS_LIST = sorted(temp_char_list, key=lambda x: x['name'].lower())
+        print(f"[Server] Processed and linked {len(ALL_CHARACTERS_LIST)} characters.")
+    except Exception as e:
+        print(f"💥 CRITICAL ERROR: Could not load or process data. Server cannot function. Error: {e}")
+
+# === Route Definitions ===
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/user_image/<filename>')
+def user_image(filename):
+    return send_from_directory(USER_IMAGES_DIR, filename)
+
+# === API Endpoints for LAN Sync (Favourites/Blacklist) ===
+
+@app.route('/api/lists', methods=['GET'])
+def get_lists():
+    client_ip = request.remote_addr
+    if is_lan_ip(client_ip):
+        print(f"[Server] LAN client {client_ip} connected. Providing synced lists.")
+        lan_data = USER_DATA.get("lan", {})
+        return jsonify({"sync_mode": "lan", "favourites": lan_data.get("favourites", []), "blacklist": lan_data.get("blacklist", [])})
+    else:
+        print(f"[Server] Public client {client_ip} connected. Instructing to use local storage.")
+        return jsonify({"sync_mode": "local"})
+
+@app.route('/api/lists', methods=['POST'])
+def update_lists():
+    client_ip = request.remote_addr
+    if not is_lan_ip(client_ip):
+        abort(403, description="Only LAN clients can update the shared lists.")
+    data = request.json
+    new_favourites = data.get('favourites', [])
+    new_blacklist = data.get('blacklist', [])
+    if not isinstance(new_favourites, list) or not isinstance(new_blacklist, list):
+        abort(400, description="Invalid data format.")
+    USER_DATA["lan"] = {"favourites": new_favourites, "blacklist": new_blacklist}
+    save_json_data(USER_DATA, USER_DATA_FILENAME)
+    print(f"[Server] Received and saved list updates from LAN client {client_ip}.")
+    return jsonify({"status": "success", "message": "Lists updated."})
+
+# === API Endpoints for Synced Album ===
+def _save_generated_image(user_hash, character_hash, image_base64, generation_config, server_id):
+    """Yuuka: Helper function to save an image and its metadata."""
+    try:
+        image_data = base64.b64decode(image_base64)
+        image_id = str(uuid.uuid4())
+        filename = f"{image_id}.png"
+        filepath = os.path.join(USER_IMAGES_DIR, filename)
+        with open(filepath, 'wb') as f:
+            f.write(image_data)
+    except Exception as e:
+        print(f"Error saving image: {e}")
+        raise IOError("Could not save image file.")
+
+    if user_hash not in ALBUM_DATA:
+        ALBUM_DATA[user_hash] = {}
+    if character_hash not in ALBUM_DATA[user_hash]:
+        ALBUM_DATA[user_hash][character_hash] = []
+        
+    new_image_metadata = {
+        "id": image_id,
+        "url": f"/user_image/{filename}",
+        "serverId": server_id,
+        "generationConfig": generation_config,
+        "createdAt": time.time()
+    }
+    
+    ALBUM_DATA[user_hash][character_hash].append(new_image_metadata)
+    save_json_data(ALBUM_DATA, ALBUM_DATA_FILENAME)
+    return new_image_metadata
+
+
+@app.route('/api/album/characters', methods=['GET'])
+def get_album_characters():
+    api_key = _get_api_key_from_request(request)
+    user_hash = _get_api_key_hash(api_key)
+    user_album = ALBUM_DATA.get(user_hash, {})
+    return jsonify(list(user_album.keys()))
+
+@app.route('/api/album/<character_hash>', methods=['GET'])
+def get_character_album(character_hash):
+    api_key = _get_api_key_from_request(request)
+    user_hash = _get_api_key_hash(api_key)
+    user_album = ALBUM_DATA.get(user_hash, {})
+    images = user_album.get(character_hash, [])
+    sorted_images = sorted(images, key=lambda x: x.get('createdAt', 0), reverse=True)
+    return jsonify(sorted_images)
+
+@app.route('/api/album/<character_hash>', methods=['POST'])
+def add_character_image(character_hash):
+    api_key = _get_api_key_from_request(request)
+    user_hash = _get_api_key_hash(api_key)
+    
+    data = request.json
+    if not data or 'image_base64' not in data or 'generation_config' not in data or 'server_id' not in data:
+        abort(400, description="Missing required data in request body.")
+    
+    try:
+        new_metadata = _save_generated_image(
+            user_hash,
+            character_hash,
+            data['image_base64'],
+            data['generation_config'],
+            data['server_id']
+        )
+        return jsonify(new_metadata), 201
+    except IOError as e:
+        abort(500, description=str(e))
+
+
+@app.route('/api/album/image/<image_id>', methods=['DELETE'])
+def delete_character_image(image_id):
+    api_key = _get_api_key_from_request(request)
+    user_hash = _get_api_key_hash(api_key)
+
+    if user_hash not in ALBUM_DATA:
+        abort(404, description="User album not found.")
+
+    found = False
+    for char_hash, images in ALBUM_DATA[user_hash].items():
+        image_to_remove = next((img for img in images if img['id'] == image_id), None)
+        if image_to_remove:
+            try:
+                filename = os.path.basename(image_to_remove['url'])
+                filepath = os.path.join(USER_IMAGES_DIR, filename)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except Exception as e:
+                print(f"Could not delete file {filepath}: {e}")
+
+            ALBUM_DATA[user_hash][char_hash] = [img for img in images if img['id'] != image_id]
+            if not ALBUM_DATA[user_hash][char_hash]:
+                del ALBUM_DATA[user_hash][char_hash]
+            
+            found = True
+            break
+            
+    if not found:
+        abort(404, description="Image ID not found in user's album.")
+        
+    save_json_data(ALBUM_DATA, ALBUM_DATA_FILENAME)
+    return jsonify({"status": "success", "message": "Image deleted."})
+
+# === API Endpoints for Direct ComfyUI Communication ===
+
+@app.route('/api/comfyui/status', methods=['GET'])
+def comfyui_status():
+    try:
+        # Yuuka: Sử dụng server address từ query param nếu có, nếu không thì dùng mặc định
+        target_address = request.args.get('server_address', COMFYUI_DEFAULT_ADDRESS).strip()
+        comfy_api_client.get_queue_details_sync(target_address)
+        return jsonify({"status": "ok", "message": f"ComfyUI is online at {target_address}."})
+    except Exception as e:
+        print(f"[ComfyUI Direct] Status check failed: {e}")
+        abort(503, description=f"ComfyUI is not reachable.")
+
+
+@app.route('/api/comfyui/info', methods=['GET'])
+def comfyui_info():
+    try:
+        from comfyui_integration.workflow_builder_service import DEFAULT_CONFIG
+        
+        last_config = None
+        character_hash = request.args.get('character_hash')
+        
+        # Yuuka: Xác định config cuối cùng để lấy server_address từ đó
+        if COMFYUI_CONFIG:
+            print("[ComfyUI Info] Using saved ComfyUI config (Priority 1)")
+            last_config = COMFYUI_CONFIG
+        elif character_hash:
+            api_key = _get_api_key_from_request(request)
+            user_hash = _get_api_key_hash(api_key)
+            user_album = ALBUM_DATA.get(user_hash, {})
+            images = user_album.get(character_hash, [])
+            if images:
+                sorted_images = sorted(images, key=lambda x: x.get('createdAt', 0), reverse=True)
+                print(f"[ComfyUI Info] Using latest image config for {character_hash} (Priority 2)")
+                last_config = sorted_images[0]['generationConfig']
+
+        if not last_config:
+            print("[ComfyUI Info] Using default config (Priority 3)")
+            last_config = DEFAULT_CONFIG
+            
+        final_config = {**DEFAULT_CONFIG, **last_config}
+
+        # Yuuka: FIX - Lấy địa chỉ server từ config đã xác định, nếu không có thì dùng mặc định
+        target_address = final_config.get('server_address', COMFYUI_DEFAULT_ADDRESS).strip()
+        if not target_address:
+            target_address = COMFYUI_DEFAULT_ADDRESS
+        
+        print(f"[ComfyUI Info] Fetching choices from target server: {target_address}")
+        all_choices = comfy_api_client.get_full_object_info(target_address)
+        
+        all_choices['sizes'] = [
+            {"name": "IL 832x1216 - Chân dung (Khuyến nghị)", "value": "832x1216"},
+            {"name": "IL 1216x832 - Phong cảnh", "value": "1216x832"},
+            {"name": "IL 1344x768", "value": "1344x768"},
+            {"name": "IL 1024x1024 - Vuông", "value": "1024x1024"}
+        ]
+        
+        all_choices['checkpoints'] = [{"name": c, "value": c} for c in all_choices.get('checkpoints', [])]
+        all_choices['samplers'] = [{"name": s, "value": s} for s in all_choices.get('samplers', [])]
+        all_choices['schedulers'] = [{"name": s, "value": s} for s in all_choices.get('schedulers', [])]
+
+        mock_accessible_channels = [{
+            "server_id": "comfyui_direct", "server_name": "ComfyUI Direct",
+            "channel_id": "all", "channel_name": "All"
+        }]
+        
+        response_data = {
+            "accessible_channels": mock_accessible_channels,
+            "global_choices": all_choices,
+            "last_config": final_config
+        }
+        return jsonify(response_data)
+    except Exception as e:
+        print(f"[ComfyUI Direct] Info fetch failed: {e}")
+        abort(500, description=f"Failed to get info from ComfyUI: {e}")
+
+@app.route('/api/comfyui/config', methods=['POST'])
+def save_comfyui_config():
+    global COMFYUI_CONFIG
+    config_data = request.json
+    if not config_data:
+        abort(400, description="Missing config data.")
+    
+    COMFYUI_CONFIG = config_data
+    save_json_data(COMFYUI_CONFIG, COMFYUI_CONFIG_FILENAME)
+    print("[Server] Saved new ComfyUI config.")
+    return jsonify({"status": "success", "message": "ComfyUI config saved."})
+
+
+@app.route('/api/comfyui/genart_sync', methods=['POST'])
+def comfyui_genart_sync():
+    cfg_data = request.json
+    if not cfg_data:
+        abort(400, "Missing generation config.")
+        
+    client_id = str(uuid.uuid4())
+    seed = cfg_data.get("seed", uuid.uuid4().int % 10**10)
+
+    try:
+        # Yuuka: FIX - Lấy địa chỉ server từ config gửi lên, nếu không có thì dùng mặc định
+        target_address = cfg_data.get('server_address', COMFYUI_DEFAULT_ADDRESS).strip()
+        if not target_address:
+            target_address = COMFYUI_DEFAULT_ADDRESS
+        print(f"[ComfyUI Direct] Sending generation request to: {target_address}")
+
+        workflow, output_node_id = workflow_builder.build_workflow(cfg_data, seed)
+        prompt_info = comfy_api_client.queue_prompt(workflow, client_id, target_address)
+        prompt_id = prompt_info['prompt_id']
+        
+        while True:
+            history = comfy_api_client.get_history(prompt_id, target_address)
+            if prompt_id in history and 'outputs' in history[prompt_id]:
+                outputs = history[prompt_id]['outputs']
+                if output_node_id in outputs and 'images' in outputs[output_node_id]:
+                    break
+            time.sleep(1)
+
+        image_info = outputs[output_node_id]['images'][0]
+        image_bytes = comfy_api_client.get_image(
+            image_info['filename'], image_info['subfolder'], image_info['type'], target_address
+        )
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+        return jsonify({
+            "status": "success",
+            "images_base64": [image_base64],
+            "generation_config": cfg_data
+        })
+    except Exception as e:
+        print(f"💥 [ComfyUI Direct] Generation failed: {e}")
+        return jsonify({"status": "error", "error_message": str(e)}), 500
+
+# === API Endpoints for Scene Tab ===
+
+@app.route('/api/scenes', methods=['GET'])
+def get_scenes():
+    api_key = _get_api_key_from_request(request)
+    user_hash = _get_api_key_hash(api_key)
+    user_scenes = SCENE_DATA.get(user_hash, [])
+    return jsonify(user_scenes)
+
+@app.route('/api/scenes', methods=['POST'])
+def save_scenes():
+    api_key = _get_api_key_from_request(request)
+    user_hash = _get_api_key_hash(api_key)
+    scenes = request.json
+    if not isinstance(scenes, list):
+        abort(400, "Invalid data format, expected a list of scenes.")
+    SCENE_DATA[user_hash] = scenes
+    save_json_data(SCENE_DATA, SCENE_DATA_FILENAME)
+    return jsonify({"status": "success", "message": "Scenes saved."})
+
+# Yuuka: Background generation task
+def _run_scene_generation_task(job, user_hash, api_key):
+    global SCENE_GENERATION_STATE
+    
+    try:
+        all_groups_map = {g['id']: g for g in TAG_GROUPS_DATA}
+        
+        initial_stages_to_run = []
+        total_images = 0
+        for scene in job['scenes']:
+            if scene.get('bypassed', False):
+                continue
+            quantity = scene.get('generationConfig', {}).get('quantity_per_stage', 1)
+            for stage in scene.get('stages', []):
+                if not stage.get('bypassed', False):
+                    initial_stages_to_run.append({'stage_id': stage['id'], 'scene_id': scene['id']})
+                    total_images += quantity
+        
+        with scene_generation_lock:
+            SCENE_GENERATION_STATE['progress']['total'] = total_images
+
+        last_config = {}
+        images_generated_count = 0
+        
+        for item_ids in initial_stages_to_run:
+            fresh_scene_data = load_json_data(SCENE_DATA_FILENAME)
+            user_scenes = fresh_scene_data.get(user_hash, [])
+            
+            scene = next((s for s in user_scenes if s.get('id') == item_ids['scene_id']), None)
+            
+            # Yuuka: FIX - Logic to correctly update total count if scene/stage is bypassed mid-run
+            if not scene or scene.get('bypassed', False):
+                print(f"[Scenes] Scene {item_ids['scene_id']} skipped: Not found or bypassed.")
+                if scene:
+                    quantity_skipped = scene.get('generationConfig', {}).get('quantity_per_stage', 1)
+                    with scene_generation_lock:
+                        SCENE_GENERATION_STATE['progress']['total'] -= quantity_skipped
+                continue
+
+            stage = next((st for st in scene.get('stages', []) if st.get('id') == item_ids['stage_id']), None)
+            quantity = scene.get('generationConfig', {}).get('quantity_per_stage', 1)
+            
+            if not stage or stage.get('bypassed', False):
+                print(f"[Scenes] Stage {item_ids['stage_id']} skipped: Not found or bypassed.")
+                with scene_generation_lock:
+                    SCENE_GENERATION_STATE['progress']['total'] -= quantity
+                continue
+
+            with scene_generation_lock:
+                SCENE_GENERATION_STATE['current_scene_id'] = scene['id']
+                SCENE_GENERATION_STATE['current_stage_id'] = stage['id']
+
+            scene_config = scene.get('generationConfig', {})
+
+            prompt_parts = {
+                'character': '', 'outfits': [], 'expression': [], 'action': [], 'context': []
+            }
+            category_mapping = { 'pose': 'action', 'outfits': 'outfits', 'view': 'expression', 'context': 'context' }
+            char_name = None
+
+            for category, group_ids in stage.get('tags', {}).items():
+                cat_lower = category.lower()
+                if cat_lower == 'character':
+                    if group_ids:
+                        group = all_groups_map.get(group_ids[0])
+                        if group: char_name = group['name']
+                else:
+                    key = category_mapping.get(cat_lower, 'context')
+                    for group_id in group_ids:
+                        group = all_groups_map.get(group_id)
+                        if group: prompt_parts[key].extend(group['tags'])
+            
+            if not char_name:
+                print(f"[Scenes] Stage {stage['id']} skipped: No character defined.")
+                continue
+
+            char_hash = get_md5_hash(char_name)
+            if char_hash not in ALL_CHARACTERS_DICT:
+                print(f"[Scenes] Stage {stage['id']} skipped: Character '{char_name}' not found.")
+                continue
+            
+            prompt_parts['character'] = char_name
+            final_prompt_from_stage = {k: ', '.join(v) if isinstance(v, list) else v for k, v in prompt_parts.items()}
+
+            from comfyui_integration.workflow_builder_service import DEFAULT_CONFIG
+            base_config = DEFAULT_CONFIG.copy()
+            if ALBUM_DATA.get(user_hash, {}).get(char_hash):
+                latest_image = sorted(ALBUM_DATA[user_hash][char_hash], key=lambda x: x.get('createdAt', 0), reverse=True)[0]
+                base_config.update(latest_image['generationConfig'])
+            elif COMFYUI_CONFIG:
+                 base_config.update(COMFYUI_CONFIG)
+            
+            for i in range(quantity):
+                with scene_generation_lock:
+                    if SCENE_GENERATION_STATE['cancel_requested']:
+                        print("[Scenes] Generation cancelled by user.")
+                        SCENE_GENERATION_STATE['progress']['message'] = "Đã huỷ."
+                        break
+                    images_generated_count += 1
+                    SCENE_GENERATION_STATE['progress']['current'] = images_generated_count
+                    SCENE_GENERATION_STATE['progress']['message'] = f"Đang xử lý ảnh {images_generated_count}/{SCENE_GENERATION_STATE['progress']['total']}..."
+
+                gen_config = {**base_config, **scene_config, **last_config, **final_prompt_from_stage}
+                
+                if int(scene_config.get("seed", 0)) == 0:
+                    seed_value = uuid.uuid4().int % 10**10
+                else:
+                    seed_value = int(gen_config.get("seed", 0))
+                
+                gen_config['seed'] = seed_value
+
+                try:
+                    print(f"[Scenes] Generating for character: {char_name}, mode: {scene['mode']}")
+                    if scene['mode'] == 'Bot API':
+                        payload = {**gen_config, 'channel_id': scene.get('channelId', 'default')}
+                        headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+                        response = requests.post(f"{BOT_API_DEFAULT_ADDRESS}/genart_sync", json=payload, headers=headers, timeout=300)
+                        response.raise_for_status()
+                        result = response.json()
+                    else: # ComfyUI Mode
+                        # Yuuka: FIX - Lấy địa chỉ server từ config, nếu không có thì dùng mặc định
+                        target_address = gen_config.get('server_address', COMFYUI_DEFAULT_ADDRESS).strip()
+                        if not target_address:
+                            target_address = COMFYUI_DEFAULT_ADDRESS
+                        print(f"[Scenes] Sending ComfyUI request to: {target_address}")
+                        
+                        client_id = str(uuid.uuid4())
+                        workflow, output_node_id = workflow_builder.build_workflow(gen_config, seed_value)
+                        prompt_info = comfy_api_client.queue_prompt(workflow, client_id, target_address)
+                        prompt_id = prompt_info['prompt_id']
+                        
+                        while True:
+                            if SCENE_GENERATION_STATE['cancel_requested']: raise Exception("Cancelled during ComfyUI poll")
+                            history = comfy_api_client.get_history(prompt_id, target_address)
+                            if prompt_id in history and 'outputs' in history[prompt_id]: break
+                            time.sleep(1)
+
+                        outputs = history[prompt_id]['outputs']
+                        image_info = outputs[output_node_id]['images'][0]
+                        image_bytes = comfy_api_client.get_image(image_info['filename'], image_info['subfolder'], image_info['type'], target_address)
+                        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                        result = {"status": "success", "images_base64": [image_base64], "generation_config": gen_config}
+                    
+                    if result.get('status') == 'success' and result.get('images_base64'):
+                        server_id = scene.get('serverId', 'comfyui_direct') if scene['mode'] == 'Bot API' else 'comfyui_direct'
+                        _save_generated_image(user_hash, char_hash, result['images_base64'][0], result['generation_config'], server_id)
+                        print(f"[Scenes] Successfully generated and saved image for '{char_name}'.")
+                        last_config = result['generation_config']
+                    else:
+                        raise Exception(result.get('error_message', 'Unknown generation error'))
+
+                except Exception as e:
+                    print(f"💥 [Scenes] Generation failed for image {images_generated_count}: {e}")
+                    with scene_generation_lock:
+                        SCENE_GENERATION_STATE['progress']['message'] = f"Lỗi ở ảnh {images_generated_count}: {e}"
+                    time.sleep(3)
+            
+            with scene_generation_lock:
+                if SCENE_GENERATION_STATE['cancel_requested']:
+                    break
+    
+    except Exception as e:
+        print(f"💥 CRITICAL ERROR in Scene Generation Task: {e}")
+        with scene_generation_lock:
+            SCENE_GENERATION_STATE['progress']['message'] = f"Lỗi nghiêm trọng: {e}"
+
+    finally:
+        with scene_generation_lock:
+            print("[Scenes] Generation process finished or stopped.")
+            SCENE_GENERATION_STATE['is_running'] = False
+            SCENE_GENERATION_STATE['cancel_requested'] = False
+            SCENE_GENERATION_STATE['current_scene_id'] = None # Yuuka: Reset ID
+            SCENE_GENERATION_STATE['current_stage_id'] = None # Yuuka: Reset ID
+            if "Lỗi" not in SCENE_GENERATION_STATE['progress']['message'] and "huỷ" not in SCENE_GENERATION_STATE['progress']['message']:
+                 SCENE_GENERATION_STATE['progress']['message'] = "Hoàn thành."
+
+
+@app.route('/api/scenes/generate', methods=['POST'])
+def scene_generate():
+    with scene_generation_lock:
+        if SCENE_GENERATION_STATE['is_running']:
+            return jsonify({"status": "error", "message": "Generation is already in progress."}), 409
+
+        api_key = _get_api_key_from_request(request)
+        user_hash = _get_api_key_hash(api_key)
+        job = request.json
+        if not job or 'scenes' not in job:
+            abort(400, "Invalid job data.")
+
+        SCENE_GENERATION_STATE['is_running'] = True
+        SCENE_GENERATION_STATE['cancel_requested'] = False
+        SCENE_GENERATION_STATE['current_job'] = job
+        SCENE_GENERATION_STATE['user_hash'] = user_hash
+        SCENE_GENERATION_STATE['current_scene_id'] = None
+        SCENE_GENERATION_STATE['current_stage_id'] = None
+        SCENE_GENERATION_STATE['progress'] = {"current": 0, "total": 0, "message": "Đang khởi tạo..."}
+
+        # Start background thread
+        thread = threading.Thread(target=_run_scene_generation_task, args=(job, user_hash, api_key))
+        thread.start()
+
+        print("[Scenes] Generation thread started.")
+        return jsonify({"status": "started", "message": "Scene generation process started."})
+
+
+@app.route('/api/scenes/cancel', methods=['POST'])
+def scene_cancel():
+    with scene_generation_lock:
+        if SCENE_GENERATION_STATE['is_running']:
+            SCENE_GENERATION_STATE['cancel_requested'] = True
+            print("[Scenes] Cancellation requested.")
+            return jsonify({"status": "success", "message": "Cancellation requested."})
+    return jsonify({"status": "error", "message": "No generation process is running."}), 404
+
+@app.route('/api/scenes/status', methods=['GET'])
+def scene_status():
+    with scene_generation_lock:
+        # Return a copy to avoid race conditions when reading
+        status_copy = SCENE_GENERATION_STATE.copy()
+        status_copy['progress'] = SCENE_GENERATION_STATE['progress'].copy()
+    return jsonify(status_copy)
+
+# === Existing API Endpoints ===
+
+@app.route('/api/tags')
+def get_tags():
+    return jsonify(TAG_PREDICTIONS)
+    
+@app.route('/api/tag_groups', methods=['GET'])
+def get_tag_groups():
+    # Yuuka: API thật, đọc từ file tags_group.json. Re-format for easier lookup.
+    all_groups = {}
+    for group in TAG_GROUPS_DATA:
+        category = group.get("category")
+        if category:
+            if category not in all_groups:
+                all_groups[category] = []
+            all_groups[category].append(group)
+            
+    # Yuuka: Trả về một dictionary phẳng để client dễ dàng tra cứu theo ID
+    flat_map = {g['id']: g for g in TAG_GROUPS_DATA}
+
+    return jsonify({"grouped": all_groups, "flat": flat_map})
+
+@app.route('/api/tag_groups', methods=['POST'])
+def create_tag_group():
+    # Yuuka: API để tạo một Tag Group mới
+    data = request.json
+    if not data or 'name' not in data or 'category' not in data or 'tags' not in data:
+        abort(400, "Missing required fields: name, category, tags.")
+
+    # Yuuka: Kiểm tra trùng lặp tên trong cùng category
+    for group in TAG_GROUPS_DATA:
+        if group.get('category') == data['category'] and group.get('name') == data['name']:
+            abort(409, f"Tag group with name '{data['name']}' already exists in category '{data['category']}'.")
+
+    new_group = {
+        "id": str(uuid.uuid4()),
+        "name": data['name'],
+        "category": data['category'],
+        "tags": data['tags'],
+        "score": data.get('score', 0),
+        "is_nsfw": data.get('is_nsfw', False)
+    }
+    TAG_GROUPS_DATA.append(new_group)
+    save_json_data(TAG_GROUPS_DATA, TAG_GROUPS_FILENAME)
+    
+    return jsonify(new_group), 201
+
+@app.route('/api/tag_groups/<group_id>', methods=['PUT'])
+def update_tag_group(group_id):
+    data = request.json
+    if not data or 'name' not in data or 'tags' not in data:
+        abort(400, "Missing required fields: name, tags.")
+
+    group_to_update = None
+    for group in TAG_GROUPS_DATA:
+        if group.get('id') == group_id:
+            group_to_update = group
+            break
+    
+    if not group_to_update:
+        abort(404, f"Tag group with id '{group_id}' not found.")
+
+    # Yuuka: Kiểm tra trùng lặp tên với các group khác trong cùng category
+    for group in TAG_GROUPS_DATA:
+        if group.get('id') != group_id and \
+           group.get('category') == group_to_update.get('category') and \
+           group.get('name') == data['name']:
+            abort(409, f"Tag group with name '{data['name']}' already exists in category '{group_to_update.get('category')}'.")
+
+    group_to_update['name'] = data['name']
+    group_to_update['tags'] = data['tags']
+    
+    save_json_data(TAG_GROUPS_DATA, TAG_GROUPS_FILENAME)
+    
+    return jsonify(group_to_update)
+
+# Yuuka: API mới để xoá vĩnh viễn một Tag Group
+@app.route('/api/tag_groups/<group_id>', methods=['DELETE'])
+def delete_tag_group(group_id):
+    global TAG_GROUPS_DATA, SCENE_DATA
+    _get_api_key_from_request(request)
+
+    group_to_delete = next((g for g in TAG_GROUPS_DATA if g.get('id') == group_id), None)
+            
+    if not group_to_delete:
+        abort(404, f"Tag group with id '{group_id}' not found.")
+
+    # Yuuka: Xoá group khỏi danh sách chính
+    TAG_GROUPS_DATA = [g for g in TAG_GROUPS_DATA if g.get('id') != group_id]
+    
+    # Yuuka: Xoá tất cả tham chiếu đến group này trong tất cả các scene của tất cả user
+    for user_hash, scenes in SCENE_DATA.items():
+        for scene in scenes:
+            for stage in scene.get('stages', []):
+                if 'tags' in stage:
+                    for category, group_ids in stage['tags'].items():
+                        if isinstance(group_ids, list) and group_id in group_ids:
+                            stage['tags'][category] = [gid for gid in group_ids if gid != group_id]
+                        
+    save_json_data(TAG_GROUPS_DATA, TAG_GROUPS_FILENAME)
+    save_json_data(SCENE_DATA, SCENE_DATA_FILENAME)
+    
+    return jsonify({"status": "success", "message": f"Tag group '{group_to_delete.get('name')}' and all its references have been deleted."})
+
+
+@app.route('/api/characters')
+def get_characters():
+    filtered_list = [char for char in ALL_CHARACTERS_LIST if request.args.get('search', '').strip().lower() in char['name'].lower()] if request.args.get('search') else ALL_CHARACTERS_LIST
+    try:
+        page, limit = int(request.args.get('page', 1)), int(request.args.get('limit', 100000))
+    except ValueError:
+        return jsonify({"error": "Parameters 'page' and 'limit' must be integers."}), 400
+    start_index, end_index = (page - 1) * limit, page * limit
+    return jsonify({"characters": filtered_list[start_index:end_index], "total": len(filtered_list), "has_more": end_index < len(filtered_list)})
+
+@app.route('/api/characters/by_hashes', methods=['POST'])
+def get_characters_by_hashes():
+    hashes = request.json.get('hashes', [])
+    if not isinstance(hashes, list):
+        abort(400, description="Invalid input: 'hashes' must be a list.")
+    results = [ALL_CHARACTERS_DICT.get(h) for h in hashes if ALL_CHARACTERS_DICT.get(h)]
+    return jsonify(results)
+
+@app.route('/image/<md5_hash>')
+def get_image(md5_hash):
+    base64_gzipped_webp = THUMBNAILS_DATA_DICT.get(md5_hash)
+    if not base64_gzipped_webp:
+        abort(404, description="Image not found.")
+    try:
+        webp_data = gzip.decompress(base64.b64decode(base64_gzipped_webp))
+        return Response(webp_data, mimetype='image/webp')
+    except Exception as e:
+        print(f"Error decoding image for hash {md5_hash}: {e}")
+        abort(500, description="Error processing image.")
+
+# === Run Server ===
+if __name__ == '__main__':
+    load_and_prepare_data()
+    print("\n✅ Server is ready!")
+    print("   - Local access at: http://127.0.0.1:5000")
+    print("   - To access from other devices on the same network, use this machine's IP address.")
+    app.run(host='0.0.0.0', debug=True, port=5000)
