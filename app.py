@@ -26,7 +26,7 @@ COMFYUI_DEFAULT_ADDRESS = "127.0.0.1:8888"
 # Yuuka: Cấu hình mặc định cho ComfyUI khi người dùng chưa có config
 DEFAULT_CONFIG = {
     "server_address": "127.0.0.1:8888",
-    "ckpt_name": "waiNSFWIllustrious_v150.safetensors",
+    "ckpt_name": "waiNSFWIllustrious_v150.safensors",
     "character": "shiina_mahiru_(otonari_no_tenshi-sama)",
     "expression": "smile",
     "action": "sitting",
@@ -72,7 +72,7 @@ ALBUM_DATA = {}
 COMFYUI_CONFIG = {} 
 TAG_PREDICTIONS = []
 SCENE_DATA = {}
-TAG_GROUPS_DATA = []
+TAG_GROUPS_DATA = {} # Yuuka: Chuyển sang dict để lưu theo user_hash
 
 # Yuuka: State cho việc gen ảnh nền
 SCENE_GENERATION_STATE = {
@@ -188,8 +188,16 @@ def load_and_prepare_data():
         ALBUM_DATA = load_json_data(ALBUM_DATA_FILENAME)
         COMFYUI_CONFIG = load_json_data(COMFYUI_CONFIG_FILENAME)
         SCENE_DATA = load_json_data(SCENE_DATA_FILENAME)
-        TAG_GROUPS_DATA = load_json_data(TAG_GROUPS_FILENAME, default_value=[])
         
+        # Yuuka: Xử lý chuyển đổi định dạng cho TAG_GROUPS_DATA
+        TAG_GROUPS_DATA = load_json_data(TAG_GROUPS_FILENAME, default_value={})
+        if isinstance(TAG_GROUPS_DATA, list):
+            print("⚠️ [Server Migration] Old 'tags_group.json' format (list) detected.")
+            print("   - This format is deprecated and will be replaced with the new user-specific format (dictionary).")
+            print("   - The old shared data will be discarded. Please backup the file if you need to preserve it.")
+            TAG_GROUPS_DATA = {}
+            save_json_data(TAG_GROUPS_DATA, TAG_GROUPS_FILENAME)
+
         tags_path = get_data_path(TAGS_FILENAME)
         if os.path.exists(tags_path):
             try:
@@ -519,7 +527,9 @@ def save_scenes():
 def _run_scene_generation_task(job, user_hash):
     global SCENE_GENERATION_STATE
     try:
-        all_groups_map = {g['id']: g for g in TAG_GROUPS_DATA}
+        # Yuuka: Lấy tag group của đúng user đang thực hiện
+        user_tag_groups = TAG_GROUPS_DATA.get(user_hash, [])
+        all_groups_map = {g['id']: g for g in user_tag_groups}
         
         initial_stages_to_run = []
         total_images = 0
@@ -578,8 +588,13 @@ def _run_scene_generation_task(job, user_hash):
                         if group: prompt_parts[key].extend(group['tags'])
             
             if not char_name: print(f"[Scenes] Stage {stage['id']} skipped: No character defined."); continue
-            char_hash = get_md5_hash(char_name)
-            if char_hash not in ALL_CHARACTERS_DICT: print(f"[Scenes] Stage {stage['id']} skipped: Character '{char_name}' not found."); continue
+
+            # Yuuka: Sửa lỗi tìm nhân vật có ký tự đặc biệt bằng cách so sánh tên trực tiếp
+            found_char = next((c for c in ALL_CHARACTERS_LIST if c['name'] == char_name), None)
+            if not found_char:
+                print(f"[Scenes] Stage {stage['id']} skipped: Character '{char_name}' not found in the main list.")
+                continue
+            char_hash = found_char['hash']
             
             prompt_parts['character'] = char_name
             final_prompt = {k: ', '.join(v) if isinstance(v, list) else v for k, v in prompt_parts.items()}
@@ -689,8 +704,11 @@ def get_tags():
     
 @app.route('/api/tag_groups', methods=['GET'])
 def get_tag_groups():
-    all_groups, flat_map = {}, {g['id']: g for g in TAG_GROUPS_DATA}
-    for group in TAG_GROUPS_DATA:
+    user_hash = _verify_token_and_get_user_hash(request)
+    user_groups_list = TAG_GROUPS_DATA.get(user_hash, [])
+    
+    all_groups, flat_map = {}, {g['id']: g for g in user_groups_list}
+    for group in user_groups_list:
         category = group.get("category")
         if category:
             if category not in all_groups: all_groups[category] = []
@@ -699,50 +717,66 @@ def get_tag_groups():
 
 @app.route('/api/tag_groups', methods=['POST'])
 def create_tag_group():
-    _verify_token_and_get_user_hash(request)
+    user_hash = _verify_token_and_get_user_hash(request)
     data = request.json
     if not data or 'name' not in data or 'category' not in data or 'tags' not in data:
         abort(400, "Missing required fields: name, category, tags.")
-    for group in TAG_GROUPS_DATA:
+    
+    user_groups = TAG_GROUPS_DATA.setdefault(user_hash, [])
+    
+    for group in user_groups:
         if group.get('category') == data['category'] and group.get('name') == data['name']:
             abort(409, f"Tag group with name '{data['name']}' already exists in category '{data['category']}'.")
+            
     new_group = {
         "id": str(uuid.uuid4()), "name": data['name'], "category": data['category'], "tags": data['tags'],
         "score": data.get('score', 0), "is_nsfw": data.get('is_nsfw', False)
     }
-    TAG_GROUPS_DATA.append(new_group)
+    user_groups.append(new_group)
     save_json_data(TAG_GROUPS_DATA, TAG_GROUPS_FILENAME)
     return jsonify(new_group), 201
 
 @app.route('/api/tag_groups/<group_id>', methods=['PUT'])
 def update_tag_group(group_id):
-    _verify_token_and_get_user_hash(request)
+    user_hash = _verify_token_and_get_user_hash(request)
     data = request.json
     if not data or 'name' not in data or 'tags' not in data:
         abort(400, "Missing required fields: name, tags.")
-    group_to_update = next((g for g in TAG_GROUPS_DATA if g.get('id') == group_id), None)
+        
+    user_groups = TAG_GROUPS_DATA.get(user_hash, [])
+    group_to_update = next((g for g in user_groups if g.get('id') == group_id), None)
+    
     if not group_to_update: abort(404, f"Tag group with id '{group_id}' not found.")
-    for group in TAG_GROUPS_DATA:
+    
+    for group in user_groups:
         if group.get('id') != group_id and group.get('category') == group_to_update.get('category') and group.get('name') == data['name']:
             abort(409, f"Tag group with name '{data['name']}' already exists in category '{group_to_update.get('category')}'.")
+            
     group_to_update.update({'name': data['name'], 'tags': data['tags']})
     save_json_data(TAG_GROUPS_DATA, TAG_GROUPS_FILENAME)
     return jsonify(group_to_update)
 
 @app.route('/api/tag_groups/<group_id>', methods=['DELETE'])
 def delete_tag_group(group_id):
-    _verify_token_and_get_user_hash(request)
-    global TAG_GROUPS_DATA, SCENE_DATA
-    group_to_delete = next((g for g in TAG_GROUPS_DATA if g.get('id') == group_id), None)
+    user_hash = _verify_token_and_get_user_hash(request)
+    global SCENE_DATA
+    
+    user_groups = TAG_GROUPS_DATA.get(user_hash, [])
+    group_to_delete = next((g for g in user_groups if g.get('id') == group_id), None)
+    
     if not group_to_delete: abort(404, f"Tag group with id '{group_id}' not found.")
-    TAG_GROUPS_DATA = [g for g in TAG_GROUPS_DATA if g.get('id') != group_id]
-    for user_hash, scenes in SCENE_DATA.items():
+    
+    TAG_GROUPS_DATA[user_hash] = [g for g in user_groups if g.get('id') != group_id]
+    
+    # Yuuka: Vẫn quét tất cả scene data để xoá reference, an toàn hơn.
+    for user_hash_in_scenes, scenes in SCENE_DATA.items():
         for scene in scenes:
             for stage in scene.get('stages', []):
                 if 'tags' in stage:
                     for category, group_ids in stage['tags'].items():
                         if isinstance(group_ids, list) and group_id in group_ids:
                             stage['tags'][category] = [gid for gid in group_ids if gid != group_id]
+                            
     save_json_data(TAG_GROUPS_DATA, TAG_GROUPS_FILENAME)
     save_json_data(SCENE_DATA, SCENE_DATA_FILENAME)
     return jsonify({"status": "success", "message": f"Tag group '{group_to_delete.get('name')}' and all its references have been deleted."})

@@ -251,6 +251,8 @@ closeModal=()=>{modal.style.display='none';state.currentModalCharacter=null};
 
 // --- Auth Logic ---
 function renderLoginForm(message = '') {
+    document.body.classList.remove('is-logged-in');
+    document.body.classList.add('is-logged-out');
     authContainer.innerHTML = `
         <div class="api-key-form">
             <h3>Xác thực</h3>
@@ -263,8 +265,6 @@ function renderLoginForm(message = '') {
             </form>
         </div>
     `;
-    authContainer.style.display = 'block';
-    document.querySelector('header').style.display = 'none';
 
     document.getElementById('auth-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -382,31 +382,30 @@ searchForm.addEventListener('submit', async (e) => {
         const token = localStorage.getItem('yuuka-auth-token');
         
         observer.disconnect();
-        document.querySelector('header').style.display = 'none';
         
-        gallery.style.display = 'none';
-        albumContainer.style.display = 'none';
-        sceneContainer.style.display = 'none';
-        sceneControls.style.display = 'none';
-        
+        // Clear content
         gallery.innerHTML = '';
         albumContainer.innerHTML = '';
         sceneContainer.innerHTML = '';
         searchBox.value = '';
-        loader.classList.remove('visible');
 
+        // Reset state and local storage
         resetApplicationState();
         localStorage.removeItem('yuuka-auth-token');
-
-        if(token) {
-            navigator.clipboard.writeText(token).then(() => {
-                renderLoginForm('Token đã được sao chép. Bạn đã đăng xuất.');
-            }).catch(() => {
-                renderLoginForm('Bạn đã đăng xuất. Không thể sao chép token.');
-            });
-        } else {
-            renderLoginForm('Bạn đã đăng xuất.');
+        
+        // Prepare logout message
+        let logoutMessage = 'Bạn đã đăng xuất.';
+        if (token) {
+             logoutMessage = 'Đã đăng xuất. Token của bạn (nếu có) đã được thử sao chép vào clipboard.';
         }
+        
+        // Render login form which also handles body classes
+        renderLoginForm(logoutMessage);
+
+        if (token) {
+            navigator.clipboard.writeText(token).catch(err => console.log("Clipboard copy failed after logout."));
+        }
+
         return;
     }
 
@@ -498,8 +497,9 @@ function initializeDragToScroll() {
 }
 
 async function initializeApp() {
-    authContainer.style.display = 'none';
-    document.querySelector('header').style.display = 'flex';
+    document.body.classList.remove('is-logged-out');
+    document.body.classList.add('is-logged-in');
+    
     try {
         const listData = await api.getLocalLists();
         state.isAuthed = true;
@@ -529,8 +529,7 @@ async function initializeApp() {
             resetApplicationState();
             renderLoginForm("Token không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.");
         } else {
-            loader.textContent = "Không thể tải dữ liệu nhân vật ban đầu.";
-            loader.classList.add('visible');
+            authContainer.innerHTML = `<div class="error-msg">Lỗi tải dữ liệu: ${error.message}</div>`;
             showError("Lỗi nghiêm trọng: Không thể tải dữ liệu nhân vật.");
         }
     }

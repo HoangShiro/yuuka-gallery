@@ -7,7 +7,7 @@
     <title>Thư viện Nhân vật</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body class="is-logged-out">
     <script>
       (function() {
         const theme = localStorage.getItem('yuuka-theme');
@@ -47,8 +47,9 @@
         <button id="back-btn">Back</button>
     </header>
 
+    <div id="auth-container"></div>
+
     <div class="container">
-        <div id="auth-container"></div>
         <div id="gallery"></div>
         <div id="album-container"></div>
         <div id="scene-container"></div>

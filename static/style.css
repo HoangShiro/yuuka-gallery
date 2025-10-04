@@ -115,6 +115,20 @@ header {
 #main-tabs-select { display: none; }
 #context-footer { position: static; width: 100%; text-align: center; padding: 15px 0 5px 0; color: var(--text-color-light); font-size: 0.9em; z-index: 998; display: none; }
 
+/* --- Auth State Management --- */
+body.is-logged-out header,
+body.is-logged-out .container,
+body.is-logged-out #context-footer,
+body.is-logged-out #scene-controls {
+    display: none !important;
+}
+#auth-container {
+    display: none;
+}
+body.is-logged-out #auth-container {
+    display: block;
+}
+
 @media (max-width: 768px) {
     header { flex-wrap: nowrap; gap: 10px; padding: 10px; }
     #tabs { display: none; }
