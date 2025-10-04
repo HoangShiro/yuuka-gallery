@@ -579,19 +579,23 @@ def _run_scene_generation_task(job, user_hash):
             for category, group_ids in stage.get('tags', {}).items():
                 cat_lower = category.lower()
                 if cat_lower == 'character':
+                    # Yuuka: Sửa lỗi - Luôn lấy ID cuối cùng trong list làm nhân vật chính.
                     if group_ids:
-                        group = all_groups_map.get(group_ids[0])
-                        if group: char_name = group['name']
+                        group = all_groups_map.get(group_ids[-1])
+                        if group: char_name = group['tags'][0]
                 else:
                     key = category_mapping.get(cat_lower, 'context')
                     for group_id in group_ids:
                         group = all_groups_map.get(group_id)
                         if group: prompt_parts[key].extend(group['tags'])
             
-            if not char_name: print(f"[Scenes] Stage {stage['id']} skipped: No character defined."); continue
-
+            if not char_name: 
+                print(f"[Scenes] Stage {stage['id']} skipped: No character defined.")
+                continue
+            
             # Yuuka: Sửa lỗi tìm nhân vật có ký tự đặc biệt bằng cách so sánh tên trực tiếp
-            found_char = next((c for c in ALL_CHARACTERS_LIST if c['name'] == char_name), None)
+            char_name = str(char_name).replace(':', '').replace('  ', ' ').strip()
+            found_char = next((c for c in ALL_CHARACTERS_LIST if str(c['name']).replace(':', '').replace('  ', ' ').strip() == char_name), None)
             if not found_char:
                 print(f"[Scenes] Stage {stage['id']} skipped: Character '{char_name}' not found in the main list.")
                 continue
