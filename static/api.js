@@ -47,6 +47,7 @@ const api = (() => {
         // --- API xác thực ---
         checkTokenForIP: () => _request('/api/auth/token'),
         generateTokenForIP: () => _request('/api/auth/token', { method: 'POST' }),
+        associateTokenWithIP: (ip) => _request('/api/auth/associate', { method: 'POST', body: { ip } }),
 
         // --- API của Gallery ---
         getLocalLists: () => _request('/api/lists'),

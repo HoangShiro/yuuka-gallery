@@ -108,7 +108,9 @@ def _verify_token_and_get_user_hash(req):
     
     user_tokens = USER_DATA.get("tokens", {})
     if user_tokens.get(client_ip) != token:
-        abort(401, description="Invalid token for this IP address.")
+        # Yuuka: Cho phép token được chia sẻ qua nhiều IP
+        if token not in user_tokens.values():
+            abort(401, description="Invalid token for this IP address.")
         
     return _get_user_hash_from_token(token)
 
@@ -256,6 +258,27 @@ def generate_token_for_ip():
     save_json_data(USER_DATA, USER_DATA_FILENAME)
     print(f"[Auth] Generated new token for IP: {client_ip}")
     return jsonify({"status": "created", "token": new_token})
+
+# Yuuka: Thêm API endpoint để chia sẻ token cho IP khác
+@app.route('/api/auth/share_token', methods=['POST'])
+def share_token_with_ip():
+    _verify_token_and_get_user_hash(request)
+    
+    data = request.json
+    target_ip = data.get('ip_address')
+    if not target_ip:
+        abort(400, description="Missing 'ip_address' in request body.")
+    
+    auth_header = request.headers.get('Authorization')
+    token = auth_header.split(' ')[1]
+
+    if "tokens" not in USER_DATA:
+        USER_DATA["tokens"] = {}
+        
+    USER_DATA["tokens"][target_ip] = token
+    save_json_data(USER_DATA, USER_DATA_FILENAME)
+    print(f"[Auth] Shared token with new IP: {target_ip}")
+    return jsonify({"status": "success", "message": f"Token has been successfully associated with {target_ip}."})
 
 # === API Endpoints for LAN Sync (Favourites/Blacklist) ===
 

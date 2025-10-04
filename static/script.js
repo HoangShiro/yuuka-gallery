@@ -25,14 +25,15 @@ const customSelectOptions = mainTabsSelectContainer.querySelector('.custom-selec
 const sceneControls = document.getElementById('scene-controls');
 
 // --- State Management ---
-let state = {
-    isComfyUIAvailable: false, // NEW: Track ComfyUI status
-    isAuthed: false, // NEW: Track auth status
+// Yuuka: Thay đổi initialState thành một hàm để đảm bảo luôn nhận được một object mới, sạch sẽ khi reset.
+const getInitialState = () => ({
+    isComfyUIAvailable: false,
+    isAuthed: false,
     currentPage: 1,
     isLoading: false,
     hasMore: true,
     currentSearchQuery: '',
-    activeTab: 'browse',
+    activeTab: null,
     debounceTimeout: null,
     syncTimeout: null,
     allCharacters: [],
@@ -42,7 +43,14 @@ let state = {
     syncMode: 'local',
     tabScrollPositions: {}, 
     scrollRestorationTarget: null,
-};
+});
+
+let state = getInitialState();
+
+function resetApplicationState() {
+    state = getInitialState();
+}
+
 
 // --- Utilities ---
 const Storage = {
@@ -189,7 +197,7 @@ async function switchTab(tabName) {
     }
     if (state.activeTab === tabName) return;
 
-    if (state.activeTab !== 'album' && state.activeTab !== 'scene') {
+    if (state.activeTab !== 'album' && state.activeTab !== 'scene' && state.activeTab !== null) {
         state.tabScrollPositions[state.activeTab] = window.scrollY;
     }
     state.activeTab = tabName;
@@ -263,8 +271,7 @@ function renderLoginForm(message = '') {
         const token = document.getElementById('auth-token-input').value.trim();
         if (token) {
             localStorage.setItem('yuuka-auth-token', token);
-            // We don't verify here, we let the first real API call do it.
-            awaitinitializeApp();
+            await initializeApp();
         }
     });
 
@@ -331,8 +338,99 @@ window.addEventListener('click', (e) => {
 searchForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const query = searchBox.value.trim();
+    
+    if (query.startsWith('BL-')) {
+        try {
+            const base64Part = query.substring(3);
+            const decodedHashes = JSON.parse(atob(base64Part));
+            if (Array.isArray(decodedHashes)) {
+                const currentBlacklist = new Set(state.blacklist);
+                let addedCount = 0;
+                decodedHashes.forEach(hash => {
+                    if (!currentBlacklist.has(hash)) {
+                        currentBlacklist.add(hash);
+                        addedCount++;
+                    }
+                });
+                state.blacklist = Array.from(currentBlacklist);
+                saveData();
+                await resetAndLoad();
+                showError(`Đã thêm ${addedCount} nhân vật mới vào blacklist.`);
+            } else {
+                throw new Error("Invalid code format.");
+            }
+        } catch (err) {
+            showError("Mã chia sẻ blacklist không hợp lệ.");
+        }
+        searchBox.value = '';
+        return;
+    }
+
     if (query === '/dark') { applyTheme('dark'); showError('Chuyển sang Dark Mode.'); searchBox.value = ''; return; }
     if (query === '/light') { applyTheme('light'); showError('Chuyển sang Light Mode.'); searchBox.value = ''; return; }
+    if (query === '/token') {
+        const token = localStorage.getItem('yuuka-auth-token');
+        if (token) {
+            navigator.clipboard.writeText(token).then(() => showError('Login token đã được sao chép vào clipboard.'));
+        } else {
+            showError('Không tìm thấy login token.');
+        }
+        searchBox.value = '';
+        return;
+    }
+    if (query === '/logout') {
+        const token = localStorage.getItem('yuuka-auth-token');
+        
+        observer.disconnect();
+        document.querySelector('header').style.display = 'none';
+        
+        gallery.style.display = 'none';
+        albumContainer.style.display = 'none';
+        sceneContainer.style.display = 'none';
+        sceneControls.style.display = 'none';
+        
+        gallery.innerHTML = '';
+        albumContainer.innerHTML = '';
+        sceneContainer.innerHTML = '';
+        searchBox.value = '';
+        loader.classList.remove('visible');
+
+        resetApplicationState();
+        localStorage.removeItem('yuuka-auth-token');
+
+        if(token) {
+            navigator.clipboard.writeText(token).then(() => {
+                renderLoginForm('Token đã được sao chép. Bạn đã đăng xuất.');
+            }).catch(() => {
+                renderLoginForm('Bạn đã đăng xuất. Không thể sao chép token.');
+            });
+        } else {
+            renderLoginForm('Bạn đã đăng xuất.');
+        }
+        return;
+    }
+
+    const loginMatch = query.match(/^\/login\s+(.+)/);
+    if (loginMatch) {
+        const ip = loginMatch[1];
+        try {
+            await api.shareTokenWithIP(ip);
+            showError(`Token đã được chia sẻ thành công cho IP: ${ip}`);
+        } catch(error) {
+            showError(`Lỗi chia sẻ token: ${error.message}`);
+        }
+        searchBox.value = '';
+        return;
+    }
+
+    const blacklistShareMatch = query.match(/^\/blacklist\s+share$/);
+    if (blacklistShareMatch) {
+        const shareCode = 'BL-' + btoa(JSON.stringify(state.blacklist));
+        navigator.clipboard.writeText(shareCode).then(() => showError('Mã chia sẻ blacklist đã được sao chép vào clipboard.'));
+        searchBox.value = '';
+        return;
+    }
+
     const blacklistCommand = query.match(/^\/(blacklist|rm)\s+(.+)/);
     if (blacklistCommand) {
         const keyword = blacklistCommand[2].toLowerCase();
@@ -351,6 +449,7 @@ searchForm.addEventListener('submit', async (e) => {
             searchBox.value = ''; state.currentSearchQuery = ''; state.scrollRestorationTarget = null;
             await resetAndLoad(); window.scrollTo(0, 0);
         } else { showError(`Không tìm thấy nhân vật nào với từ khóa: "${keyword}"`); }
+        return;
     }
 });
 
@@ -376,7 +475,7 @@ modal.addEventListener('click', (e) => e.target === modal && closeModal());
 window.addEventListener('keydown', (e) => e.key === 'Escape' && closeModal());
 
 const observer = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting && !state.isLoading && state.hasMore) {
+    if (entries[0] && entries[0].isIntersecting && !state.isLoading && state.hasMore) {
         loadCharacters();
     }
 }, { rootMargin: '400px' });
@@ -419,13 +518,15 @@ async function initializeApp() {
         }
         state.sessionBrowseOrder = browsable;
         
-        await resetAndLoad();
+        switchTab('browse'); 
+        
         initializeDragToScroll();
-        checkComfyUI(); // Check status without blocking
+        checkComfyUI();
     } catch (error) {
         if (error.status === 401) {
             localStorage.removeItem('yuuka-auth-token');
             state.isAuthed = false;
+            resetApplicationState();
             renderLoginForm("Token không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.");
         } else {
             loader.textContent = "Không thể tải dữ liệu nhân vật ban đầu.";
