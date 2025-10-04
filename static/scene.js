@@ -178,7 +178,13 @@ class SceneManager {
         this.container.addEventListener('touchstart', this.handleTouchStart.bind(this), { passive: true });
         this.container.addEventListener('touchmove', this.handleTouchMove.bind(this), { passive: false });
         this.container.addEventListener('touchend', this.handleTouchEnd.bind(this));
-        this.tagGroupModal.addEventListener('click', (e) => e.target === this.tagGroupModal && this.closeTagGroupModal());
+        
+        // Yuuka: Sửa logic này. Chỉ đóng modal nếu nó không có thuộc tính 'data-persistent'
+        this.tagGroupModal.addEventListener('click', (e) => {
+            if (e.target === this.tagGroupModal && !this.tagGroupModal.dataset.persistent) {
+                this.closeTagGroupModal();
+            }
+        });
     }
 
     handleClick(e) {
@@ -264,6 +270,10 @@ class SceneManager {
         const assignedIds = new Set(stage.tags[category] || []);
         const buttonsHTML = (this.tagGroups.grouped[category] || []).map(g => `<button class="tag-group-select-btn ${assignedIds.has(g.id) ? 'selected' : ''}" data-group-id="${g.id}">${g.name}</button>`).join('');
         modalContent.innerHTML = `<h3>Select Groups for ${category}</h3><div class="tag-group-selector-grid">${buttonsHTML}</div><div class="modal-actions"><button id="tag-group-new-btn">New</button><div style="flex-grow: 1;"></div><button id="tag-group-cancel-btn">Cancel</button><button id="tag-group-done-btn">Done</button></div>`;
+        
+        // Yuuka: Xóa thuộc tính persistent khi mở modal selector
+        delete this.tagGroupModal.dataset.persistent;
+        
         this.tagGroupModal.style.display = 'flex';
         modalContent.querySelector('.tag-group-selector-grid').addEventListener('click', e => e.target.matches('.tag-group-select-btn') && e.target.classList.toggle('selected'));
         modalContent.querySelector('#tag-group-new-btn').onclick = () => this.renderNewTagGroupForm(category, stageBlock);
@@ -275,7 +285,12 @@ class SceneManager {
         let actions = isEditing ? `<button id="tag-group-remove-btn" class="btn-secondary" title="Gỡ khỏi Stage">➖</button><button id="tag-group-delete-btn" class="btn-danger" title="Xoá vĩnh viễn">🗑️</button>` : '';
         actions += `<div style="flex-grow: 1;"></div><button id="tag-group-cancel-btn">Cancel</button><button id="tag-group-save-btn">${isEditing ? 'Update' : 'Save'}</button>`;
         modalContent.innerHTML = `<h3>${isEditing ? 'Edit' : 'New'} Tag Group in ${category}</h3><div class="form-group"><label for="tag-group-name-input">Group Name</label><input type="text" id="tag-group-name-input" value="${isEditing ? group.name : ''}"></div><div class="form-group"><label for="tag-group-tags-input">Tags (comma separated)</label><textarea id="tag-group-tags-input" rows="3">${isEditing ? group.tags.join(', ') : ''}</textarea></div><div class="modal-actions">${actions}</div>`;
-        this._initTagAutocomplete(modalContent); this.tagGroupModal.style.display = 'flex';
+        this._initTagAutocomplete(modalContent);
+        
+        // Yuuka: Thêm thuộc tính persistent để ngăn modal đóng khi click ra ngoài
+        this.tagGroupModal.dataset.persistent = 'true';
+        
+        this.tagGroupModal.style.display = 'flex';
         modalContent.querySelector('#tag-group-cancel-btn').onclick = () => this.closeTagGroupModal();
         if (isEditing) {
             modalContent.querySelector('#tag-group-remove-btn').onclick = () => { const stageBlock = contextElement.closest('.stage-block'); const scene = this.scenes.find(s => s.id === stageBlock.dataset.sceneId); const stage = scene?.stages.find(st => st.id === stageBlock.dataset.stageId); if (stage?.tags[category]) { stage.tags[category] = stage.tags[category].filter(id => id !== group.id); this.saveState(); this.render(); this.closeTagGroupModal(); }};
@@ -291,7 +306,12 @@ class SceneManager {
     }
 } } this.saveState(); this.render(); this.closeTagGroupModal(); } catch (error) { showError(`Lỗi: ${error.message}`); } };
     }
-    closeTagGroupModal() { this.tagGroupModal.style.display = 'none'; this.tagGroupModal.querySelector('#tag-group-modal-content').innerHTML = ''; }
+    closeTagGroupModal() {
+        this.tagGroupModal.style.display = 'none';
+        this.tagGroupModal.querySelector('#tag-group-modal-content').innerHTML = '';
+        // Yuuka: Dọn dẹp thuộc tính persistent khi đóng modal
+        delete this.tagGroupModal.dataset.persistent;
+    }
     _initTagAutocomplete(formContainer) { if (!this.tagPredictions?.length) return; formContainer.querySelectorAll('textarea').forEach(input => { if (input.closest('.tag-autocomplete-container')) return; const wrapper = document.createElement('div'); wrapper.className = 'tag-autocomplete-container'; input.parentElement.insertBefore(wrapper, input); wrapper.appendChild(input); const list = document.createElement('ul'); list.className = 'tag-autocomplete-list'; wrapper.appendChild(list); let activeIndex = -1; const hideList = () => { list.style.display = 'none'; list.innerHTML = ''; activeIndex = -1; }; input.addEventListener('input', () => { const text = input.value, cursorPos = input.selectionStart; const textBefore = text.substring(0, cursorPos), lastComma = textBefore.lastIndexOf(','); const currentTag = textBefore.substring(lastComma + 1).trim(); if (currentTag.length < 1) { hideList(); return; } const searchTag = currentTag.replace(/\s+/g, '_').toLowerCase(); const matches = this.tagPredictions.filter(t => t.startsWith(searchTag)).slice(0, 7); if (matches.length > 0) { list.innerHTML = matches.map(m => `<li class="tag-autocomplete-item" data-tag="${m}">${m.replace(/_/g, ' ')}</li>`).join(''); list.style.display = 'block'; activeIndex = -1; } else { hideList(); } }); const applySuggestion = (suggestion) => { const text = input.value, cursorPos = input.selectionStart; const textBefore = text.substring(0, cursorPos), lastComma = textBefore.lastIndexOf(','); const before = text.substring(0, lastComma + 1); const after = text.substring(cursorPos), endOfTag = after.indexOf(',') === -1 ? after.length : after.indexOf(','); const finalAfter = text.substring(cursorPos + endOfTag); const newText = `${before.trim() ? `${before.trim()} ` : ''}${suggestion.replace(/_/g, ' ')}, ${finalAfter.trim()}`; input.value = newText.trim(); const newCursorPos = `${before.trim() ? `${before.trim()} ` : ''}${suggestion}`.length + 2; input.focus(); input.setSelectionRange(newCursorPos, newCursorPos); hideList(); input.dispatchEvent(new Event('input', { bubbles: true })); }; list.addEventListener('mousedown', e => { e.preventDefault(); if (e.target.matches('.tag-autocomplete-item')) applySuggestion(e.target.dataset.tag); }); input.addEventListener('keydown', e => { const items = list.querySelectorAll('.tag-autocomplete-item'); if (items.length === 0) return; if (e.key === 'ArrowDown') { e.preventDefault(); activeIndex = (activeIndex + 1) % items.length; } else if (e.key === 'ArrowUp') { e.preventDefault(); activeIndex = (activeIndex - 1 + items.length) % items.length; } else if ((e.key === 'Enter' || e.key === 'Tab') && activeIndex > -1) { e.preventDefault(); applySuggestion(items[activeIndex].dataset.tag); return; } else if (e.key === 'Escape') { hideList(); return; } items.forEach((item, i) => item.classList.toggle('active', i === activeIndex)); }); input.addEventListener('blur', () => setTimeout(hideList, 150)); }); }
 
     renderSceneSettingsModal(scene) {
