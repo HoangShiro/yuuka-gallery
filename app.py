@@ -23,6 +23,10 @@ from comfyui_integration import comfy_api_client
 CSV_CHARACTERS_URL = "https://raw.githubusercontent.com/mirabarukaso/character_select_stand_alone_app/refs/heads/main/data/wai_characters.csv"
 JSON_THUMBNAILS_URL = "https://huggingface.co/datasets/flagrantia/character_select_stand_alone_app/resolve/main/wai_character_thumbs.json"
 COMFYUI_DEFAULT_ADDRESS = "127.0.0.1:8888"
+OBFUSCATION_KEY = b'yuuka_is_the_best_sensei_at_millennium_seminar'
+# Yuuka: Tiền tố để nhận biết chuỗi đã được mã hoá Base64
+B64_PREFIX = "b64:"
+
 
 # Yuuka: Cấu hình mặc định cho ComfyUI khi người dùng chưa có config
 DEFAULT_CONFIG = {
@@ -60,6 +64,10 @@ TAGS_FILENAME = "tags.csv"
 SCENE_DATA_FILENAME = "scene_data.json"
 TAG_GROUPS_FILENAME = "tags_group.json"
 
+# Yuuka: Danh sách các file JSON cần mã hóa giá trị string
+OBFUSCATED_JSON_FILES = [ALBUM_DATA_FILENAME, TAG_GROUPS_FILENAME, USER_DATA_FILENAME]
+
+
 # --- Flask App Initialization ---
 app = Flask(__name__)
 CORS(app)
@@ -94,6 +102,40 @@ scene_generation_lock = threading.Lock()
 workflow_builder = WorkflowBuilderService()
 
 # === Helper functions ===
+
+# Yuuka: Các hàm này dùng để mã hoá/giải mã Base64 cho các giá trị string trong file JSON.
+def _encode_string_b64(s: str) -> str:
+    """Mã hoá một chuỗi sang Base64 và thêm tiền tố."""
+    encoded = base64.b64encode(s.encode('utf-8')).decode('utf-8')
+    return f"{B64_PREFIX}{encoded}"
+
+def _decode_string_b64(s: str) -> str:
+    """Giải mã một chuỗi từ Base64 nếu có tiền tố. Nếu không, trả về chuỗi gốc."""
+    if s.startswith(B64_PREFIX):
+        try:
+            b64_part = s[len(B64_PREFIX):]
+            return base64.b64decode(b64_part.encode('utf-8')).decode('utf-8')
+        except (TypeError, base64.binascii.Error):
+            # Nếu giải mã thất bại dù có prefix, trả về chuỗi gốc để tránh lỗi
+            return s
+    return s
+
+def _process_data_recursive(data, process_func):
+    """
+    Hàm đệ quy để áp dụng một hàm xử lý (mã hóa/giải mã)
+    lên tất cả các giá trị string trong một cấu trúc dữ liệu lồng nhau.
+    """
+    if isinstance(data, dict):
+        return {k: _process_data_recursive(v, process_func) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_process_data_recursive(item, process_func) for item in data]
+    elif isinstance(data, str):
+        # Yuuka: Không mã hoá URL hình ảnh trong album_data.json
+        if data.startswith('/user_image/'):
+            return data
+        return process_func(data)
+    else:
+        return data
 
 # Yuuka: Cập nhật hệ thống xác thực dựa trên IP và Token
 def _get_user_hash_from_token(token: str) -> str:
@@ -130,7 +172,11 @@ def load_json_data(filename, default_value={}):
     if os.path.exists(path):
         try:
             with open(path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                loaded_data = json.load(f)
+                # Yuuka: Giải mã dữ liệu nếu file nằm trong danh sách cần mã hoá
+                if filename in OBFUSCATED_JSON_FILES:
+                    return _process_data_recursive(loaded_data, _decode_string_b64)
+                return loaded_data
         except json.JSONDecodeError:
             print(f"⚠️ [Server] Warning: Could not decode {path}. Starting fresh.")
     else:
@@ -140,8 +186,13 @@ def load_json_data(filename, default_value={}):
 def save_json_data(data, filename):
     path = get_data_path(filename)
     try:
+        data_to_save = data
+        # Yuuka: Mã hoá dữ liệu trước khi lưu nếu file nằm trong danh sách
+        if filename in OBFUSCATED_JSON_FILES:
+            data_to_save = _process_data_recursive(data, _encode_string_b64)
+
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
+            json.dump(data_to_save, f, indent=2)
         print(f"[Server] Saved data to: {path}")
     except IOError as e:
         print(f"💥 CRITICAL ERROR: Could not write data to {path}. Error: {e}")
@@ -185,10 +236,10 @@ def load_and_prepare_data():
     try:
         os.makedirs(CACHE_DIR, exist_ok=True)
         os.makedirs(USER_IMAGES_DIR, exist_ok=True)
-        USER_DATA = load_json_data(USER_DATA_FILENAME)
-        ALBUM_DATA = load_json_data(ALBUM_DATA_FILENAME)
-        COMFYUI_CONFIG = load_json_data(COMFYUI_CONFIG_FILENAME)
-        SCENE_DATA = load_json_data(SCENE_DATA_FILENAME)
+        USER_DATA = load_json_data(USER_DATA_FILENAME, default_value={})
+        ALBUM_DATA = load_json_data(ALBUM_DATA_FILENAME, default_value={})
+        COMFYUI_CONFIG = load_json_data(COMFYUI_CONFIG_FILENAME, default_value={})
+        SCENE_DATA = load_json_data(SCENE_DATA_FILENAME, default_value={})
         
         # Yuuka: Xử lý chuyển đổi định dạng cho TAG_GROUPS_DATA
         TAG_GROUPS_DATA = load_json_data(TAG_GROUPS_FILENAME, default_value={})
@@ -246,7 +297,24 @@ def index():
 
 @app.route('/user_image/<filename>')
 def user_image(filename):
-    return send_from_directory(USER_IMAGES_DIR, filename)
+    # Yuuka: Logic mới để giải mã ảnh trước khi gửi về client.
+    filepath = os.path.join(USER_IMAGES_DIR, filename)
+    if not os.path.exists(filepath):
+        abort(404)
+    try:
+        with open(filepath, 'rb') as f:
+            obfuscated_data = f.read()
+        
+        # Áp dụng lại phép XOR để có được dữ liệu gốc
+        original_data = bytes([
+            b ^ OBFUSCATION_KEY[i % len(OBFUSCATION_KEY)] 
+            for i, b in enumerate(obfuscated_data)
+        ])
+        
+        return Response(original_data, mimetype='image/png')
+    except Exception as e:
+        print(f"Error de-obfuscating image {filename}: {e}")
+        abort(500)
 
 # === API Endpoints for Auth ===
 @app.route('/api/auth/token', methods=['GET'])
@@ -323,10 +391,19 @@ def update_lists():
 def _save_generated_image(user_hash, character_hash, image_base64, generation_config):
     try:
         image_data = base64.b64decode(image_base64)
+        
+        # Yuuka: Áp dụng phép XOR đơn giản để mã hoá dữ liệu ảnh
+        obfuscated_data = bytes([
+            b ^ OBFUSCATION_KEY[i % len(OBFUSCATION_KEY)] 
+            for i, b in enumerate(image_data)
+        ])
+        
         image_id = str(uuid.uuid4())
         filename = f"{image_id}.png"
         filepath = os.path.join(USER_IMAGES_DIR, filename)
-        with open(filepath, 'wb') as f: f.write(image_data)
+        with open(filepath, 'wb') as f:
+            f.write(obfuscated_data)
+            
     except Exception as e:
         print(f"Error saving image: {e}")
         raise IOError("Could not save image file.")
@@ -482,7 +559,17 @@ def comfyui_genart_sync():
         if not target_address: target_address = COMFYUI_DEFAULT_ADDRESS
         print(f"[ComfyUI] Sending generation request to: {target_address}")
 
-        workflow, output_node_id = workflow_builder.build_workflow(cfg_data, seed)
+        # Yuuka: Logic mới - Lấy workflow gốc và thay thế SaveImage bằng node Base64
+        workflow, original_output_node_id = workflow_builder.build_workflow(cfg_data, seed)
+        vaedecode_node_id = workflow[original_output_node_id]["inputs"]["images"][0]
+        del workflow[original_output_node_id]
+        
+        api_output_node_id = "999" # ID của node custom
+        workflow[api_output_node_id] = {
+            "inputs": {"images": [vaedecode_node_id, 0]},
+            "class_type": "ImageToBase64_Yuuka"
+        }
+
         prompt_info = comfy_api_client.queue_prompt(workflow, client_id, target_address)
         prompt_id = prompt_info['prompt_id']
         
@@ -490,15 +577,13 @@ def comfyui_genart_sync():
             history = comfy_api_client.get_history(prompt_id, target_address)
             if prompt_id in history and 'outputs' in history[prompt_id]:
                 outputs = history[prompt_id]['outputs']
-                if output_node_id in outputs and 'images' in outputs[output_node_id]:
+                # Yuuka: Chờ output của node custom thay vì node SaveImage
+                if api_output_node_id in outputs and 'images_base64' in outputs[api_output_node_id]:
                     break
             time.sleep(1)
 
-        image_info = outputs[output_node_id]['images'][0]
-        image_bytes = comfy_api_client.get_image(
-            image_info['filename'], image_info['subfolder'], image_info['type'], target_address
-        )
-        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        # Yuuka: Lấy dữ liệu base64 trực tiếp từ history
+        image_base64 = outputs[api_output_node_id]['images_base64'][0]
         
         return jsonify({
             "status": "success", "images_base64": [image_base64],
@@ -627,19 +712,29 @@ def _run_scene_generation_task(job, user_hash):
                     if not target_address: target_address = COMFYUI_DEFAULT_ADDRESS
                     print(f"[Scenes] Sending ComfyUI request to: {target_address}")
                     
-                    client_id, workflow, output_node_id = str(uuid.uuid4()), *workflow_builder.build_workflow(gen_config, seed_value)
+                    # Yuuka: Logic mới - Thay thế node SaveImage
+                    client_id = str(uuid.uuid4())
+                    workflow, original_output_node_id = workflow_builder.build_workflow(gen_config, seed_value)
+                    vaedecode_node_id = workflow[original_output_node_id]["inputs"]["images"][0]
+                    del workflow[original_output_node_id]
+                    api_output_node_id = "999"
+                    workflow[api_output_node_id] = {
+                        "inputs": {"images": [vaedecode_node_id, 0]},
+                        "class_type": "ImageToBase64_Yuuka"
+                    }
+
                     prompt_id = comfy_api_client.queue_prompt(workflow, client_id, target_address)['prompt_id']
                     
                     while True:
                         if SCENE_GENERATION_STATE['cancel_requested']: raise Exception("Cancelled during poll")
                         history = comfy_api_client.get_history(prompt_id, target_address)
-                        if prompt_id in history and 'outputs' in history[prompt_id]: break
+                        if prompt_id in history and 'outputs' in history[prompt_id]:
+                             if api_output_node_id in history[prompt_id]['outputs']:
+                                break
                         time.sleep(1)
 
                     outputs = history[prompt_id]['outputs']
-                    image_info = outputs[output_node_id]['images'][0]
-                    image_bytes = comfy_api_client.get_image(image_info['filename'], image_info['subfolder'], image_info['type'], target_address)
-                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                    image_base64 = outputs[api_output_node_id]['images_base64'][0]
                     result = {"status": "success", "images_base64": [image_base64], "generation_config": gen_config}
                     
                     if result.get('status') == 'success' and result.get('images_base64'):
