@@ -44,12 +44,11 @@
              <input type="text" id="search-box" placeholder="Tìm kiếm hoặc gõ /rm <từ khóa>">
         </form>
 
-        <div id="album-selectors-container"></div>
-
         <button id="back-btn">Back</button>
     </header>
 
     <div class="container">
+        <div id="auth-container"></div>
         <div id="gallery"></div>
         <div id="album-container"></div>
         <div id="scene-container"></div>
@@ -80,7 +79,6 @@
         </div>
     </div>
     
-    <!-- NEW: Modal for managing tag groups, initially hidden -->
     <div id="tag-group-modal" class="modal-backdrop" style="display: none;">
         <div class="modal-dialog">
             <div id="tag-group-modal-content">
@@ -88,7 +86,6 @@
             </div>
         </div>
     </div>
-
 
     <script src="{{ url_for('static', filename='api.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>

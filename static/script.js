@@ -2,7 +2,8 @@
 // --- DOM Elements ---
 const gallery = document.getElementById('gallery');
 const albumContainer = document.getElementById('album-container');
-const sceneContainer = document.getElementById('scene-container'); // NEW
+const sceneContainer = document.getElementById('scene-container');
+const authContainer = document.getElementById('auth-container');
 const loader = document.getElementById('loader');
 const searchForm = document.getElementById('search-form');
 const searchBox = document.getElementById('search-box');
@@ -21,12 +22,12 @@ const errorPopup = document.getElementById('error-popup');
 const mainTabsSelectContainer = document.getElementById('main-tabs-select');
 const customSelectTrigger = document.getElementById('tabs-select-trigger');
 const customSelectOptions = mainTabsSelectContainer.querySelector('.custom-select-options');
-const albumSelectorsContainer = document.getElementById('album-selectors-container');
-const sceneControls = document.getElementById('scene-controls'); // NEW
-
+const sceneControls = document.getElementById('scene-controls');
 
 // --- State Management ---
 let state = {
+    isComfyUIAvailable: false, // NEW: Track ComfyUI status
+    isAuthed: false, // NEW: Track auth status
     currentPage: 1,
     isLoading: false,
     hasMore: true,
@@ -72,7 +73,6 @@ function applyTheme(theme) {
     localStorage.setItem('yuuka-theme', theme);
 }
 
-
 // --- Core Functions ---
 createCharacterCard=char=>{const card=document.createElement('div');card.className='character-card';card.dataset.hash=char.hash;card.dataset.name=char.name;const imageContainer=document.createElement('div');imageContainer.className='image-container';const img=document.createElement('img');img.src=`/image/${char.hash}`;img.alt=char.name;img.loading='lazy';imageContainer.appendChild(img);const nameDiv=document.createElement('div');nameDiv.className='name';nameDiv.textContent=char.name;card.appendChild(imageContainer);card.appendChild(nameDiv);gallery.appendChild(card)}
 
@@ -80,14 +80,12 @@ async function syncListsToServer() {
     if (state.syncMode !== 'lan') return;
     clearTimeout(state.syncTimeout);
     state.syncTimeout = setTimeout(async () => {
-        console.log("Syncing lists to server...");
         try {
             await api.updateLocalLists({
                 favourites: state.favourites,
                 blacklist: state.blacklist
             });
         } catch (error) {
-            console.error("Failed to sync lists with server:", error);
             showError("Lỗi: không thể đồng bộ danh sách với server.");
         }
     }, 500);
@@ -102,13 +100,11 @@ function saveData() {
     }
 }
 
-
 async function loadCharacters() {
     if (state.isLoading || !state.hasMore) return;
     state.isLoading = true;
     loader.classList.add('visible');
     loader.textContent = "Đang tải thêm...";
-
     await new Promise(resolve => setTimeout(resolve, 20));
 
     try {
@@ -135,49 +131,35 @@ async function loadCharacters() {
             state.hasMore = false;
         } else {
             charactersToRender.forEach(createCharacterCard);
-            
             if (state.scrollRestorationTarget) {
                 window.scrollTo(0, state.scrollRestorationTarget);
                 if (window.scrollY >= state.scrollRestorationTarget - window.innerHeight) {
                     state.scrollRestorationTarget = null; 
                 }
             }
-
             state.currentPage++;
             state.hasMore = gallery.children.length < totalResults;
         }
     } catch (error) {
-        console.error("Could not load more characters:", error);
         loader.textContent = "Lỗi khi tải dữ liệu.";
         state.hasMore = false;
     } finally {
         state.isLoading = false;
-        
-        if (state.hasMore) {
-            loader.textContent = '';
+        if (!state.hasMore) {
+            const total = gallery.getElementsByClassName('character-card').length;
+            loader.textContent = total === 0 ? "Không tìm thấy nhân vật nào." : `Đã hiển thị tất cả ${total} kết quả.`;
         } else {
-            const totalInGallery = gallery.getElementsByClassName('character-card').length;
-            if (totalInGallery === 0) {
-                 loader.textContent = "Không tìm thấy nhân vật nào.";
-            } else {
-                 loader.textContent = `Đã hiển thị tất cả ${totalInGallery} kết quả.`;
-            }
+            loader.textContent = '';
         }
 
         setTimeout(() => {
             const contentFitsOnScreen = document.documentElement.scrollHeight <= document.documentElement.clientHeight;
             if ((contentFitsOnScreen || state.scrollRestorationTarget) && state.hasMore && !state.isLoading) {
-                if (state.scrollRestorationTarget) {
-                    console.log("Restoring scroll, loading more content...");
-                } else {
-                    console.log("Nội dung chưa lấp đầy màn hình, tự động tải thêm...");
-                }
                 loadCharacters();
             }
         }, 100);
     }
 }
-
 
 async function resetAndLoad() {
     observer.disconnect();
@@ -185,10 +167,9 @@ async function resetAndLoad() {
     state.currentPage = 1;
     state.hasMore = true;
     state.isLoading = false;
-    
     loader.classList.add('visible'); 
     
-    if (state.activeTab !== 'album' && state.activeTab !== 'scene') { // MODIFIED
+    if (state.activeTab !== 'album' && state.activeTab !== 'scene') {
         await loadCharacters();
         observer.observe(loader);
     } else {
@@ -196,47 +177,39 @@ async function resetAndLoad() {
     }
 }
 
-
 async function switchTab(tabName) {
+    if (!state.isAuthed) return;
     if (state.activeTab === 'album' && tabName === 'album') {
         albumManager.showCharacterSelectionGrid();
         return;
     }
-    // NEW: Reset scene view on re-click
     if (state.activeTab === 'scene' && tabName === 'scene') {
         sceneManager.init();
         return;
     }
-
     if (state.activeTab === tabName) return;
 
     if (state.activeTab !== 'album' && state.activeTab !== 'scene') {
         state.tabScrollPositions[state.activeTab] = window.scrollY;
     }
-
     state.activeTab = tabName;
     
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabName));
     customSelectTrigger.textContent = tabName.charAt(0).toUpperCase() + tabName.slice(1);
-    document.querySelectorAll('.custom-select-option').forEach(opt => {
-        opt.classList.toggle('selected', opt.dataset.value === tabName);
-    });
+    document.querySelectorAll('.custom-select-option').forEach(opt => opt.classList.toggle('selected', opt.dataset.value === tabName));
 
-    // --- MODIFIED: Show/hide main containers ---
     const isGalleryTab = ['browse', 'favourite', 'blacklist'].includes(tabName);
     gallery.style.display = isGalleryTab ? 'grid' : 'none';
     albumContainer.style.display = (tabName === 'album') ? 'block' : 'none';
-    sceneContainer.style.display = (tabName === 'scene') ? 'block' : 'none'; // NEW
+    sceneContainer.style.display = (tabName === 'scene') ? 'block' : 'none';
     searchForm.style.display = isGalleryTab ? 'block' : 'none';
-    albumSelectorsContainer.style.display = (tabName === 'album' && albumManager.selectedCharacter) ? 'flex' : 'none';
-    sceneControls.style.display = (tabName === 'scene') ? 'flex' : 'none'; // NEW
+    sceneControls.style.display = (tabName === 'scene') ? 'flex' : 'none';
+    backBtn.style.display = 'none';
+    contextFooter.style.display = 'none';
 
     if (isGalleryTab) {
-        backBtn.style.display = 'none';
-        contextFooter.style.display = 'none';
         searchBox.placeholder = `Tìm trong tab ${tabName}...`;
         if (tabName === 'browse') searchBox.placeholder = 'Tìm kiếm hoặc gõ /rm <từ khóa>';
-
         state.scrollRestorationTarget = state.tabScrollPositions[tabName] || 0;
         await resetAndLoad();
     } else {
@@ -246,16 +219,8 @@ async function switchTab(tabName) {
         state.scrollRestorationTarget = null;
         
         if (tabName === 'album') {
-            if (albumContainer.innerHTML.trim() === '') {
-                albumManager.showCharacterSelectionGrid();
-            } else {
-                backBtn.style.display = albumManager.viewStack.length > 1 ? 'block' : 'none';
-                if (albumManager.selectedCharacter) {
-                    albumManager._renderSelectors();
-                }
-            }
-        } else if (tabName === 'scene') { // NEW
-            backBtn.style.display = 'none';
+            albumManager.init();
+        } else if (tabName === 'scene') {
             sceneManager.init();
         }
     }
@@ -276,10 +241,78 @@ updateModalButtons=()=>{
 };
 closeModal=()=>{modal.style.display='none';state.currentModalCharacter=null};
 
+// --- Auth Logic ---
+function renderLoginForm(message = '') {
+    authContainer.innerHTML = `
+        <div class="api-key-form">
+            <h3>Xác thực</h3>
+            <p>Nhập Token của bạn hoặc tạo một Token mới để tiếp tục.</p>
+            ${message ? `<p class="error-msg">${message}</p>` : ''}
+            <form id="auth-form">
+                <input type="text" id="auth-token-input" placeholder="Nhập Token tại đây">
+                <button type="submit">Đăng nhập</button>
+                <button type="button" id="generate-token-btn">Tạo Token Mới</button>
+            </form>
+        </div>
+    `;
+    authContainer.style.display = 'block';
+    document.querySelector('header').style.display = 'none';
+
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const token = document.getElementById('auth-token-input').value.trim();
+        if (token) {
+            localStorage.setItem('yuuka-auth-token', token);
+            // We don't verify here, we let the first real API call do it.
+            awaitinitializeApp();
+        }
+    });
+
+    document.getElementById('generate-token-btn').addEventListener('click', async () => {
+        try {
+            const data = await api.generateTokenForIP();
+            localStorage.setItem('yuuka-auth-token', data.token);
+            await initializeApp();
+        } catch (error) {
+            renderLoginForm(`Lỗi tạo token: ${error.message}`);
+        }
+    });
+}
+
+async function handleAuth() {
+    let token = localStorage.getItem('yuuka-auth-token');
+    if (token) {
+        await initializeApp();
+        return;
+    }
+    
+    try {
+        // Check if server already has a token for this IP
+        const data = await api.checkTokenForIP();
+        localStorage.setItem('yuuka-auth-token', data.token);
+        await initializeApp();
+    } catch (error) {
+        if (error.status === 404) {
+            renderLoginForm(); // No token found for IP, show login form.
+        } else {
+            authContainer.innerHTML = `<div class="error-msg">Lỗi kết nối server: ${error.message}</div>`;
+        }
+    }
+}
+
+async function checkComfyUI() {
+    try {
+        await api.checkComfyUIStatus('127.0.0.1:8888'); // Hardcoded for now, can be dynamic later
+        state.isComfyUIAvailable = true;
+        showError("ComfyUI đã kết nối. Các tính năng tạo ảnh đã được bật.");
+    } catch (e) {
+        state.isComfyUIAvailable = false;
+        showError("Không thể kết nối tới ComfyUI. Chức năng tạo ảnh bị vô hiệu hóa.");
+    }
+}
+
 // --- Event Handlers ---
-tabsContainer.addEventListener('click', (e) => {
-    if (e.target.matches('.tab-btn')) switchTab(e.target.dataset.tab)
-});
+tabsContainer.addEventListener('click', (e) => e.target.matches('.tab-btn') && switchTab(e.target.dataset.tab));
 backBtn.addEventListener('click', () => albumManager.goBack());
 
 customSelectTrigger.addEventListener('click', () => mainTabsSelectContainer.classList.toggle('open'));
@@ -291,54 +324,33 @@ customSelectOptions.addEventListener('click', (e) => {
 });
 window.addEventListener('click', (e) => {
     if (!e.target.closest('.custom-select-container')) {
-        document.querySelectorAll('.custom-select-container.open').forEach(container => {
-            container.classList.remove('open');
-        });
+        document.querySelectorAll('.custom-select-container.open').forEach(c => c.classList.remove('open'));
     }
 });
-
 
 searchForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const query = searchBox.value.trim();
-    
-    // Theme commands
-    if (query === '/dark') {
-        applyTheme('dark');
-        showError('Chuyển sang Dark Mode.');
-        searchBox.value = '';
-        return;
-    }
-    if (query === '/light') {
-        applyTheme('light');
-        showError('Chuyển sang Light Mode.');
-        searchBox.value = '';
-        return;
-    }
-
+    if (query === '/dark') { applyTheme('dark'); showError('Chuyển sang Dark Mode.'); searchBox.value = ''; return; }
+    if (query === '/light') { applyTheme('light'); showError('Chuyển sang Light Mode.'); searchBox.value = ''; return; }
     const blacklistCommand = query.match(/^\/(blacklist|rm)\s+(.+)/);
-
     if (blacklistCommand) {
         const keyword = blacklistCommand[2].toLowerCase();
         const matches = state.allCharacters.filter(c => c.name.toLowerCase().includes(keyword) && !state.blacklist.includes(c.hash));
         if (matches.length > 0) {
-            const hashesToAdd = matches.map(c => c.hash);
-            state.blacklist.push(...hashesToAdd);
+            const hashes = matches.map(c => c.hash);
+            state.blacklist.push(...hashes);
             saveData();
             state.sessionBrowseOrder = state.allCharacters.filter(char => !state.blacklist.includes(char.hash));
+            // Re-shuffle
             for (let i = state.sessionBrowseOrder.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [state.sessionBrowseOrder[i], state.sessionBrowseOrder[j]] = [state.sessionBrowseOrder[j], state.sessionBrowseOrder[i]];
             }
             showError(`${matches.length} nhân vật đã được thêm vào blacklist.`);
-            searchBox.value = '';
-            state.currentSearchQuery = '';
-            state.scrollRestorationTarget = null;
-            await resetAndLoad();
-            window.scrollTo(0, 0);
-        } else {
-            showError(`Không tìm thấy nhân vật nào với từ khóa: "${keyword}"`);
-        }
+            searchBox.value = ''; state.currentSearchQuery = ''; state.scrollRestorationTarget = null;
+            await resetAndLoad(); window.scrollTo(0, 0);
+        } else { showError(`Không tìm thấy nhân vật nào với từ khóa: "${keyword}"`); }
     }
 });
 
@@ -346,39 +358,22 @@ searchBox.addEventListener('input', () => {
     clearTimeout(state.debounceTimeout);
     state.debounceTimeout = setTimeout(async () => {
         const query = searchBox.value.trim().toLowerCase();
-        if (query.startsWith('/rm') || query.startsWith('/blacklist') || query === '/dark' || query === '/light') return;
-        if (state.currentSearchQuery !== query) {
-            state.currentSearchQuery = query;
-            state.scrollRestorationTarget = null;
-            await resetAndLoad();
-            window.scrollTo(0, 0);
-        }
+        if (query.startsWith('/') || state.currentSearchQuery === query) return;
+        state.currentSearchQuery = query;
+        state.scrollRestorationTarget = null;
+        await resetAndLoad();
+        window.scrollTo(0, 0);
     }, 300);
 });
 
-gallery.addEventListener('click', (event) => { const card = event.target.closest('.character-card'); if (!card) return; if (event.target.matches('.name')) { copyTextToClipboard(card.dataset.name, event.target); } else if (event.target.closest('.image-container')) { openModal(card); } });
-
+gallery.addEventListener('click', (e) => { const c = e.target.closest('.character-card'); if (c) { if (e.target.matches('.name')) copyTextToClipboard(c.dataset.name, e.target); else if (e.target.closest('.image-container')) openModal(c); }});
 modalFavBtn.addEventListener('click',()=>{const{hash}=state.currentModalCharacter;if(state.favourites.includes(hash)){state.favourites=state.favourites.filter(h=>h!==hash)}else{state.favourites.push(hash)}saveData();updateModalButtons();if(state.activeTab==='favourite'&&!state.favourites.includes(hash)){document.querySelector(`.character-card[data-hash="${hash}"]`)?.remove();closeModal()}});
 modalBlacklistBtn.addEventListener('click',()=>{const{hash}=state.currentModalCharacter;if(state.blacklist.includes(hash)){state.blacklist=state.blacklist.filter(h=>h!==hash)}else{state.blacklist.push(hash);state.favourites=state.favourites.filter(h=>h!==hash)}saveData();updateModalButtons();document.querySelector(`.character-card[data-hash="${hash}"]`)?.remove();closeModal()});
-
-modalAlbumBtn.addEventListener('click', () => {
-    if (!state.currentModalCharacter) return;
-    albumContainer.innerHTML = '';
-    switchTab('album');
-    albumManager.init(state.currentModalCharacter);
-    closeModal();
-});
-
-modalSearchBtn.addEventListener('click', () => {
-    if (!state.currentModalCharacter) return;
-    const characterName = state.currentModalCharacter.name;
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(characterName)}`;
-    window.open(searchUrl, '_blank');
-});
-
+modalAlbumBtn.addEventListener('click', () => { if (state.currentModalCharacter) { switchTab('album'); albumManager.init(state.currentModalCharacter); closeModal(); }});
+modalSearchBtn.addEventListener('click', () => { if (state.currentModalCharacter) window.open(`https://www.google.com/search?q=${encodeURIComponent(state.currentModalCharacter.name)}`, '_blank') });
 closeModalBtn.addEventListener('click', closeModal);
-modal.addEventListener('click', (event) => event.target === modal && closeModal());
-window.addEventListener('keydown', (event) => event.key === 'Escape' && closeModal());
+modal.addEventListener('click', (e) => e.target === modal && closeModal());
+window.addEventListener('keydown', (e) => e.key === 'Escape' && closeModal());
 
 const observer = new IntersectionObserver((entries) => {
     if (entries[0].isIntersecting && !state.isLoading && state.hasMore) {
@@ -388,93 +383,31 @@ const observer = new IntersectionObserver((entries) => {
 
 function initializeDragToScroll() {
     const body = document.body;
-    let isDown = false;
-    let lastY;
-    let velocityY = 0;
-    let momentumID;
+    let isDown = false, lastY, velocityY = 0, momentumID;
     const DAMPING = 0.95;
-
-    function beginMomentumTracking() {
-        cancelAnimationFrame(momentumID);
-        momentumID = requestAnimationFrame(momentumLoop);
-    }
-    
-    function momentumLoop() {
-        window.scrollBy(0, -velocityY);
-        velocityY *= DAMPING; 
-        if (Math.abs(velocityY) > 0.5) {
-            momentumID = requestAnimationFrame(momentumLoop);
-        }
-    }
-
+    function beginMomentumTracking() { cancelAnimationFrame(momentumID); momentumID = requestAnimationFrame(momentumLoop); }
+    function momentumLoop() { window.scrollBy(0, -velocityY); velocityY *= DAMPING; if (Math.abs(velocityY) > 0.5) momentumID = requestAnimationFrame(momentumLoop); }
     body.addEventListener('mousedown', (e) => {
         if (e.button !== 0 || e.clientX >= document.documentElement.clientWidth) return;
-        
-        // MODIFIED: Added scene elements to ignore list
-        const ignoredElements = 'INPUT, TEXTAREA, SELECT, BUTTON, A, .character-card, #modal, .image-viewer, #settings-modal, .custom-select-container, .fab-container, .scene-block';
-        if (e.target.closest(ignoredElements)) {
-            return;
-        }
-
-        if (document.documentElement.scrollHeight <= document.documentElement.clientHeight) {
-            return;
-        }
-
-        isDown = true;
-        body.classList.add('is-dragging');
-        
-        lastY = e.pageY;
-        velocityY = 0;
-        cancelAnimationFrame(momentumID);
-        
-        e.preventDefault();
-
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
+        const ignored = 'INPUT, TEXTAREA, SELECT, BUTTON, A, .character-card, #modal, .image-viewer, #settings-modal, .custom-select-container, .fab-container, .scene-block';
+        if (e.target.closest(ignored) || document.documentElement.scrollHeight <= document.documentElement.clientHeight) return;
+        isDown = true; body.classList.add('is-dragging'); lastY = e.pageY; velocityY = 0; cancelAnimationFrame(momentumID); e.preventDefault();
+        window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp);
     });
-
-    const handleMouseMove = (e) => {
-        if (!isDown) return;
-        e.preventDefault();
-        
-        const y = e.pageY;
-        const deltaY = y - lastY;
-        
-        window.scrollBy(0, -deltaY);
-        
-        velocityY = deltaY;
-        lastY = y;
-    };
-
-    const handleMouseUp = () => {
-        if (!isDown) return;
-        isDown = false;
-        body.classList.remove('is-dragging');
-        
-        beginMomentumTracking();
-
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-    };
+    const handleMouseMove = (e) => { if (isDown) { e.preventDefault(); const y = e.pageY; const deltaY = y - lastY; window.scrollBy(0, -deltaY); velocityY = deltaY; lastY = y; }};
+    const handleMouseUp = () => { if (isDown) { isDown = false; body.classList.remove('is-dragging'); beginMomentumTracking(); window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); }};
 }
 
-
-async function initialize() {
+async function initializeApp() {
+    authContainer.style.display = 'none';
+    document.querySelector('header').style.display = 'flex';
     try {
         const listData = await api.getLocalLists();
-
+        state.isAuthed = true;
         state.syncMode = listData.sync_mode;
         document.title = `Thư viện Nhân vật (${state.syncMode.toUpperCase()})`;
-
-        if (state.syncMode === 'lan') {
-            console.log("LAN sync mode enabled. Using lists from server.");
-            state.favourites = listData.favourites;
-            state.blacklist = listData.blacklist;
-        } else {
-            console.log("Local mode enabled. Using localStorage.");
-            state.favourites = Storage.getFavourites();
-            state.blacklist = Storage.getBlacklist();
-        }
+        state.favourites = listData.sync_mode === 'lan' ? listData.favourites : Storage.getFavourites();
+        state.blacklist = listData.sync_mode === 'lan' ? listData.blacklist : Storage.getBlacklist();
 
         const charData = await api.getAllCharacters();
         state.allCharacters = charData.characters;
@@ -487,15 +420,19 @@ async function initialize() {
         state.sessionBrowseOrder = browsable;
         
         await resetAndLoad();
-
         initializeDragToScroll();
-
+        checkComfyUI(); // Check status without blocking
     } catch (error) {
-        loader.textContent = "Không thể tải dữ liệu nhân vật ban đầu.";
-        loader.classList.add('visible');
-        showError("Lỗi nghiêm trọng: Không thể tải dữ liệu nhân vật.");
-        console.error("Initialization failed:", error);
+        if (error.status === 401) {
+            localStorage.removeItem('yuuka-auth-token');
+            state.isAuthed = false;
+            renderLoginForm("Token không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.");
+        } else {
+            loader.textContent = "Không thể tải dữ liệu nhân vật ban đầu.";
+            loader.classList.add('visible');
+            showError("Lỗi nghiêm trọng: Không thể tải dữ liệu nhân vật.");
+        }
     }
 }
 
-initialize();
+handleAuth();
