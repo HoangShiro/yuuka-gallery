@@ -364,7 +364,33 @@ searchForm.addEventListener('submit', async (e) => {
         }
         searchBox.value = '';
         return;
+    } else if (query.startsWith('FV-')) {
+        try {
+            const base64Part = query.substring(3);
+            const decodedHashes = JSON.parse(atob(base64Part));
+            if (Array.isArray(decodedHashes)) {
+                const currentFavourites = new Set(state.favourites);
+                let addedCount = 0;
+                decodedHashes.forEach(hash => {
+                    if (!currentFavourites.has(hash)) {
+                        currentFavourites.add(hash);
+                        addedCount++;
+                    }
+                });
+                state.favourites = Array.from(currentFavourites);
+                saveData();
+                await resetAndLoad();
+                showError(`Đã thêm ${addedCount} nhân vật mới vào favourite.`);
+            } else {
+                throw new Error("Invalid code format.");
+            }
+        } catch (err) {
+            showError("Mã chia sẻ favourite không hợp lệ.");
+        }
+        searchBox.value = '';
+        return;
     }
+
 
     if (query === '/dark') { applyTheme('dark'); showError('Chuyển sang Dark Mode.'); searchBox.value = ''; return; }
     if (query === '/light') { applyTheme('light'); showError('Chuyển sang Light Mode.'); searchBox.value = ''; return; }
@@ -426,6 +452,14 @@ searchForm.addEventListener('submit', async (e) => {
     if (blacklistShareMatch) {
         const shareCode = 'BL-' + btoa(JSON.stringify(state.blacklist));
         navigator.clipboard.writeText(shareCode).then(() => showError('Mã chia sẻ blacklist đã được sao chép vào clipboard.'));
+        searchBox.value = '';
+        return;
+    }
+
+    const favouriteShareMatch = query.match(/^\/favourite\s+share$/);
+    if (favouriteShareMatch) {
+        const shareCode = 'FV-' + btoa(JSON.stringify(state.favourites));
+        navigator.clipboard.writeText(shareCode).then(() => showError('Mã chia sẻ favourite đã được sao chép vào clipboard.'));
         searchBox.value = '';
         return;
     }
