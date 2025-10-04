@@ -435,6 +435,22 @@ searchForm.addEventListener('submit', async (e) => {
         return;
     }
 
+    if (query === '/stop') {
+        if (confirm('Bạn có chắc muốn tắt server không? Thao tác này sẽ đóng ứng dụng.')) {
+            api.shutdownServer().then(() => {
+                showError("Đã gửi lệnh tắt server.");
+                loader.textContent = "Server đang tắt... Bạn có thể đóng tab này.";
+                loader.classList.add('visible');
+                // Disable interactions
+                document.body.style.pointerEvents = 'none';
+            }).catch(err => {
+                showError(`Lỗi khi gửi lệnh tắt: ${err.message}`);
+            });
+        }
+        searchBox.value = '';
+        return;
+    }
+
     const loginMatch = query.match(/^\/login\s+(.+)/);
     if (loginMatch) {
         const ip = loginMatch[1];

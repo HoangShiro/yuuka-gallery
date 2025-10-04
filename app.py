@@ -11,6 +11,7 @@ import json
 import ipaddress
 import uuid
 import threading
+import signal
 from flask import Flask, render_template, jsonify, Response, abort, request, send_from_directory
 from flask_cors import CORS
 
@@ -806,6 +807,21 @@ def get_image(md5_hash):
     except Exception as e:
         print(f"Error decoding image for hash {md5_hash}: {e}")
         abort(500, "Error processing image.")
+
+# === API Endpoints for Server Control ===
+def _shutdown_server():
+    print("Yuuka: Nhận được lệnh tắt server. Tạm biệt senpai!")
+    # Yuuka: Gửi tín hiệu SIGINT (giống Ctrl+C) để tắt tiến trình.
+    os.kill(os.getpid(), signal.SIGINT)
+
+@app.route('/api/server/shutdown', methods=['POST'])
+def server_shutdown():
+    _verify_token_and_get_user_hash(request)
+    print("[Server] Lệnh tắt server đã được nhận từ client.")
+    # Yuuka: Sử dụng Timer để đảm bảo client nhận được phản hồi trước khi server tắt.
+    threading.Timer(0.5, _shutdown_server).start()
+    return jsonify({"status": "success", "message": "Server is shutting down."})
+
 
 # === Run Server ===
 if __name__ == '__main__':

@@ -84,5 +84,8 @@ const api = (() => {
         },
         generateArt: (payload) => _request('/api/comfyui/genart_sync', { method: 'POST', body: payload }),
         saveComfyUIConfig: (configData) => _request('/api/comfyui/config', { method: 'POST', body: configData }),
+        
+        // --- API Điều khiển Server ---
+        shutdownServer: () => _request('/api/server/shutdown', { method: 'POST' }),
     };
 })();
