@@ -104,7 +104,19 @@ html.dark-mode #result-footer { background: rgba(42, 39, 38, 0.6); border: 1px s
 #floating-search-bar { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); z-index: 1000; width: 90%; max-width: 500px; opacity: 0; transition: bottom 0.3s ease-out, opacity 0.3s ease-out; }
 #floating-search-bar.show { bottom: 90px; opacity: 1; }
 #floating-search-bar #search-form { position: relative; box-shadow: 0 10px 15px -3px var(--color-shadow); }
-#floating-search-bar #search-box { width: 100%; padding: 16px 50px 16px 24px; font-size: var(--font-size-base); border-radius: var(--rounded-full); border: 1px solid var(--color-border); background-color: var(--color-card-bg); }
+#floating-search-bar #search-box {
+    width: 100%;
+    padding: 16px 50px 16px 24px;
+    font-size: var(--font-size-base);
+    border-radius: var(--rounded-full);
+    border: 1px solid var(--color-border);
+    background-color: var(--color-card-bg);
+    color: var(--color-primary-text); /* Yuuka: Sửa lỗi màu chữ v1.1 */
+}
+/* Yuuka: Sửa màu chữ placeholder của thanh search trong dark mode v1.1 */
+html.dark-mode #floating-search-bar #search-box::placeholder {
+    color: var(--color-secondary-text);
+}
 .search-submit-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background-color: var(--color-accent); color: white; border: none; border-radius: 50%; width: 42px; height: 42px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 
 /* --- 6. CORE MODAL & UTILITY STYLES --- */
