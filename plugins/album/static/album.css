@@ -1,0 +1,318 @@
+/* --- MODIFIED FILE: plugins/album/static/album.css --- */
+.plugin-album__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--spacing-4);
+}
+
+/* Yuuka: Sửa lại selector cho card trong album */
+.plugin-album__album-card {
+    background-color: var(--color-card-bg);
+    border-radius: var(--rounded-md);
+    box-shadow: 0 4px 6px -1px var(--color-shadow);
+    overflow: hidden;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.plugin-album__album-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 15px -3px var(--color-shadow);
+}
+
+.plugin-album__image-card {
+    background: none;
+    box-shadow: none;
+    aspect-ratio: 1 / 1;
+}
+
+.plugin-album__image-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: var(--rounded-md);
+    box-shadow: 0 4px 6px -1px var(--color-shadow);
+}
+
+.plugin-album__empty-msg {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--color-secondary-text);
+    font-size: var(--font-size-lg);
+}
+
+/* Yuuka: Style mới cho placeholder, căn giữa nội dung */
+.plugin-album__album-card.placeholder-card {
+    display: flex;
+    flex-direction: column; /* Sắp xếp nội dung theo chiều dọc */
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-3);
+    gap: var(--spacing-3);
+    color: var(--color-secondary-text);
+}
+
+.plugin-album__progress-bar-container {
+    width: 80%;
+    height: 8px;
+    background-color: var(--color-border);
+    border-radius: var(--rounded-full);
+    overflow: hidden;
+}
+
+.plugin-album__progress-bar {
+    width: 0%;
+    height: 100%;
+    background-color: var(--color-accent);
+    border-radius: var(--rounded-full);
+    transition: width 0.3s ease;
+}
+
+.plugin-album__progress-text {
+    font-size: 0.8em;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+/* --- YUUKA: STYLE MỚI CHO CARD NHÂN VẬT ĐANG GEN --- */
+.character-card.is-generating {
+    animation: float 2s ease-in-out infinite;
+}
+
+.character-card.is-generating .image-container img {
+    opacity: 0.3;
+    filter: blur(2px);
+    transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+.album-grid-progress-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2);
+    animation: fadeIn 0.3s;
+    color: white;
+}
+/* --- Kết thúc Style mới --- */
+
+
+/* --- Floating Action Buttons (FAB) --- */
+.plugin-album__fab-container {
+    position: fixed;
+    bottom: var(--spacing-5);
+    right: var(--spacing-5);
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+}
+
+.plugin-album__fab {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background-color: var(--color-accent);
+    color: white;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    cursor: pointer;
+    transition: transform 0.2s, background-color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.plugin-album__fab .material-symbols-outlined { font-size: 28px; }
+.plugin-album__fab:hover {
+    transform: scale(1.1);
+    background-color: var(--color-accent-hover);
+}
+.plugin-album__fab:disabled {
+    background-color: var(--color-secondary-text);
+    cursor: not-allowed;
+    transform: none;
+}
+.plugin-album__fab--settings { background-color: var(--color-border); color: var(--color-primary-text); }
+html.dark-mode .plugin-album__fab--settings { background-color: var(--color-card-bg); }
+
+/* --- Settings Modal --- */
+.plugin-album__settings-modal.modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.3s;
+}
+
+.plugin-album__settings-modal .modal-dialog {
+    background: var(--color-card-bg);
+    color: var(--color-primary-text);
+    padding: var(--spacing-5);
+    border-radius: var(--rounded-lg);
+    max-width: 600px;
+    width: 90%;
+    position: relative;
+    padding-bottom: 90px; /* Thêm không gian cho thanh action nổi */
+}
+
+.plugin-album__settings-modal .modal-dialog h3 {
+    margin-top: 0;
+    padding-bottom: var(--spacing-3);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.plugin-album__settings-form-container {
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: var(--spacing-2);
+    margin: 0 calc(var(--spacing-2) * -1);
+}
+
+.plugin-album__settings-modal .form-group { margin-bottom: 15px; }
+.plugin-album__settings-modal .form-group label { display: block; font-weight: 500; margin-bottom: 5px; }
+.plugin-album__settings-modal .form-group input[type="text"], 
+.plugin-album__settings-modal .form-group input[type="number"], 
+.plugin-album__settings-modal .form-group select, 
+.plugin-album__settings-modal .form-group textarea {
+    width: 100%; padding: 8px; border: 1px solid var(--color-border);
+    border-radius: 4px; box-sizing: border-box; font-family: inherit;
+    font-size: 1em; background-color: var(--color-primary-bg);
+    color: var(--color-primary-text);
+}
+.plugin-album__settings-modal .form-group textarea { resize: none; overflow-y: hidden; }
+.plugin-album__settings-modal .form-group-slider { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.plugin-album__settings-modal .form-group-slider label { flex-basis: 100%; }
+.plugin-album__settings-modal .form-group-slider input[type="range"] { flex-grow: 1; }
+.plugin-album__settings-modal .input-with-button { display: flex; gap: 8px; }
+.plugin-album__settings-modal .input-with-button button {
+    padding: 8px 12px;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+.plugin-album__settings-modal .input-with-button button:hover {
+    background-color: var(--color-border);
+}
+
+
+/* Yuuka: Style mới cho thanh actions nổi ở cuối modal */
+.plugin-album__settings-modal .modal-actions {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--spacing-3);
+    padding: var(--spacing-3) var(--spacing-4);
+    background-color: var(--color-card-bg);
+    border-top: 1px solid var(--color-border);
+    border-radius: 0 0 var(--rounded-lg) var(--rounded-lg);
+}
+
+.plugin-album__settings-modal .modal-actions button {
+    border-radius: var(--rounded-md);
+    border: none;
+    cursor: pointer;
+    font-weight: var(--font-weight-medium);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-2);
+    /* Yuuka: Chuyển sang size vuông cho icon-only button */
+    width: 44px;
+    height: 44px;
+    padding: 0;
+}
+
+.plugin-album__settings-modal .modal-actions .btn-save { background: var(--color-accent); color: white; }
+.plugin-album__settings-modal .modal-actions .btn-cancel { 
+    background: var(--color-border); 
+    color: var(--color-primary-text); 
+    margin-left: auto; /* Đẩy nhóm nút này sang phải */
+}
+
+/* Style chung cho nút Paste và Copy bên trái */
+.plugin-album__settings-modal .modal-actions .btn-paste,
+.plugin-album__settings-modal .modal-actions .btn-copy {
+    background: transparent;
+    color: var(--color-secondary-text);
+}
+.plugin-album__settings-modal .modal-actions .btn-paste:hover,
+.plugin-album__settings-modal .modal-actions .btn-copy:hover { 
+    background-color: var(--color-border); 
+}
+
+/* --- Album Footer (Title) --- */
+.plugin-album__footer {
+    position: fixed;
+    bottom: var(--spacing-4);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 998;
+    display: none;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: var(--spacing-2) var(--spacing-4);
+    border-radius: var(--rounded-full);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 4px 12px var(--color-shadow);
+    color: var(--color-primary-text);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+}
+
+html.dark-mode .plugin-album__footer {
+    background: rgba(42, 39, 38, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* --- Yuuka: Styles cho tiên đoán tag --- */
+.tag-autocomplete-container {
+    position: relative;
+}
+.tag-autocomplete-list {
+    display: none;
+    position: absolute;
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-top: none;
+    background-color: var(--color-card-bg);
+    width: 100%;
+    box-sizing: border-box;
+    max-height: 150px;
+    overflow-y: auto;
+    z-index: 2600; /* Phải cao hơn modal-dialog */
+}
+.tag-autocomplete-item {
+    padding: var(--spacing-2) var(--spacing-3);
+    cursor: pointer;
+}
+.tag-autocomplete-item:hover, .tag-autocomplete-item.active {
+    background-color: var(--color-border);
+}
+
+/* Thêm để overlay tiến độ hiển thị đúng trong thẻ nhân vật */
+.character-card .image-container {
+    position: relative;
+}

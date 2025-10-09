@@ -1,0 +1,23 @@
+{
+    "id": "simple-viewer",
+    "name": "Simple Image Viewer",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Cung cấp một component xem ảnh đầy đủ tính năng (zoom/pan/swipe) và có thể tùy chỉnh cho các plugin khác sử dụng.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:SimpleViewerPlugin",
+        "frontend_component": null
+    },
+    "assets": {
+        "js": [
+            "simple_viewer.js"
+        ],
+        "css": [
+            "simple_viewer.css"
+        ]
+    },
+    "ui": {
+        "needs_generation_poller": true
+    }
+}

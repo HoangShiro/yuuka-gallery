@@ -1,0 +1,19 @@
+{
+    "id": "navibar",
+    "name": "Navigation Bar",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Cung cấp thanh điều hướng chính dạng singleton cho toàn bộ ứng dụng.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:NavibarPlugin",
+        "frontend_component": "NavibarComponent"
+    },
+    "assets": {
+        "js": ["navibar.js"],
+        "css": ["navibar.css"]
+    },
+    "ui": {
+        "is_singleton": true
+    }
+}

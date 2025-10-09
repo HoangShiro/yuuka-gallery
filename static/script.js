@@ -1,588 +1,424 @@
 // --- MODIFIED FILE: static/script.js ---
+
+// YUUKA: KHỞI TẠO NAMESPACE TOÀN CỤC NGAY LẬP TỨC
+window.Yuuka = {
+    components: {}, // Nơi các plugin sẽ khai báo component của chúng
+    services: {}, // YUUKA: Nơi chứa các instance của plugin dạng công cụ (singleton)
+    initialPluginState: {}, // Kênh giao tiếp để truyền dữ liệu khi chuyển tab
+    
+    // YUUKA: EVENT BUS - NÂNG CẤP VỚI PHƯƠNG THỨC `off`
+    events: {
+        _listeners: {},
+        on(eventName, callback) {
+            if (!this._listeners[eventName]) {
+                this._listeners[eventName] = [];
+            }
+            this._listeners[eventName].push(callback);
+        },
+        off(eventName, callback) {
+            if (this._listeners[eventName]) {
+                this._listeners[eventName] = this._listeners[eventName].filter(
+                    listener => listener !== callback
+                );
+            }
+        },
+        emit(eventName, data) {
+            if (this._listeners[eventName]) {
+                this._listeners[eventName].forEach(callback => {
+                    try {
+                        callback(data);
+                    } catch (e) {
+                        console.error(`[EventBus] Error in '${eventName}' listener:`, e);
+                    }
+                });
+            }
+        },
+    },
+
+    // YUUKA: UI SERVICE LÕI GIỜ CHỈ CÒN CÁC HÀM TIỆN ÍCH CHUNG
+    ui: {
+        switchTab(tabId) {
+            switchTab(tabId);
+        },
+
+        /**
+         * YUUKA: HÀM MỚI ĐỂ HIỂN THỊ MODAL XÁC NHẬN
+         * @param {string} message - Nội dung cần xác nhận.
+         * @returns {Promise<boolean>} - Trả về true nếu người dùng nhấn OK, false nếu nhấn Cancel.
+         */
+        confirm(message) {
+            return new Promise(resolve => {
+                if (document.querySelector('.confirm-modal-backdrop')) {
+                    resolve(false);
+                    return;
+                }
+
+                const modal = document.createElement('div');
+                modal.className = 'confirm-modal-backdrop modal-backdrop';
+                modal.innerHTML = `
+                    <div class="confirm-modal-dialog">
+                        <p>${message}</p>
+                        <div class="modal-actions">
+                            <button class="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button>
+                            <button class="btn-confirm" title="Xác nhận"><span class="material-symbols-outlined">check</span></button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+
+                const cleanupAndResolve = (value) => {
+                    modal.remove();
+                    window.removeEventListener('keydown', keydownHandler);
+                    resolve(value);
+                };
+
+                const keydownHandler = (e) => {
+                    if (e.key === 'Escape') cleanupAndResolve(false);
+                    if (e.key === 'Enter') cleanupAndResolve(true);
+                };
+
+                modal.querySelector('.btn-confirm').onclick = () => cleanupAndResolve(true);
+                modal.querySelector('.btn-cancel').onclick = () => cleanupAndResolve(false);
+                modal.addEventListener('click', e => { if (e.target === modal) cleanupAndResolve(false); });
+                window.addEventListener('keydown', keydownHandler);
+                modal.querySelector('.btn-confirm').focus();
+            });
+        },
+
+        /**
+         * YUUKA: SERVICE MỚI ĐỂ MỞ MODAL CẤU HÌNH
+         * @param {object} options
+         * @param {string} options.title - Tiêu đề của modal.
+         * @param {function} options.fetchInfo - Hàm async để lấy thông tin cấu hình và các lựa chọn. Phải trả về { last_config, global_choices }.
+         * @param {function} options.onSave - Hàm async được gọi khi lưu, nhận vào (updatedConfig).
+         * @param {Map} [options.promptClipboard] - (Tùy chọn) Clipboard nội bộ cho prompt.
+         * @returns {Promise<void>}
+         */
+        async openSettingsModal(options) {
+            const modal = document.createElement('div');
+            modal.className = 'modal-backdrop settings-modal-backdrop';
+            document.body.appendChild(modal);
+            modal.innerHTML = `<div class="modal-dialog"><h3>Đang tải...</h3></div>`;
+            const close = () => modal.remove();
+            modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+            try {
+                const { last_config, global_choices } = await options.fetchInfo();
+                const tagPredictions = await api.getTags().catch(() => []);
+
+                const dialog = modal.querySelector('.modal-dialog');
+                const ct = (k,l,v)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><textarea id="cfg-${k}" name="${k}" rows="1">${v||''}</textarea></div>`;
+                const cs = (k,l,v,min,max,step)=>`<div class="form-group form-group-slider"><label for="cfg-${k}">${l}: <span id="val-${k}">${v}</span></label><input type="range" id="cfg-${k}" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}" oninput="document.getElementById('val-${k}').textContent = this.value"></div>`;
+                const cse = (k,l,v,o)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><select id="cfg-${k}" name="${k}">${o.map(opt=>`<option value="${opt.value}" ${opt.value==v?'selected':''}>${opt.name}</option>`).join('')}</select></div>`;
+                const cti = (k,l,v)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><input type="text" id="cfg-${k}" name="${k}" value="${v||''}"></div>`;
+                const ciwb = (k,l,v)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><div class="input-with-button"><input type="text" id="cfg-${k}" name="${k}" value="${v||''}"><button type="button" class="connect-btn">Connect</button></div></div>`;
+                
+                dialog.innerHTML = `<h3>${options.title}</h3><div class="settings-form-container"><form id="core-settings-form">${ct('character','Character',last_config.character)}${ct('outfits','Outfits',last_config.outfits)}${ct('expression','Expression',last_config.expression)}${ct('action','Action',last_config.action)}${ct('context','Context',last_config.context)}${ct('quality','Quality',last_config.quality)}${ct('negative','Negative',last_config.negative)}${cti('lora_name','LoRA Name',last_config.lora_name)}${cs('steps','Steps',last_config.steps,10,50,1)}${cs('cfg','CFG',last_config.cfg,1.0,7.0,0.1)}${cse('size','W x H',`${last_config.width}x${last_config.height}`,global_choices.sizes)}${cse('sampler_name','Sampler',last_config.sampler_name,global_choices.samplers)}${cse('scheduler','Scheduler',last_config.scheduler,global_choices.schedulers)}${cse('ckpt_name','Checkpoint',last_config.ckpt_name,global_choices.checkpoints)}${ciwb('server_address','Server Address',last_config.server_address)}</form></div><div class="modal-actions"><button type="button" class="btn-paste" title="Dán"><span class="material-symbols-outlined">content_paste</span></button><button type="button" class="btn-copy" title="Copy"><span class="material-symbols-outlined">content_copy</span></button><button type="button" class="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button><button type="submit" class="btn-save" title="Lưu" form="core-settings-form"><span class="material-symbols-outlined">save</span></button></div>`;
+
+                const form = dialog.querySelector('form');
+                
+                // --- Logic autocomplete, copy, paste, etc. (đã được tối ưu hóa)
+                this._initTagAutocomplete(dialog, tagPredictions);
+                dialog.querySelectorAll('textarea').forEach(t=>{const a=()=>{t.style.height='auto';t.style.height=`${t.scrollHeight}px`;};t.addEventListener('input',a);setTimeout(a,0);});
+                dialog.querySelector('.btn-cancel').addEventListener('click', close);
+                dialog.querySelector('.btn-copy').addEventListener('click',()=>{const p=['outfits','expression','action','context','quality','negative'];options.promptClipboard=new Map(p.map(k=>[k,form.elements[k]?form.elements[k].value.trim():'']));showError("Prompt đã sao chép.");});
+                dialog.querySelector('.btn-paste').addEventListener('click',()=>{if(!options.promptClipboard){showError("Chưa có prompt.");return;}options.promptClipboard.forEach((v,k)=>{if(form.elements[k])form.elements[k].value=v;});dialog.querySelectorAll('textarea').forEach(t=>t.dispatchEvent(new Event('input',{bubbles:true})));showError("Đã dán prompt.");});
+                dialog.querySelector('.connect-btn').addEventListener('click',async()=>{const a=dialog.querySelector('[name="server_address"]').value.trim();const b=dialog.querySelector('.connect-btn');const o=b.textContent;b.textContent='...';b.disabled=true;try{await api.server.checkComfyUIStatus(a);showError("Kết nối thành công!");}catch(e){showError("Kết nối thất bại.");}finally{b.textContent='Connect';b.disabled=false;}});
+                
+                form.addEventListener('submit', async(e) => {
+                    e.preventDefault();
+                    const u = {};
+                    ['character','outfits','expression','action','context','quality','negative','lora_name','server_address','sampler_name','scheduler','ckpt_name'].forEach(k=>u[k]=form.elements[k].value);
+                    ['steps','cfg'].forEach(k=>u[k]=parseFloat(form.elements[k].value));
+                    const [w,h] = form.elements['size'].value.split('x').map(Number);
+                    u.width=w; u.height=h;
+                    try {
+                        await options.onSave(u);
+                        showError('Lưu cấu hình thành công!');
+                        close();
+                    } catch(err) { showError(`Lỗi khi lưu: ${err.message}`); }
+                });
+
+            } catch (e) {
+                 modal.querySelector('.modal-dialog').innerHTML = `<h3>Lỗi</h3><p>${e.message}</p><div class="modal-actions"><button class="btn-cancel">Đóng</button></div>`;
+                 modal.querySelector('.btn-cancel').addEventListener('click', close);
+            }
+        },
+
+        _initTagAutocomplete(formContainer, tagPredictions) {
+            if(!tagPredictions || tagPredictions.length === 0) return;
+            formContainer.querySelectorAll('textarea, input[type="text"]').forEach(input=>{
+                if(input.parentElement.classList.contains('tag-autocomplete-container')) return;
+                const w=document.createElement('div'); w.className='tag-autocomplete-container'; input.parentElement.insertBefore(w,input); w.appendChild(input);
+                const l=document.createElement('ul'); l.className='tag-autocomplete-list'; w.appendChild(l);
+                let a=-1; const h=()=>{l.style.display='none';l.innerHTML='';a=-1;};
+                input.addEventListener('input',()=>{const t=input.value,c=input.selectionStart;const b=t.substring(0,c),last=b.lastIndexOf(',');const cur=b.substring(last+1).trim();if(cur.length<1){h();return;}const s=cur.replace(/\s+/g,'_').toLowerCase();const m=tagPredictions.filter(t=>t.startsWith(s)).slice(0,7);if(m.length>0){l.innerHTML=m.map(match=>`<li class="tag-autocomplete-item" data-tag="${match}">${match.replace(/_/g,' ')}</li>`).join('');l.style.display='block';a=-1;}else{h();}});
+                const apply=(s)=>{const t=input.value,c=input.selectionStart;const textB=t.substring(0,c),last=textB.lastIndexOf(',');const before=t.substring(0,last+1);const after=t.substring(c),end=after.indexOf(',')===-1?after.length:after.indexOf(',');const finalA=t.substring(c+end);const n=`${before.trim()?`${before.trim()} `:''}${s.replace(/_/g,' ')}, ${finalA.trim()}`;input.value=n.trim();const nC=`${before.trim()?`${before.trim()} `:''}${s}`.length+2;input.focus();input.setSelectionRange(nC,nC);h();input.dispatchEvent(new Event('input',{bubbles:true}));};
+                l.addEventListener('mousedown',e=>{e.preventDefault();if(e.target.matches('.tag-autocomplete-item'))apply(e.target.dataset.tag);});
+                input.addEventListener('keydown',e=>{const i=l.querySelectorAll('.tag-autocomplete-item');if(i.length===0)return;if(e.key==='ArrowDown'){e.preventDefault();a=(a+1)%i.length;}else if(e.key==='ArrowUp'){e.preventDefault();a=(a-1+i.length)%i.length;}else if((e.key==='Enter'||e.key==='Tab')&&a>-1){e.preventDefault();apply(i[a].dataset.tag);}else if(e.key==='Escape')h();i.forEach((item,idx)=>item.classList.toggle('active',idx===a));});
+                input.addEventListener('blur',()=>setTimeout(h,150));
+            });
+        }
+    }
+};
+
 // --- DOM Elements ---
-const gallery = document.getElementById('gallery');
-const albumContainer = document.getElementById('album-container');
-const sceneContainer = document.getElementById('scene-container');
-const authContainer = document.getElementById('auth-container');
-const loader = document.getElementById('loader');
-const searchForm = document.getElementById('search-form');
-const searchBox = document.getElementById('search-box');
 const tabsContainer = document.getElementById('tabs');
-const modal = document.getElementById('modal');
-const modalImage = document.getElementById('modal-image');
-const modalCaption = document.getElementById('modal-caption');
-const closeModalBtn = document.getElementById('modal-close');
-const modalFavBtn = document.getElementById('modal-fav-btn');
-const modalAlbumBtn = document.getElementById('modal-album-btn');
-const modalBlacklistBtn = document.getElementById('modal-blacklist-btn');
-const modalSearchBtn = document.getElementById('modal-search-btn');
-const backBtn = document.getElementById('back-btn');
-const contextFooter = document.getElementById('context-footer');
+const mainContainer = document.querySelector('.container');
+const authContainer = document.getElementById('auth-container');
 const errorPopup = document.getElementById('error-popup');
-const mainTabsSelectContainer = document.getElementById('main-tabs-select');
-const customSelectTrigger = document.getElementById('tabs-select-trigger');
-const customSelectOptions = mainTabsSelectContainer.querySelector('.custom-select-options');
-const sceneControls = document.getElementById('scene-controls');
 
 // --- State Management ---
-// Yuuka: Thay đổi initialState thành một hàm để đảm bảo luôn nhận được một object mới, sạch sẽ khi reset.
-const getInitialState = () => ({
-    isComfyUIAvailable: false,
+const state = {
     isAuthed: false,
-    currentPage: 1,
-    isLoading: false,
-    hasMore: true,
-    currentSearchQuery: '',
     activeTab: null,
-    debounceTimeout: null,
-    syncTimeout: null,
-    allCharacters: [],
-    favourites: [],
-    blacklist: [],
-    sessionBrowseOrder: [],
-    syncMode: 'local',
-    tabScrollPositions: {}, 
-    scrollRestorationTarget: null,
-});
-
-let state = getInitialState();
-
-function resetApplicationState() {
-    state = getInitialState();
-}
-
-
-// --- Utilities ---
-const Storage = {
-    getFavourites: () => JSON.parse(localStorage.getItem('favouriteCharacters') || '[]'),
-    saveFavourites: (hashes) => localStorage.setItem('favouriteCharacters', JSON.stringify(Array.from(new Set(hashes)))),
-    getBlacklist: () => JSON.parse(localStorage.getItem('blacklistedCharacters') || '[]'),
-    saveBlacklist: (hashes) => localStorage.setItem('blacklistedCharacters', JSON.stringify(Array.from(new Set(hashes)))),
+    activePlugins: [],
+    currentPluginInstance: null,
+    // YUUKA: Trạng thái cho Service mới
+    generationStatus: {
+        interval: null,
+        knownTasks: new Set(),
+    },
 };
-function copyTextToClipboard(text, elementToFeedback){const originalText=elementToFeedback.textContent;navigator.clipboard.writeText(text).then(()=>{elementToFeedback.textContent='Copied!';setTimeout(()=>{elementToFeedback.textContent=originalText},1e3)}).catch(err=>{console.warn("Clipboard API failed, trying fallback:",err);const textArea=document.createElement("textarea");textArea.value=text;textArea.style.position='fixed';document.body.appendChild(textArea);textArea.focus();textArea.select();try{document.execCommand('copy');elementToFeedback.textContent='Copied!';setTimeout(()=>{elementToFeedback.textContent=originalText},1e3)}catch(e){console.error("Fallback copy failed:",e);elementToFeedback.textContent='Copy Failed!';setTimeout(()=>{elementToFeedback.textContent=originalText},1e3)}document.body.removeChild(textArea)})}
 
+// --- Core Logic ---
 let errorTimeout;
 function showError(message) {
     clearTimeout(errorTimeout);
     errorPopup.textContent = message;
     errorPopup.classList.add('show');
-    errorTimeout = setTimeout(() => {
-        errorPopup.classList.remove('show');
-    }, 4000);
+    errorTimeout = setTimeout(() => { errorPopup.classList.remove('show'); }, 4000);
 }
 
-// --- Theme Management ---
-function applyTheme(theme) {
-    if (theme === 'dark') {
-        document.documentElement.classList.add('dark-mode');
-    } else {
-        document.documentElement.classList.remove('dark-mode');
-    }
-    localStorage.setItem('yuuka-theme', theme);
-}
-
-// --- Core Functions ---
-createCharacterCard=char=>{const card=document.createElement('div');card.className='character-card';card.dataset.hash=char.hash;card.dataset.name=char.name;const imageContainer=document.createElement('div');imageContainer.className='image-container';const img=document.createElement('img');img.src=`/image/${char.hash}`;img.alt=char.name;img.loading='lazy';imageContainer.appendChild(img);const nameDiv=document.createElement('div');nameDiv.className='name';nameDiv.textContent=char.name;card.appendChild(imageContainer);card.appendChild(nameDiv);gallery.appendChild(card)}
-
-async function syncListsToServer() {
-    if (state.syncMode !== 'lan') return;
-    clearTimeout(state.syncTimeout);
-    state.syncTimeout = setTimeout(async () => {
-        try {
-            await api.updateLocalLists({
-                favourites: state.favourites,
-                blacklist: state.blacklist
-            });
-        } catch (error) {
-            showError("Lỗi: không thể đồng bộ danh sách với server.");
-        }
-    }, 500);
-}
-
-function saveData() {
-    if (state.syncMode === 'lan') {
-        syncListsToServer();
-    } else {
-        Storage.saveFavourites(state.favourites);
-        Storage.saveBlacklist(state.blacklist);
-    }
-}
-
-async function loadCharacters() {
-    if (state.isLoading || !state.hasMore) return;
-    state.isLoading = true;
-    loader.classList.add('visible');
-    loader.textContent = "Đang tải thêm...";
-    await new Promise(resolve => setTimeout(resolve, 20));
-
-    try {
-        let sourceList = [];
-        if (state.activeTab === 'browse') {
-            sourceList = state.sessionBrowseOrder.filter(char =>
-                state.currentSearchQuery ? char.name.toLowerCase().includes(state.currentSearchQuery) : true
-            );
-        } else {
-            const listSourceHashes = state.activeTab === 'favourite' ? state.favourites : state.blacklist;
-            sourceList = state.allCharacters.filter(char =>
-                listSourceHashes.includes(char.hash) &&
-                (state.currentSearchQuery ? char.name.toLowerCase().includes(state.currentSearchQuery) : true)
-            );
-        }
-
-        const totalResults = sourceList.length;
-        const BATCH_SIZE = 50;
-        const startIndex = (state.currentPage - 1) * BATCH_SIZE;
-        const endIndex = startIndex + BATCH_SIZE;
-        const charactersToRender = sourceList.slice(startIndex, endIndex);
-
-        if (charactersToRender.length === 0 && state.currentPage === 1) {
-            state.hasMore = false;
-        } else {
-            charactersToRender.forEach(createCharacterCard);
-            if (state.scrollRestorationTarget) {
-                window.scrollTo(0, state.scrollRestorationTarget);
-                if (window.scrollY >= state.scrollRestorationTarget - window.innerHeight) {
-                    state.scrollRestorationTarget = null; 
-                }
-            }
-            state.currentPage++;
-            state.hasMore = gallery.children.length < totalResults;
-        }
-    } catch (error) {
-        loader.textContent = "Lỗi khi tải dữ liệu.";
-        state.hasMore = false;
-    } finally {
-        state.isLoading = false;
-        if (!state.hasMore) {
-            const total = gallery.getElementsByClassName('character-card').length;
-            loader.textContent = total === 0 ? "Không tìm thấy nhân vật nào." : `Đã hiển thị tất cả ${total} kết quả.`;
-        } else {
-            loader.textContent = '';
-        }
-
-        setTimeout(() => {
-            const contentFitsOnScreen = document.documentElement.scrollHeight <= document.documentElement.clientHeight;
-            if ((contentFitsOnScreen || state.scrollRestorationTarget) && state.hasMore && !state.isLoading) {
-                loadCharacters();
-            }
-        }, 100);
-    }
-}
-
-async function resetAndLoad() {
-    observer.disconnect();
-    gallery.innerHTML = '';
-    state.currentPage = 1;
-    state.hasMore = true;
-    state.isLoading = false;
-    loader.classList.add('visible'); 
+function renderLoginForm(message = '') {
+    document.body.className = 'is-logged-out';
+    authContainer.innerHTML = `<div class="auth-form-wrapper"><h3>Xác thực</h3><p>Nhập Token của bạn hoặc tạo một Token mới để tiếp tục.</p>${message ? `<p class="error-msg">${message}</p>` : ''}<form id="auth-form"><input type="text" id="auth-token-input" placeholder="Nhập Token tại đây" autocomplete="off"><button type="submit">Đăng nhập</button><button type="button" id="generate-token-btn">Tạo Token Mới</button></form></div>`;
     
-    if (state.activeTab !== 'album' && state.activeTab !== 'scene') {
-        await loadCharacters();
-        observer.observe(loader);
-    } else {
-        loader.classList.remove('visible');
-    }
+    document.getElementById('auth-form').addEventListener('submit', async (e) => { 
+        e.preventDefault(); 
+        const token = document.getElementById('auth-token-input').value.trim(); 
+        if (!token) return;
+        try {
+            await api.auth.login(token);
+            localStorage.setItem('yuuka-auth-token', token); 
+            await startApplication();
+        } catch (error) {
+             renderLoginForm(`Token không hợp lệ hoặc đã xảy ra lỗi.`);
+        }
+    });
+
+    document.getElementById('generate-token-btn').addEventListener('click', async () => { 
+        try { 
+            const data = await api.auth.generateTokenForIP(); 
+            localStorage.setItem('yuuka-auth-token', data.token); 
+            await startApplication(); 
+        } catch (error) { 
+            renderLoginForm(`Lỗi tạo token: ${error.message}`); 
+        } 
+    });
 }
 
 async function switchTab(tabName) {
-    if (!state.isAuthed) return;
-    if (state.activeTab === 'album' && tabName === 'album') {
-        albumManager.showCharacterSelectionGrid();
-        return;
-    }
-    if (state.activeTab === 'scene' && tabName === 'scene') {
-        sceneManager.init();
-        return;
-    }
     if (state.activeTab === tabName) return;
-
-    if (state.activeTab !== 'album' && state.activeTab !== 'scene' && state.activeTab !== null) {
-        state.tabScrollPositions[state.activeTab] = window.scrollY;
-    }
     state.activeTab = tabName;
-    
+
+    if (state.currentPluginInstance && typeof state.currentPluginInstance.destroy === 'function') {
+        state.currentPluginInstance.destroy();
+        state.currentPluginInstance = null;
+    }
+
+    document.querySelectorAll('.plugin-container').forEach(c => c.style.display = 'none');
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabName));
-    customSelectTrigger.textContent = tabName.charAt(0).toUpperCase() + tabName.slice(1);
-    document.querySelectorAll('.custom-select-option').forEach(opt => opt.classList.toggle('selected', opt.dataset.value === tabName));
 
-    const isGalleryTab = ['browse', 'favourite', 'blacklist'].includes(tabName);
-    gallery.style.display = isGalleryTab ? 'grid' : 'none';
-    albumContainer.style.display = (tabName === 'album') ? 'block' : 'none';
-    sceneContainer.style.display = (tabName === 'scene') ? 'block' : 'none';
-    searchForm.style.display = isGalleryTab ? 'block' : 'none';
-    sceneControls.style.display = (tabName === 'scene') ? 'flex' : 'none';
-    backBtn.style.display = 'none';
-    contextFooter.style.display = 'none';
+    const pluginInfo = state.activePlugins.find(p => p.ui?.tab?.id === tabName);
 
-    if (isGalleryTab) {
-        searchBox.placeholder = `Tìm trong tab ${tabName}...`;
-        if (tabName === 'browse') searchBox.placeholder = 'Tìm kiếm hoặc gõ /rm <từ khóa>';
-        state.scrollRestorationTarget = state.tabScrollPositions[tabName] || 0;
-        await resetAndLoad();
-    } else {
-        observer.disconnect();
-        loader.classList.remove('visible');
-        loader.textContent = '';
-        state.scrollRestorationTarget = null;
-        
-        if (tabName === 'album') {
-            albumManager.init();
-        } else if (tabName === 'scene') {
-            sceneManager.init();
-        }
-    }
-}
+    if (pluginInfo) {
+        const componentName = pluginInfo.entry_points.frontend_component;
+        const ComponentClass = window.Yuuka.components[componentName];
 
-// --- Modal Logic ---
-openModal=characterCard=>{state.currentModalCharacter={hash:characterCard.dataset.hash,name:characterCard.dataset.name};modalImage.src=characterCard.querySelector('img').src;modalCaption.textContent=state.currentModalCharacter.name;updateModalButtons();modal.style.display='flex'};
-updateModalButtons=()=>{
-    if(!state.currentModalCharacter) return;
-    const isFavourited=state.favourites.includes(state.currentModalCharacter.hash);
-    const isBlacklisted=state.blacklist.includes(state.currentModalCharacter.hash);
-    modalFavBtn.textContent = '❤️';
-    modalBlacklistBtn.textContent = '➖';
-    modalFavBtn.classList.toggle('is-favourited', isFavourited);
-    modalBlacklistBtn.classList.toggle('is-blacklisted', isBlacklisted);
-    modalFavBtn.disabled = state.activeTab === 'blacklist';
-    modalBlacklistBtn.style.display = state.activeTab === 'favourite' ? 'none' : 'inline-flex';
-};
-closeModal=()=>{modal.style.display='none';state.currentModalCharacter=null};
-
-// --- Auth Logic ---
-function renderLoginForm(message = '') {
-    document.body.classList.remove('is-logged-in');
-    document.body.classList.add('is-logged-out');
-    authContainer.innerHTML = `
-        <div class="api-key-form">
-            <h3>Xác thực</h3>
-            <p>Nhập Token của bạn hoặc tạo một Token mới để tiếp tục.</p>
-            ${message ? `<p class="error-msg">${message}</p>` : ''}
-            <form id="auth-form">
-                <input type="text" id="auth-token-input" placeholder="Nhập Token tại đây">
-                <button type="submit">Đăng nhập</button>
-                <button type="button" id="generate-token-btn">Tạo Token Mới</button>
-            </form>
-        </div>
-    `;
-
-    document.getElementById('auth-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const token = document.getElementById('auth-token-input').value.trim();
-        if (token) {
-            localStorage.setItem('yuuka-auth-token', token);
-            await initializeApp();
-        }
-    });
-
-    document.getElementById('generate-token-btn').addEventListener('click', async () => {
-        try {
-            const data = await api.generateTokenForIP();
-            localStorage.setItem('yuuka-auth-token', data.token);
-            await initializeApp();
-        } catch (error) {
-            renderLoginForm(`Lỗi tạo token: ${error.message}`);
-        }
-    });
-}
-
-async function handleAuth() {
-    let token = localStorage.getItem('yuuka-auth-token');
-    if (token) {
-        await initializeApp();
-        return;
-    }
-    
-    try {
-        // Check if server already has a token for this IP
-        const data = await api.checkTokenForIP();
-        localStorage.setItem('yuuka-auth-token', data.token);
-        await initializeApp();
-    } catch (error) {
-        if (error.status === 404) {
-            renderLoginForm(); // No token found for IP, show login form.
-        } else {
-            authContainer.innerHTML = `<div class="error-msg">Lỗi kết nối server: ${error.message}</div>`;
-        }
-    }
-}
-
-async function checkComfyUI() {
-    try {
-        await api.checkComfyUIStatus('127.0.0.1:8888'); // Hardcoded for now, can be dynamic later
-        state.isComfyUIAvailable = true;
-        showError("ComfyUI đã kết nối. Các tính năng tạo ảnh đã được bật.");
-    } catch (e) {
-        state.isComfyUIAvailable = false;
-        showError("Không thể kết nối tới ComfyUI. Chức năng tạo ảnh bị vô hiệu hóa.");
-    }
-}
-
-// --- Event Handlers ---
-tabsContainer.addEventListener('click', (e) => e.target.matches('.tab-btn') && switchTab(e.target.dataset.tab));
-backBtn.addEventListener('click', () => albumManager.goBack());
-
-customSelectTrigger.addEventListener('click', () => mainTabsSelectContainer.classList.toggle('open'));
-customSelectOptions.addEventListener('click', (e) => {
-    if (e.target.matches('.custom-select-option')) {
-        switchTab(e.target.dataset.value);
-        mainTabsSelectContainer.classList.remove('open');
-    }
-});
-window.addEventListener('click', (e) => {
-    if (!e.target.closest('.custom-select-container')) {
-        document.querySelectorAll('.custom-select-container.open').forEach(c => c.classList.remove('open'));
-    }
-});
-
-searchForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const query = searchBox.value.trim();
-    
-    if (query.startsWith('BL-')) {
-        try {
-            const base64Part = query.substring(3);
-            const decodedHashes = JSON.parse(atob(base64Part));
-            if (Array.isArray(decodedHashes)) {
-                const currentBlacklist = new Set(state.blacklist);
-                let addedCount = 0;
-                decodedHashes.forEach(hash => {
-                    if (!currentBlacklist.has(hash)) {
-                        currentBlacklist.add(hash);
-                        addedCount++;
-                    }
-                });
-                state.blacklist = Array.from(currentBlacklist);
-                saveData();
-                await resetAndLoad();
-                showError(`Đã thêm ${addedCount} nhân vật mới vào blacklist.`);
-            } else {
-                throw new Error("Invalid code format.");
+        if (ComponentClass) {
+            const container = document.querySelector(`.plugin-container[data-plugin-id="${pluginInfo.id}"]`);
+            if (container) {
+                container.style.display = 'block';
+                state.currentPluginInstance = new ComponentClass(container, api, state.activePlugins);
+                if (typeof state.currentPluginInstance.init === 'function') {
+                    await state.currentPluginInstance.init();
+                }
             }
-        } catch (err) {
-            showError("Mã chia sẻ blacklist không hợp lệ.");
-        }
-        searchBox.value = '';
-        return;
-    } else if (query.startsWith('FV-')) {
-        try {
-            const base64Part = query.substring(3);
-            const decodedHashes = JSON.parse(atob(base64Part));
-            if (Array.isArray(decodedHashes)) {
-                const currentFavourites = new Set(state.favourites);
-                let addedCount = 0;
-                decodedHashes.forEach(hash => {
-                    if (!currentFavourites.has(hash)) {
-                        currentFavourites.add(hash);
-                        addedCount++;
-                    }
-                });
-                state.favourites = Array.from(currentFavourites);
-                saveData();
-                await resetAndLoad();
-                showError(`Đã thêm ${addedCount} nhân vật mới vào favourite.`);
-            } else {
-                throw new Error("Invalid code format.");
-            }
-        } catch (err) {
-            showError("Mã chia sẻ favourite không hợp lệ.");
-        }
-        searchBox.value = '';
-        return;
-    }
-
-
-    if (query === '/dark') { applyTheme('dark'); showError('Chuyển sang Dark Mode.'); searchBox.value = ''; return; }
-    if (query === '/light') { applyTheme('light'); showError('Chuyển sang Light Mode.'); searchBox.value = ''; return; }
-    if (query === '/token') {
-        const token = localStorage.getItem('yuuka-auth-token');
-        if (token) {
-            navigator.clipboard.writeText(token).then(() => showError('Login token đã được sao chép vào clipboard.'));
         } else {
-            showError('Không tìm thấy login token.');
+            showError(`Lỗi: Component '${componentName}' chưa được tải.`);
         }
-        searchBox.value = '';
-        return;
     }
-    if (query === '/logout') {
-        const token = localStorage.getItem('yuuka-auth-token');
-        
-        observer.disconnect();
-        
-        // Clear content
-        gallery.innerHTML = '';
-        albumContainer.innerHTML = '';
-        sceneContainer.innerHTML = '';
-        searchBox.value = '';
+}
 
-        // Reset state and local storage
-        resetApplicationState();
-        localStorage.removeItem('yuuka-auth-token');
-        
-        // Prepare logout message
-        let logoutMessage = 'Bạn đã đăng xuất.';
-        if (token) {
-             logoutMessage = 'Đã đăng xuất. Token của bạn (nếu có) đã được thử sao chép vào clipboard.';
-        }
-        
-        // Render login form which also handles body classes
-        renderLoginForm(logoutMessage);
+// YUUKA: GLOBAL GENERATION STATUS POLLER
+async function checkGlobalGenerationStatus() {
+    try {
+        const status = await api.generation.getStatus();
+        // YUUKA'S FIX: Lấy keys từ `status.tasks` thay vì `status`
+        const serverTaskIds = new Set(Object.keys(status.tasks || {}));
 
-        if (token) {
-            navigator.clipboard.writeText(token).catch(err => console.log("Clipboard copy failed after logout."));
-        }
+        // Event cho các task mới bắt đầu
+        serverTaskIds.forEach(taskId => {
+            if (!state.generationStatus.knownTasks.has(taskId)) {
+                state.generationStatus.knownTasks.add(taskId);
+                Yuuka.events.emit('generation:started', status.tasks[taskId]);
+            }
+        });
 
-        return;
-    }
+        // Event cho các task đã hoàn thành hoặc lỗi
+        state.generationStatus.knownTasks.forEach(taskId => {
+            if (!serverTaskIds.has(taskId)) {
+                // Task này đã kết thúc, nhưng chúng ta không có data cuối cùng ở đây.
+                // Plugin sẽ tự dọn dẹp placeholder khi nhận được `image:added` hoặc lỗi
+                state.generationStatus.knownTasks.delete(taskId);
+                Yuuka.events.emit('generation:task_ended', { taskId });
+            }
+        });
 
-    if (query === '/stop') {
-        if (confirm('Bạn có chắc muốn tắt server không? Thao tác này sẽ đóng ứng dụng.')) {
-            api.shutdownServer().then(() => {
-                showError("Đã gửi lệnh tắt server.");
-                loader.textContent = "Server đang tắt... Bạn có thể đóng tab này.";
-                loader.classList.add('visible');
-                // Disable interactions
-                document.body.style.pointerEvents = 'none';
-            }).catch(err => {
-                showError(`Lỗi khi gửi lệnh tắt: ${err.message}`);
+        // Phát event update cho tất cả các task đang chạy
+        Yuuka.events.emit('generation:update', status.tasks || {});
+
+        // Xử lý các sự kiện từ backend
+        if (status.events && status.events.length > 0) {
+            status.events.forEach(event => {
+                const { type, data } = event;
+                switch(type) {
+                    case 'IMAGE_SAVED':
+                        Yuuka.events.emit('image:added', data); // Gửi toàn bộ data
+                        break;
+                    case 'IMAGE_DELETED': // Yuuka: event bus v1.0
+                        Yuuka.events.emit('image:deleted', data);
+                        break;
+                    // Các event khác có thể được thêm vào đây
+                }
             });
         }
-        searchBox.value = '';
-        return;
-    }
 
-    const loginMatch = query.match(/^\/login\s+(.+)/);
-    if (loginMatch) {
-        const ip = loginMatch[1];
-        try {
-            await api.shareTokenWithIP(ip);
-            showError(`Token đã được chia sẻ thành công cho IP: ${ip}`);
-        } catch(error) {
-            showError(`Lỗi chia sẻ token: ${error.message}`);
+        // Tự động dừng polling nếu không có task nào
+        if (serverTaskIds.size === 0 && state.generationStatus.interval) {
+            clearInterval(state.generationStatus.interval);
+            state.generationStatus.interval = null;
+            state.generationStatus.knownTasks.clear();
+             console.log('[Core Poller] No active tasks. Stopping status polling.');
         }
-        searchBox.value = '';
-        return;
-    }
 
-    const blacklistShareMatch = query.match(/^\/blacklist\s+share$/);
-    if (blacklistShareMatch) {
-        const shareCode = 'BL-' + btoa(JSON.stringify(state.blacklist));
-        navigator.clipboard.writeText(shareCode).then(() => showError('Mã chia sẻ blacklist đã được sao chép vào clipboard.'));
-        searchBox.value = '';
-        return;
-    }
-
-    const favouriteShareMatch = query.match(/^\/favourite\s+share$/);
-    if (favouriteShareMatch) {
-        const shareCode = 'FV-' + btoa(JSON.stringify(state.favourites));
-        navigator.clipboard.writeText(shareCode).then(() => showError('Mã chia sẻ favourite đã được sao chép vào clipboard.'));
-        searchBox.value = '';
-        return;
-    }
-
-    const blacklistCommand = query.match(/^\/(blacklist|rm)\s+(.+)/);
-    if (blacklistCommand) {
-        const keyword = blacklistCommand[2].toLowerCase();
-        const matches = state.allCharacters.filter(c => c.name.toLowerCase().includes(keyword) && !state.blacklist.includes(c.hash));
-        if (matches.length > 0) {
-            const hashes = matches.map(c => c.hash);
-            state.blacklist.push(...hashes);
-            saveData();
-            state.sessionBrowseOrder = state.allCharacters.filter(char => !state.blacklist.includes(char.hash));
-            // Re-shuffle
-            for (let i = state.sessionBrowseOrder.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [state.sessionBrowseOrder[i], state.sessionBrowseOrder[j]] = [state.sessionBrowseOrder[j], state.sessionBrowseOrder[i]];
-            }
-            showError(`${matches.length} nhân vật đã được thêm vào blacklist.`);
-            searchBox.value = ''; state.currentSearchQuery = ''; state.scrollRestorationTarget = null;
-            await resetAndLoad(); window.scrollTo(0, 0);
-        } else { showError(`Không tìm thấy nhân vật nào với từ khóa: "${keyword}"`); }
-        return;
-    }
-});
-
-searchBox.addEventListener('input', () => {
-    clearTimeout(state.debounceTimeout);
-    state.debounceTimeout = setTimeout(async () => {
-        const query = searchBox.value.trim().toLowerCase();
-        if (query.startsWith('/') || state.currentSearchQuery === query) return;
-        state.currentSearchQuery = query;
-        state.scrollRestorationTarget = null;
-        await resetAndLoad();
-        window.scrollTo(0, 0);
-    }, 300);
-});
-
-gallery.addEventListener('click', (e) => { const c = e.target.closest('.character-card'); if (c) { if (e.target.matches('.name')) copyTextToClipboard(c.dataset.name, e.target); else if (e.target.closest('.image-container')) openModal(c); }});
-modalFavBtn.addEventListener('click',()=>{const{hash}=state.currentModalCharacter;if(state.favourites.includes(hash)){state.favourites=state.favourites.filter(h=>h!==hash)}else{state.favourites.push(hash)}saveData();updateModalButtons();if(state.activeTab==='favourite'&&!state.favourites.includes(hash)){document.querySelector(`.character-card[data-hash="${hash}"]`)?.remove();closeModal()}});
-modalBlacklistBtn.addEventListener('click',()=>{const{hash}=state.currentModalCharacter;if(state.blacklist.includes(hash)){state.blacklist=state.blacklist.filter(h=>h!==hash)}else{state.blacklist.push(hash);state.favourites=state.favourites.filter(h=>h!==hash)}saveData();updateModalButtons();document.querySelector(`.character-card[data-hash="${hash}"]`)?.remove();closeModal()});
-modalAlbumBtn.addEventListener('click', () => { if (state.currentModalCharacter) { switchTab('album'); albumManager.init(state.currentModalCharacter); closeModal(); }});
-modalSearchBtn.addEventListener('click', () => { if (state.currentModalCharacter) window.open(`https://www.google.com/search?q=${encodeURIComponent(state.currentModalCharacter.name)}`, '_blank') });
-closeModalBtn.addEventListener('click', closeModal);
-modal.addEventListener('click', (e) => e.target === modal && closeModal());
-window.addEventListener('keydown', (e) => e.key === 'Escape' && closeModal());
-
-const observer = new IntersectionObserver((entries) => {
-    if (entries[0] && entries[0].isIntersecting && !state.isLoading && state.hasMore) {
-        loadCharacters();
-    }
-}, { rootMargin: '400px' });
-
-function initializeDragToScroll() {
-    const body = document.body;
-    let isDown = false, lastY, velocityY = 0, momentumID;
-    const DAMPING = 0.95;
-    function beginMomentumTracking() { cancelAnimationFrame(momentumID); momentumID = requestAnimationFrame(momentumLoop); }
-    function momentumLoop() { window.scrollBy(0, -velocityY); velocityY *= DAMPING; if (Math.abs(velocityY) > 0.5) momentumID = requestAnimationFrame(momentumLoop); }
-    body.addEventListener('mousedown', (e) => {
-        if (e.button !== 0 || e.clientX >= document.documentElement.clientWidth) return;
-        const ignored = 'INPUT, TEXTAREA, SELECT, BUTTON, A, .character-card, #modal, .image-viewer, #settings-modal, .custom-select-container, .fab-container, .scene-block';
-        if (e.target.closest(ignored) || document.documentElement.scrollHeight <= document.documentElement.clientHeight) return;
-        isDown = true; body.classList.add('is-dragging'); lastY = e.pageY; velocityY = 0; cancelAnimationFrame(momentumID); e.preventDefault();
-        window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp);
-    });
-    const handleMouseMove = (e) => { if (isDown) { e.preventDefault(); const y = e.pageY; const deltaY = y - lastY; window.scrollBy(0, -deltaY); velocityY = deltaY; lastY = y; }};
-    const handleMouseUp = () => { if (isDown) { isDown = false; body.classList.remove('is-dragging'); beginMomentumTracking(); window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); }};
-}
-
-async function initializeApp() {
-    document.body.classList.remove('is-logged-out');
-    document.body.classList.add('is-logged-in');
-    
-    try {
-        const listData = await api.getLocalLists();
-        state.isAuthed = true;
-        state.syncMode = listData.sync_mode;
-        document.title = `Thư viện Nhân vật (${state.syncMode.toUpperCase()})`;
-        state.favourites = listData.sync_mode === 'lan' ? listData.favourites : Storage.getFavourites();
-        state.blacklist = listData.sync_mode === 'lan' ? listData.blacklist : Storage.getBlacklist();
-
-        const charData = await api.getAllCharacters();
-        state.allCharacters = charData.characters;
-
-        let browsable = state.allCharacters.filter(char => !state.blacklist.includes(char.hash));
-        for (let i = browsable.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [browsable[i], browsable[j]] = [browsable[j], browsable[i]];
-        }
-        state.sessionBrowseOrder = browsable;
-        
-        switchTab('browse'); 
-        
-        initializeDragToScroll();
-        checkComfyUI();
     } catch (error) {
-        if (error.status === 401) {
-            localStorage.removeItem('yuuka-auth-token');
-            state.isAuthed = false;
-            resetApplicationState();
-            renderLoginForm("Token không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.");
-        } else {
-            authContainer.innerHTML = `<div class="error-msg">Lỗi tải dữ liệu: ${error.message}</div>`;
-            showError("Lỗi nghiêm trọng: Không thể tải dữ liệu nhân vật.");
+        console.error("[Core Poller] Error checking generation status:", error);
+        if (error.status === 401) { // Nếu token hết hạn, dừng polling
+            clearInterval(state.generationStatus.interval);
+            state.generationStatus.interval = null;
         }
     }
 }
 
-handleAuth();
+function startGlobalPolling() {
+    if (state.generationStatus.interval) return;
+    console.log('[Core Poller] Starting global generation status polling...');
+    state.generationStatus.interval = setInterval(checkGlobalGenerationStatus, 1500);
+}
+
+
+async function initializeAppUI() {
+    console.log("[Core] Authentication successful. Initializing UI...");
+    document.body.className = 'is-logged-in';
+    authContainer.innerHTML = '';
+    
+    const activePluginsUI = await api.getActivePluginsUI();
+    state.activePlugins = activePluginsUI;
+    if (state.activePlugins.length === 0) { showError("Lỗi: Không có plugin nào được tải."); return; }
+
+    // YUUKA: Bắt đầu polling nếu có bất kỳ plugin nào yêu cầu thông qua cờ trong manifest.
+    if (activePluginsUI.some(p => p.ui?.needs_generation_poller)) { // Yuuka: architecture-fix v1.0
+       await checkGlobalGenerationStatus(); // Chạy lần đầu ngay lập tức
+       startGlobalPolling(); 
+    }
+    // Lắng nghe event để bắt đầu polling nếu một task mới được tạo ra
+    Yuuka.events.on('generation:started', startGlobalPolling);
+    // Yuuka: Lắng nghe event từ API call để chủ động bắt đầu polling // Yuuka: polling trigger v1.0
+    Yuuka.events.on('generation:task_created_locally', startGlobalPolling);
+
+
+    tabsContainer.innerHTML = '';
+    activePluginsUI.forEach(plugin => {
+        api.createPluginApiClient(plugin.id);
+        
+        const componentName = plugin.entry_points.frontend_component;
+        const ComponentClass = window.Yuuka.components[componentName];
+
+        if (ComponentClass) {
+            if (plugin.ui?.tab) {
+                const tabBtn = document.createElement('button');
+                tabBtn.className = 'tab-btn';
+                tabBtn.dataset.tab = plugin.ui.tab.id;
+                tabsContainer.appendChild(tabBtn);
+
+                if (plugin.id !== 'core') {
+                     const existingContainer = document.querySelector(`.plugin-container[data-plugin-id="${plugin.id}"]`);
+                    if (!existingContainer) {
+                        const pluginContainer = document.createElement('div');
+                        pluginContainer.id = `${plugin.id}-container`;
+                        pluginContainer.className = 'plugin-container';
+                        pluginContainer.dataset.pluginId = plugin.id;
+                        mainContainer.appendChild(pluginContainer);
+                    }
+                }
+            } 
+            else if (plugin.ui?.is_singleton) {
+                console.log(`[Core] Initializing singleton UI plugin: ${plugin.id}`);
+                const serviceInstance = new ComponentClass(null, api);
+                window.Yuuka.services[plugin.id] = serviceInstance;
+            }
+            else {
+                 console.log(`[Core] Initializing pure JS service plugin: ${plugin.id}`);
+                 const serviceInstance = new ComponentClass(null, api);
+                 window.Yuuka.services[plugin.id] = serviceInstance;
+            }
+        }
+    });
+    
+    const firstTab = state.activePlugins.find(p => p.ui?.tab)?.ui?.tab?.id;
+    if (firstTab) {
+        await switchTab(firstTab);
+    } else {
+        showError("Lỗi: Không tìm thấy tab nào để hiển thị.");
+    }
+}
+
+async function startApplication() {
+    console.log("[Core] Yuuka is waking up...");
+    const token = localStorage.getItem('yuuka-auth-token');
+    
+    const logoutMessage = sessionStorage.getItem('yuuka-logout-message');
+    if (logoutMessage) {
+        sessionStorage.removeItem('yuuka-logout-message');
+    }
+
+    if (token) {
+        try {
+            await initializeAppUI();
+        } catch (error) {
+            if (error.status === 401) {
+                localStorage.removeItem('yuuka-auth-token');
+                renderLoginForm("Token không hợp lệ. Vui lòng đăng nhập lại.");
+            } else {
+                showError(`Lỗi khởi tạo: ${error.message}`);
+                console.error(error);
+            }
+        }
+    } else {
+        try {
+            const data = await api.auth.checkTokenForIP();
+            localStorage.setItem('yuuka-auth-token', data.token);
+            await initializeAppUI();
+        } catch (error) {
+            if (error.status === 404) {
+                renderLoginForm(logoutMessage || '');
+            } else {
+                authContainer.innerHTML = `<p class="error-msg">Lỗi kết nối server: ${error.message}</p>`;
+            }
+        }
+    }
+}
+
+window.addEventListener('load', startApplication);

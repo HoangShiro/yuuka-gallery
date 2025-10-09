@@ -1,0 +1,20 @@
+{
+    "id": "float-viewer",
+    "name": "Floating Image Viewer",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Cung cấp một cửa sổ nổi để xem nhanh tất cả các ảnh đã tạo.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:FloatViewerPlugin",
+        "frontend_component": "FloatViewerComponent"
+    },
+    "assets": {
+        "js": ["float_viewer.js"],
+        "css": ["float_viewer.css"]
+    },
+    "ui": {
+        "is_singleton": true,
+        "needs_generation_poller": true
+    }
+}

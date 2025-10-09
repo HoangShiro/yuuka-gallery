@@ -1,4 +1,4 @@
-# --- NEW FILE: comfyui_integration/workflow_builder_service.py ---
+# --- MODIFIED FILE: comfyui_integration/workflow_builder_service.py ---
 import os
 import json
 import uuid
@@ -101,26 +101,61 @@ class WorkflowBuilderService:
             return self._build_standard_workflow(cfg_data, seed)
 
     def _build_standard_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
-        """Xây dựng workflow text-to-image tiêu chuẩn, không dùng template."""
+        """
+        Yuuka: Cập nhật workflow tiêu chuẩn theo cấu trúc mới.
+        Workflow này sẽ trả về ảnh dưới dạng base64 qua API.
+        """
         text_prompt = cfg_data.get(COMBINED_TEXT_PROMPT_KEY, build_full_prompt_from_cfg(cfg_data))
         negative_prompt = ", ".join(normalize_tag_list(str(cfg_data.get("negative", DEFAULT_CONFIG["negative"]))))
         
         workflow = {
-            "3": {"class_type": "KSampler", "inputs": {
-                "cfg": cfg_data.get("cfg", DEFAULT_CONFIG["cfg"]),
-                "denoise": 1.0, "latent_image": ["5", 0], "model": ["4", 0],
-                "negative": ["7", 0], "positive": ["6", 0],
-                "sampler_name": cfg_data.get("sampler_name", DEFAULT_CONFIG["sampler_name"]),
-                "scheduler": cfg_data.get("scheduler", DEFAULT_CONFIG["scheduler"]),
-                "seed": seed, "steps": cfg_data.get("steps", DEFAULT_CONFIG["steps"])}},
-            "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": cfg_data.get("ckpt_name", DEFAULT_CONFIG["ckpt_name"])}},
-            "5": {"class_type": "EmptyLatentImage", "inputs": {"batch_size": 1, "height": cfg_data.get("height", DEFAULT_CONFIG["height"]), "width": cfg_data.get("width", DEFAULT_CONFIG["width"])}},
-            "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": text_prompt}},
-            "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": negative_prompt}},
-            "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
-            "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": f"CharacterGallery_Std_{seed}", "images": ["8", 0]}}
+            "3": {
+                "inputs": {
+                    "seed": seed,
+                    "steps": cfg_data.get("steps", DEFAULT_CONFIG["steps"]),
+                    "cfg": cfg_data.get("cfg", DEFAULT_CONFIG["cfg"]),
+                    "sampler_name": cfg_data.get("sampler_name", DEFAULT_CONFIG["sampler_name"]),
+                    "scheduler": cfg_data.get("scheduler", DEFAULT_CONFIG["scheduler"]),
+                    "denoise": 1,
+                    "model": ["11", 0],
+                    "positive": ["6", 0],
+                    "negative": ["7", 0],
+                    "latent_image": ["12", 0]
+                },
+                "class_type": "KSampler"
+            },
+            "6": {
+                "inputs": {"text": text_prompt, "clip": ["11", 1]},
+                "class_type": "CLIPTextEncode"
+            },
+            "7": {
+                "inputs": {"text": negative_prompt, "clip": ["11", 1]},
+                "class_type": "CLIPTextEncode"
+            },
+            "8": {
+                "inputs": {"samples": ["3", 0], "vae": ["11", 2]},
+                "class_type": "VAEDecode"
+            },
+            "11": {
+                "inputs": {"ckpt_name": cfg_data.get("ckpt_name", DEFAULT_CONFIG["ckpt_name"])},
+                "class_type": "CheckpointLoaderSimple"
+            },
+            "12": {
+                "inputs": {
+                    "width": cfg_data.get("width", DEFAULT_CONFIG["width"]),
+                    "height": cfg_data.get("height", DEFAULT_CONFIG["height"]),
+                    "batch_size": 1
+                },
+                "class_type": "EmptyLatentImage"
+            },
+            "15": {
+                "inputs": {"images": ["8", 0]},
+                "class_type": "ImageToBase64_Yuuka"
+            }
         }
-        return workflow, "9"
+        
+        # Yuuka: Trả về workflow và ID của node output base64
+        return workflow, "15"
 
     def _build_lora_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
         """Xây dựng workflow sử dụng LoRA từ template."""
@@ -149,6 +184,13 @@ class WorkflowBuilderService:
         workflow["3"]["inputs"]["sampler_name"] = cfg_data.get("sampler_name", DEFAULT_CONFIG["sampler_name"])
         workflow["3"]["inputs"]["scheduler"] = cfg_data.get("scheduler", DEFAULT_CONFIG["scheduler"])
         
-        workflow["9"]["inputs"]["filename_prefix"] = f"CharacterGallery_LoRA_{seed}"
-        
-        return workflow, "9"
+        # Yuuka: Cần đảm bảo workflow LoRA cũng có node output base64. 
+        # Giả sử template có node ID là "16" cho việc này. Nếu không, nó sẽ thất bại.
+        # Senpai cần đảm bảo template `SDXL_with_LoRA.json` có node ImageToBase64_Yuuka.
+        output_node_id = "15" # Giả định ID node output là 15, cần kiểm tra file json
+        if output_node_id not in workflow:
+            print(f"⚠️  Template LoRA không có output node {output_node_id}. Việc lấy ảnh có thể thất bại.")
+            # Fallback về node SaveImage nếu có
+            output_node_id = "9" if "9" in workflow else "15"
+
+        return workflow, output_node_id

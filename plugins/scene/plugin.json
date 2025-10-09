@@ -1,0 +1,26 @@
+{
+    "id": "scene",
+    "name": "Scene Manager",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Quản lý và thực hiện các kịch bản (scene) tạo ảnh hàng loạt.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:ScenePlugin",
+        "frontend_component": "SceneComponent"
+    },
+    "assets": {
+        "js": ["scene.js"],
+        "css": ["scene.css"]
+    },
+    "ui": {
+        "tab": {
+            "id": "scene",
+            "label": "Scene",
+            "icon": "movie",
+            "show_search": false
+        },
+        "order": 20,
+        "needs_generation_poller": true
+    }
+}

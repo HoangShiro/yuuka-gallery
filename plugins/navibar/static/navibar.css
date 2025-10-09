@@ -1,0 +1,81 @@
+/* --- NEW FILE: plugins/navibar/static/navibar.css --- */
+
+#main-nav { 
+    position: fixed; 
+    bottom: var(--spacing-4); 
+    left: 50%; 
+    transform: translateX(-50%); 
+    z-index: 1001; 
+    display: flex; 
+    align-items: center; 
+    width: auto; 
+    max-width: 90%; 
+    background: rgba(255, 255, 255, 0.6); 
+    backdrop-filter: blur(10px); 
+    -webkit-backdrop-filter: blur(10px); 
+    padding: var(--spacing-2); 
+    border-radius: var(--rounded-full); 
+    border: 1px solid rgba(255, 255, 255, 0.2); 
+    box-shadow: 0 4px 12px var(--color-shadow); 
+}
+html.dark-mode #main-nav { 
+    background: rgba(42, 39, 38, 0.6); 
+    border: 1px solid rgba(255, 255, 255, 0.1); 
+}
+
+.nav-group { 
+    display: flex; 
+    gap: var(--spacing-2); 
+    align-items: center;
+}
+.nav-spacer { 
+    flex-grow: 1; 
+    min-width: var(--spacing-4); 
+}
+
+.nav-btn { 
+    width: 52px; 
+    height: 52px; 
+    border-radius: var(--rounded-full); 
+    border: none; 
+    background: transparent; 
+    cursor: pointer; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    color: var(--color-primary-text); 
+    flex-shrink: 0;
+    overflow: hidden;
+
+    /* YUUKA: Thêm transition cho animation */
+    transition: background-color 0.2s, color 0.2s, transform 0.1s ease-out, 
+                opacity 0.3s ease, width 0.3s ease, 
+                padding 0.3s ease, margin 0.3s ease;
+}
+
+.nav-btn:hover { 
+    background: rgba(0, 0, 0, 0.05); 
+}
+.nav-btn:active { 
+    transform: scale(0.9); 
+}
+html.dark-mode .nav-btn:hover { 
+    background: rgba(255, 255, 255, 0.1); 
+}
+
+.nav-btn.active { 
+    background-color: var(--color-accent); 
+    color: white; 
+}
+.nav-btn.active .material-symbols-outlined { 
+    font-variation-settings: 'FILL' 1; 
+}
+
+/* YUUKA: CSS cho animation thêm/xóa/ẩn button */
+.nav-btn.is-hidden {
+    width: 0;
+    opacity: 0;
+    padding: 0;
+    margin: 0 !important; /* Quan trọng để xóa gap */
+    pointer-events: none;
+}

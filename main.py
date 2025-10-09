@@ -1,4 +1,4 @@
-# --- NEW FILE: main.py ---
+# --- MODIFIED FILE: main.py ---
 import sys
 import os
 import subprocess
@@ -78,15 +78,12 @@ def main():
     print("Yuuka: Phiên bản đã được cập nhật. Đang tải dữ liệu và khởi chạy server...")
     
     try:
-        from app import app, load_and_prepare_data
+        from app import app, initialize_server # Yuuka: fix app call v1.0
         
-        # Tải dữ liệu cần thiết cho server
-        load_and_prepare_data()
+        # Tải dữ liệu và khởi tạo server
+        initialize_server() # Yuuka: fix app call v1.0
         
         # Khởi chạy server Flask
-        print("\n✅ Server is ready!")
-        print("   - Local access at: http://127.0.0.1:5000")
-        print("   - To access from other devices on the same network, use this machine's IP address.")
         app.run(host='0.0.0.0', debug=False, port=5000)
 
     except ImportError as e:

@@ -1,0 +1,253 @@
+/* --- MODIFIED FILE: plugins/float-viewer/static/float_viewer.css --- */
+
+.float-viewer-window {
+    position: fixed;
+    z-index: 1500;
+    background: var(--color-card-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-lg);
+    box-shadow: 0 10px 25px -5px var(--color-shadow), 0 8px 10px -6px var(--color-shadow);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* Quan trọng để border-radius hoạt động */
+    resize: none; /* Tắt resize mặc định của trình duyệt */
+    min-width: 200px;
+    min-height: 250px;
+    transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease, border-radius 0.2s ease;
+}
+
+.float-viewer-window.is-dragging {
+    transition: none !important;
+}
+
+.float-viewer-header {
+    padding: var(--spacing-1) var(--spacing-3);
+    cursor: move;
+    background: var(--color-primary-bg);
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: opacity 0.2s ease;
+}
+.float-viewer-header-title {
+    font-weight: var(--font-weight-medium);
+    font-size: var(--font-size-sm);
+}
+.float-viewer-header-actions button {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--color-secondary-text);
+    padding: 0;
+    border-radius: var(--rounded-full);
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.float-viewer-header-actions button .material-symbols-outlined {
+    font-size: 20px;
+}
+
+.float-viewer-header-actions button:hover {
+    background: var(--color-border);
+    color: var(--color-primary-text);
+}
+
+
+.float-viewer-content {
+    flex-grow: 1;
+    overflow: auto;
+    padding: var(--spacing-3);
+}
+
+.float-viewer-content::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.float-viewer-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+.float-viewer-content::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 4px;
+}
+.float-viewer-content:hover::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+}
+.float-viewer-content {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+}
+.float-viewer-content:hover {
+    scrollbar-color: var(--color-border) transparent;
+}
+
+
+.float-viewer-gallery {
+    display: flex;
+    gap: var(--spacing-3);
+}
+
+.float-viewer-gallery.horizontal {
+    flex-direction: row;
+    height: 100%;
+}
+.float-viewer-gallery.vertical {
+    flex-direction: column;
+    width: 100%;
+}
+
+.float-viewer-image-wrapper {
+    cursor: pointer;
+    border-radius: var(--rounded-md);
+    overflow: hidden;
+    box-shadow: 0 2px 4px var(--color-shadow);
+    flex-shrink: 0;
+}
+.float-viewer-gallery.horizontal .float-viewer-image-wrapper {
+    width: 120px;
+    height: 100%;
+}
+.float-viewer-gallery.vertical .float-viewer-image-wrapper {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+}
+
+.float-viewer-image-wrapper img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.float-viewer-image-wrapper:hover img {
+    transform: scale(1.05);
+    transition: transform 0.2s ease-out;
+}
+
+.float-viewer-loader {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--color-secondary-text);
+}
+
+/* --- YUUKA: CSS mới cho placeholder --- */
+.float-viewer-placeholder-card {
+    border-radius: var(--rounded-md);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-3);
+    gap: var(--spacing-3);
+    color: var(--color-secondary-text);
+}
+
+.float-viewer-gallery.horizontal .float-viewer-placeholder-card {
+    width: 120px;
+    height: 100%;
+}
+.float-viewer-gallery.vertical .float-viewer-placeholder-card {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+}
+
+.float-viewer-progress-bar-container {
+    width: 80%;
+    height: 6px;
+    background-color: var(--color-border);
+    border-radius: var(--rounded-full);
+    overflow: hidden;
+}
+
+.float-viewer-progress-bar {
+    width: 0%;
+    height: 100%;
+    background-color: var(--color-accent);
+    border-radius: var(--rounded-full);
+    transition: width 0.3s ease;
+}
+
+.float-viewer-progress-text {
+    font-size: 0.75em;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+/* --- Kết thúc CSS cho placeholder --- */
+
+
+/* --- Resize Handles --- */
+.resize-handle {
+    position: absolute;
+    background: transparent;
+    z-index: 10;
+    transition: opacity 0.2s ease;
+}
+.resize-handle.n { top: 0; left: 5px; right: 5px; height: 5px; cursor: n-resize; }
+.resize-handle.s { bottom: 0; left: 5px; right: 5px; height: 5px; cursor: s-resize; }
+.resize-handle.e { top: 5px; bottom: 5px; right: 0; width: 5px; cursor: e-resize; }
+.resize-handle.w { top: 5px; bottom: 5px; left: 0; width: 5px; cursor: w-resize; }
+.resize-handle.nw { top: 0; left: 0; width: 10px; height: 10px; cursor: nw-resize; }
+.resize-handle.ne { top: 0; right: 0; width: 10px; height: 10px; cursor: ne-resize; }
+.resize-handle.sw { bottom: 0; left: 0; width: 10px; height: 10px; cursor: sw-resize; }
+.resize-handle.se { bottom: 0; right: 0; width: 10px; height: 10px; cursor: se-resize; }
+
+
+/* YUUKA: CSS cho trạng thái "dính" cạnh */
+.float-viewer-window.snapped-left .float-viewer-header,
+.float-viewer-window.snapped-right .float-viewer-header,
+.float-viewer-window.snapped-top .float-viewer-header,
+.float-viewer-window.snapped-bottom .float-viewer-header {
+    display: none;
+}
+
+/* YUUKA: Chỉ ẩn các handle ở cạnh đang dính */
+.float-viewer-window.snapped-left .resize-handle.w,
+.float-viewer-window.snapped-left .resize-handle.nw,
+.float-viewer-window.snapped-left .resize-handle.sw,
+.float-viewer-window.snapped-right .resize-handle.e,
+.float-viewer-window.snapped-right .resize-handle.ne,
+.float-viewer-window.snapped-right .resize-handle.se,
+.float-viewer-window.snapped-top .resize-handle.n,
+.float-viewer-window.snapped-top .resize-handle.nw,
+.float-viewer-window.snapped-top .resize-handle.ne,
+.float-viewer-window.snapped-bottom .resize-handle.s,
+.float-viewer-window.snapped-bottom .resize-handle.sw,
+.float-viewer-window.snapped-bottom .resize-handle.se {
+    opacity: 0;
+    pointer-events: none;
+}
+
+
+.float-viewer-window.snapped-left {
+    height: 100% !important;
+    top: 0 !important;
+    border-radius: 0 var(--rounded-lg) var(--rounded-lg) 0;
+}
+.float-viewer-window.snapped-right {
+    height: 100% !important;
+    top: 0 !important;
+    border-radius: var(--rounded-lg) 0 0 var(--rounded-lg);
+}
+.float-viewer-window.snapped-top {
+    width: 100% !important;
+    left: 0 !important;
+    border-radius: 0 0 var(--rounded-lg) var(--rounded-lg);
+}
+.float-viewer-window.snapped-bottom {
+    width: 100% !important;
+    left: 0 !important;
+    border-radius: var(--rounded-lg) var(--rounded-lg) 0 0;
+}
