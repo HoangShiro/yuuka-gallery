@@ -108,6 +108,7 @@
     overflow: hidden;
     box-shadow: 0 2px 4px var(--color-shadow);
     flex-shrink: 0;
+    position: relative; /* Yuuka: Thêm để định vị overlay */
 }
 .float-viewer-gallery.horizontal .float-viewer-image-wrapper {
     width: 120px;
@@ -124,10 +125,36 @@
     height: 100%;
     object-fit: cover;
     display: block;
+    transition: transform 0.2s ease-out; /* Yuuka: animation v2.0 */
 }
 .float-viewer-image-wrapper:hover img {
     transform: scale(1.05);
-    transition: transform 0.2s ease-out;
+}
+
+/* Yuuka: Overlay cho creationTime v1.0 */
+.float-viewer-image-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: var(--spacing-4) var(--spacing-2) var(--spacing-1); /* Thêm padding trên để gradient có không gian */
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.6) 0%, transparent 100%);
+    pointer-events: none; /* Để vẫn có thể click xuyên qua */
+    display: flex;
+    justify-content: flex-end; /* Căn phải */
+    align-items: flex-end; /* Căn xuống dưới */
+    transition: opacity 0.2s ease-out; /* Yuuka: animation v2.0 */
+}
+
+.float-viewer-image-wrapper:hover .float-viewer-image-overlay { /* Yuuka: animation v2.0 */
+    opacity: 0;
+}
+
+.float-viewer-creation-time {
+    font-size: 0.75em;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.7);
 }
 
 .float-viewer-loader {

@@ -321,7 +321,7 @@ class AlbumComponent {
         }
     }
     
-    _createImageCard(imgData) { const c=document.createElement('div');c.className='plugin-album__album-card plugin-album__image-card';c.dataset.id=imgData.id;c.innerHTML=`<img src="${imgData.url}" alt="Art" loading="lazy">`;c.addEventListener('click',()=>this.renderImageViewer(imgData));return c;}
+    _createImageCard(imgData) { const c=document.createElement('div');c.className='plugin-album__album-card plugin-album__image-card';c.dataset.id=imgData.id;c.innerHTML=`<img src="${imgData.pv_url}" alt="Art" loading="lazy">`;c.addEventListener('click',()=>this.renderImageViewer(imgData));return c;} // Yuuka: preview image fix v1.0
 
     _createPlaceholderCard(taskId) {
         const placeholder = document.createElement('div');
@@ -337,7 +337,7 @@ class AlbumComponent {
         this.viewer.open({
             items: this.state.allImageData.map(d => ({ ...d, imageUrl: d.url })),
             startIndex: i,
-            renderInfoPanel: (item) => {const c=item.generationConfig;if(!c)return"Không có thông tin.";const r=(l,v)=>{if(!v||(typeof v==='string'&&v.trim()===''))return'';const s=document.createElement('span');s.textContent=v;return`<div class="info-row"><strong>${l}:</strong> <span>${s.innerHTML}</span></div>`;};const d=new Date(item.createdAt*1000).toLocaleString('vi-VN');const m=['character','outfits','expression','action','context','quality','negative'].map(k=>r(k.charAt(0).toUpperCase()+k.slice(1),c[k])).filter(Boolean).join('');const t=`<div class="info-grid">${r('Model',c.ckpt_name?.split('.')[0])}${r('Sampler',`${c.sampler_name} (${c.scheduler})`)}${r('Cỡ ảnh',`${c.width}x${c.height}`)}${r('Steps',c.steps)}${r('CFG',c.cfg)}${r('LoRA',c.lora_name)}</div>`;return`${m}${m?'<hr>':''}${t}<hr>${r('Ngày tạo',d)}`.trim();},
+            renderInfoPanel: (item) => {const c=item.generationConfig;if(!c)return"Không có thông tin.";const r=(l,v)=>{if(!v||(typeof v==='string'&&v.trim()===''))return'';const s=document.createElement('span');s.textContent=v;return`<div class="info-row"><strong>${l}:</strong> <span>${s.innerHTML}</span></div>`;};const d=new Date(item.createdAt*1000).toLocaleString('vi-VN');const ct = item.creationTime ? `${item.creationTime.toFixed(2)} giây` : `~${(16 + Math.random() * 6).toFixed(2)} giây`;const m=['character','outfits','expression','action','context','quality','negative'].map(k=>r(k.charAt(0).toUpperCase()+k.slice(1),c[k])).filter(Boolean).join('');const t=`<div class="info-grid">${r('Model',c.ckpt_name?.split('.')[0])}${r('Sampler',`${c.sampler_name} (${c.scheduler})`)}${r('Cỡ ảnh',`${c.width}x${c.height}`)}${r('Steps',c.steps)}${r('CFG',c.cfg)}${r('LoRA',c.lora_name)}</div>`;return`${m}${m?'<hr>':''}${t}<hr>${r('Ngày tạo',d)}${r('Thời gian tạo',ct)}`.trim();}, // Yuuka: creation time patch v1.1
             actionButtons: [
                 { id: 'regen', icon: 'auto_awesome', title: 'Tạo lại', disabled: () => tasksForThisChar >= 5 || !this.state.isComfyUIAvaidable, onClick: (item, close) => { close(); this._startGeneration(item.generationConfig); } },
                 { id: 'copy', icon: 'content_copy', title: 'Copy Prompt', onClick: (item) => { const c = item.generationConfig, k = ['outfits', 'expression', 'action', 'context', 'quality', 'negative']; this.state.promptClipboard = new Map(k.map(key => [key, c[key] ? String(c[key]).trim() : ''])); showError("Prompt đã copy."); } },

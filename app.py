@@ -102,13 +102,23 @@ def get_thumbnail_image(md5_hash):
         return Response(image_data, mimetype=mimetype)
     abort(404)
 
-@app.route('/user_image/<filename>')
-def get_user_image(filename):
-    """Phục vụ ảnh do người dùng tạo ra, tự động giải mã."""
-    image_data, mimetype = plugin_manager.core_api.get_user_image_data(filename)
+# Yuuka: new image paths v1.0 - Tách route để phục vụ ảnh từ các thư mục con
+@app.route('/user_image/imgs/<filename>')
+def get_user_main_image(filename):
+    """Phục vụ ảnh gốc do người dùng tạo ra, tự động giải mã."""
+    image_data, mimetype = plugin_manager.core_api.get_user_image_data('imgs', filename)
     if image_data:
         return Response(image_data, mimetype=mimetype)
     abort(404)
+
+@app.route('/user_image/pv_imgs/<filename>')
+def get_user_preview_image(filename):
+    """Phục vụ ảnh preview do người dùng tạo ra, tự động giải mã."""
+    image_data, mimetype = plugin_manager.core_api.get_user_image_data('pv_imgs', filename)
+    if image_data:
+        return Response(image_data, mimetype=mimetype)
+    abort(404)
+
 
 @app.route('/api/tags')
 def get_tags():

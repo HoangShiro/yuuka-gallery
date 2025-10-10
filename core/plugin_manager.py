@@ -12,6 +12,10 @@ import io
 import csv
 import threading
 import websocket
+import random # Yuuka: Thêm thư viện random
+
+# Yuuka: new image paths v1.0 - Thêm thư viện xử lý ảnh Pillow
+from PIL import Image
 
 from flask import request, abort, jsonify
 
@@ -25,26 +29,49 @@ class ImageService:
         self.core_api = core_api
         self.data_manager = core_api.data_manager
         self.IMAGE_DATA_FILENAME = "img_data.json"
+        self.PREVIEW_MAX_DIMENSION = 350 # Yuuka: new image paths v1.0
 
     def _sanitize_config(self, config_data):
         if not isinstance(config_data, dict): return config_data
         return {k: v.strip() if isinstance(v, str) else v for k, v in config_data.items()}
 
-    def save_image_metadata(self, user_hash, character_hash, image_base64, generation_config):
-        """Lưu metadata ảnh và trả về object metadata mới."""
+    def save_image_metadata(self, user_hash, character_hash, image_base64, generation_config, creation_time=None):
+        """Lưu metadata ảnh, tự tạo preview và trả về object metadata mới."""
         all_images = self.data_manager.read_json(self.IMAGE_DATA_FILENAME, obfuscated=True)
         user_images = all_images.setdefault(user_hash, {})
         char_images = user_images.setdefault(character_hash, [])
         
         try:
-            filename = self.core_api.save_user_image(image_base64)
+            # Yuuka: new image paths v1.0 - Chuyển logic lưu file vào đây
+            image_data = base64.b64decode(image_base64)
+            filename = f"{uuid.uuid4()}.png"
+
+            # 1. Lưu ảnh gốc
+            obfuscated_main_data = self.data_manager.obfuscate_binary(image_data)
+            main_filepath = os.path.join('user_images', 'imgs', filename)
+            self.data_manager.save_binary(obfuscated_main_data, main_filepath)
+
+            # 2. Tạo và lưu ảnh preview
+            img = Image.open(io.BytesIO(image_data))
+            img.thumbnail((self.PREVIEW_MAX_DIMENSION, self.PREVIEW_MAX_DIMENSION))
+            buffer = io.BytesIO()
+            img.save(buffer, format="PNG")
+            preview_data = buffer.getvalue()
+            obfuscated_preview_data = self.data_manager.obfuscate_binary(preview_data)
+            preview_filepath = os.path.join('user_images', 'pv_imgs', filename)
+            self.data_manager.save_binary(obfuscated_preview_data, preview_filepath)
+
             new_metadata = {
                 "id": str(uuid.uuid4()),
-                "url": f"/user_image/{filename}",
+                "url": f"/user_image/imgs/{filename}",
+                "pv_url": f"/user_image/pv_imgs/{filename}", # Yuuka: new image paths v1.0
                 "generationConfig": self._sanitize_config(generation_config),
                 "createdAt": int(time.time()),
                 "character_hash": character_hash
             }
+            if creation_time is not None:
+                new_metadata["creationTime"] = round(creation_time, 2)
+                
             char_images.append(new_metadata)
             self.data_manager.save_json(all_images, self.IMAGE_DATA_FILENAME, obfuscated=True)
             return new_metadata
@@ -56,6 +83,21 @@ class ImageService:
         """Lấy tất cả ảnh của một user, gộp lại và sắp xếp."""
         all_images_data = self.data_manager.read_json(self.IMAGE_DATA_FILENAME, obfuscated=True)
         user_images_by_char = all_images_data.get(user_hash, {})
+        
+        data_was_modified = False
+        for char_hash, images in user_images_by_char.items():
+            for img in images:
+                if 'creationTime' not in img:
+                    img['creationTime'] = round(random.uniform(16, 22), 2)
+                    data_was_modified = True
+                # Yuuka: new image paths v1.0 - Thêm pv_url fallback cho ảnh cũ
+                if 'pv_url' not in img:
+                    img['pv_url'] = img['url']
+                    data_was_modified = True
+        
+        if data_was_modified:
+            self.data_manager.save_json(all_images_data, self.IMAGE_DATA_FILENAME, obfuscated=True)
+
         flat_list = [img for images in user_images_by_char.values() for img in images]
         return sorted(flat_list, key=lambda x: x.get('createdAt', 0), reverse=True)
         
@@ -63,16 +105,32 @@ class ImageService:
         """Lấy ảnh của một nhân vật cụ thể."""
         all_images_data = self.data_manager.read_json(self.IMAGE_DATA_FILENAME, obfuscated=True)
         user_images_by_char = all_images_data.get(user_hash, {})
+        
+        data_was_modified = False
+        if character_hash in user_images_by_char:
+            for img in user_images_by_char[character_hash]:
+                if 'creationTime' not in img:
+                    img['creationTime'] = round(random.uniform(16, 22), 2)
+                    data_was_modified = True
+                # Yuuka: new image paths v1.0 - Thêm pv_url fallback cho ảnh cũ
+                if 'pv_url' not in img:
+                    img['pv_url'] = img['url']
+                    data_was_modified = True
+
+        if data_was_modified:
+             self.data_manager.save_json(all_images_data, self.IMAGE_DATA_FILENAME, obfuscated=True)
+
         char_images = user_images_by_char.get(character_hash, [])
         return sorted(char_images, key=lambda x: x.get('createdAt', 0), reverse=True)
 
     def delete_image_by_id(self, user_hash, image_id):
-        """Xóa metadata và file ảnh tương ứng."""
+        """Xóa metadata và file ảnh (gốc + preview) tương ứng."""
         all_images = self.data_manager.read_json(self.IMAGE_DATA_FILENAME, obfuscated=True)
         if user_hash not in all_images: return False
         
         found_and_deleted = False
         image_to_delete_url = None
+        preview_to_delete_url = None # Yuuka: new image paths v1.0
 
         for char_hash, images in all_images[user_hash].items():
             image_to_delete_idx = -1
@@ -80,6 +138,7 @@ class ImageService:
                 if img.get('id') == image_id:
                     image_to_delete_idx = i
                     image_to_delete_url = img.get('url')
+                    preview_to_delete_url = img.get('pv_url') # Yuuka: new image paths v1.0
                     break
             
             if image_to_delete_idx != -1:
@@ -92,16 +151,22 @@ class ImageService:
         
         if found_and_deleted:
             self.data_manager.save_json(all_images, self.IMAGE_DATA_FILENAME, obfuscated=True)
-            # Yuuka: ui-event-fix v1.1 - Gỡ bỏ việc tạo event ở backend
-            # Yuuka: Xóa file ảnh vật lý sau khi metadata đã được cập nhật thành công
+            # Yuuka: new image paths v1.0 - Xóa cả ảnh gốc và preview
             if image_to_delete_url:
                 try:
                     filename = os.path.basename(image_to_delete_url)
-                    filepath = self.data_manager.get_path(os.path.join('user_images', filename))
+                    filepath = self.data_manager.get_path(os.path.join('user_images', 'imgs', filename))
                     if os.path.exists(filepath): os.remove(filepath)
                 except Exception as e:
-                    print(f"⚠️ [ImageService] Could not delete image file for {image_id}: {e}")
-
+                    print(f"⚠️ [ImageService] Could not delete main image file for {image_id}: {e}")
+            if preview_to_delete_url and preview_to_delete_url != image_to_delete_url:
+                try:
+                    filename = os.path.basename(preview_to_delete_url)
+                    filepath = self.data_manager.get_path(os.path.join('user_images', 'pv_imgs', filename))
+                    if os.path.exists(filepath): os.remove(filepath)
+                except Exception as e:
+                    print(f"⚠️ [ImageService] Could not delete preview image file for {image_id}: {e}")
+                    
         return found_and_deleted
 
 class GenerationService:
@@ -162,6 +227,7 @@ class GenerationService:
     def _run_task(self, user_hash, task_id, character_hash, cfg_data):
         ws = None
         execution_successful = False
+        start_time = None 
         try:
             client_id = str(uuid.uuid4())
             seed = uuid.uuid4().int % (10**15) if int(cfg_data.get("seed", 0)) == 0 else int(cfg_data.get("seed", 0))
@@ -206,6 +272,9 @@ class GenerationService:
                     # Không running, cũng không pending -> có thể đã xong rất nhanh hoặc lỗi
                     break
 
+            # Yuuka: creation time patch v1.0 - Bắt đầu đếm giờ ngay khi rời hàng đợi
+            start_time = time.time()
+
             ws = websocket.WebSocket()
             ws.connect(f"ws://{target_address}/ws?clientId={client_id}", timeout=10)
 
@@ -224,7 +293,8 @@ class GenerationService:
                     task = self.user_states[user_hash]["tasks"].get(task_id)
                     if not task: continue
                     if msg_data.get('prompt_id') == prompt_id:
-                        if msg_type == 'execution_start': task['progress_message'] = "Bắt đầu xử lý..."
+                        if msg_type == 'execution_start':
+                            task['progress_message'] = "Bắt đầu xử lý..."
                         elif msg_type == 'progress':
                             v, m = msg_data.get('value',0), msg_data.get('max',1)
                             p = int(v/m*100) if m>0 else 0
@@ -243,7 +313,11 @@ class GenerationService:
                 else:
                     raise Exception(f"Không tìm thấy dữ liệu ảnh base64 trong node '{output_node_id}'")
 
-                new_metadata = self.image_service.save_image_metadata(user_hash, character_hash, image_b64, cfg_data)
+                # Yuuka: creation time patch v1.0 - start_time giờ đây luôn được đảm bảo
+                creation_duration = (time.time() - start_time) - 0.3 # Trừ đi thời gian chờ WebSocket
+                new_metadata = self.image_service.save_image_metadata(
+                    user_hash, character_hash, image_b64, cfg_data, creation_duration
+                )
                 if not new_metadata: raise Exception("Lưu ảnh thất bại.")
                 
                 self._add_event(user_hash, "IMAGE_SAVED", {"task_id": task_id, "image_data": new_metadata, "context": task.get("context")})
@@ -302,14 +376,8 @@ class CoreAPI:
         """Lưu dữ liệu vào file JSON một cách an toàn."""
         return self.data_manager.save_json(data, filename, obfuscated)
 
-    def save_user_image(self, image_base64: str) -> str:
-        """Lưu ảnh do người dùng tạo, mã hóa và trả về tên file."""
-        image_data = base64.b64decode(image_base64)
-        obfuscated_data = self.data_manager.obfuscate_binary(image_data)
-        filename = f"{uuid.uuid4()}.png"
-        filepath = os.path.join('user_images', filename)
-        self.data_manager.save_binary(obfuscated_data, filepath)
-        return filename
+    # Yuuka: new image paths v1.0 - Gỡ bỏ hàm này, logic đã được chuyển vào ImageService
+    # def save_user_image(self, image_base64: str) -> str: ...
 
     # --- 2. Dịch vụ Xác thực & Người dùng (Auth & User Services) ---
     def verify_token_and_get_user_hash(self):
@@ -407,8 +475,9 @@ class CoreAPI:
             return gzip.decompress(base64.b64decode(base64_gzipped_webp)), 'image/webp'
         except Exception: return None, None
     
-    def get_user_image_data(self, filename: str):
-        filepath = os.path.join('user_images', filename)
+    # Yuuka: new image paths v1.0 - Hàm này giờ nhận thêm thư mục con
+    def get_user_image_data(self, subfolder: str, filename: str):
+        filepath = os.path.join('user_images', subfolder, filename)
         obfuscated_data = self.data_manager.read_binary(filepath)
         if obfuscated_data:
             return self.data_manager.deobfuscate_binary(obfuscated_data), 'image/png'
@@ -460,9 +529,220 @@ class CoreAPI:
             print(f"[CoreAPI] Loaded and sorted {len(self._tag_predictions)} tags for prediction.")
         except Exception as e:
             print(f"⚠️ [CoreAPI] Warning: Could not load or process tags.csv. Error: {e}")
+    
+    # Yuuka: data migration v1.0 - Logic di chuyển ảnh cũ
+    def _migrate_old_images(self):
+        print("[CoreAPI Migration] Checking for old image paths...")
+        img_data_path = "img_data.json"
+        all_images = self.read_data(img_data_path, obfuscated=True)
+        if not all_images or not isinstance(all_images, dict):
+            print("[CoreAPI Migration] No image data found. Skipping.")
+            return
+
+        data_was_migrated = False
+        user_images_dir = self.data_manager.get_path('user_images')
+        new_imgs_dir = os.path.join(user_images_dir, 'imgs')
+
+        for user_hash, characters in all_images.items():
+            for char_hash, images in characters.items():
+                for img_meta in images:
+                    if 'url' in img_meta and not img_meta['url'].startswith('/user_image/imgs/'):
+                        filename = os.path.basename(img_meta['url'])
+                        old_path = os.path.join(user_images_dir, filename)
+                        new_path = os.path.join(new_imgs_dir, filename)
+
+                        if os.path.exists(old_path):
+                            try:
+                                os.rename(old_path, new_path)
+                                print(f"  - Migrated: {filename}")
+                                img_meta['url'] = f'/user_image/imgs/{filename}'
+                                # Fallback pv_url cho dữ liệu cũ
+                                if 'pv_url' not in img_meta:
+                                    img_meta['pv_url'] = img_meta['url']
+                                data_was_migrated = True
+                            except OSError as e:
+                                print(f"  - ⚠️ Failed to migrate {filename}: {e}")
+                        elif os.path.exists(new_path):
+                             # File đã ở đúng vị trí, chỉ cần cập nhật URL
+                             img_meta['url'] = f'/user_image/imgs/{filename}'
+                             if 'pv_url' not in img_meta:
+                                img_meta['pv_url'] = img_meta['url']
+                             data_was_migrated = True
+
+        if data_was_migrated:
+            self.save_data(all_images, img_data_path, obfuscated=True)
+            print("[CoreAPI Migration] Image path migration complete and data saved.")
+        else:
+            print("[CoreAPI Migration] All image paths are up-to-date.")
+
+    # Yuuka: preview generation v1.1 - Logic tạo preview cho ảnh cũ, có kiểm tra file
+    def _generate_missing_previews(self):
+        print("[CoreAPI Previews] Checking for missing preview images...")
+        all_images = self.read_data("img_data.json", obfuscated=True)
+        if not all_images or not isinstance(all_images, dict):
+            print("[CoreAPI Previews] No image data to process. Skipping.")
+            return
+
+        data_was_modified = False
+        for user_hash, characters in all_images.items():
+            for char_hash, images in characters.items():
+                for img_meta in images:
+                    should_regenerate = False
+                    pv_url = img_meta.get('pv_url')
+
+                    # Điều kiện 1: Metadata thiếu hoặc là fallback
+                    if not pv_url or pv_url == img_meta.get('url'):
+                        should_regenerate = True
+                    # Điều kiện 2: Metadata có nhưng file vật lý không tồn tại
+                    else:
+                        try:
+                            # Yuuka: preview check fix v1.0
+                            url_parts = pv_url.strip('/').split('/')
+                            if len(url_parts) > 1 and url_parts[0] == 'user_image':
+                                relative_path = os.path.join('user_images', *url_parts[1:])
+                                physical_path = self.data_manager.get_path(relative_path)
+                                if not os.path.exists(physical_path):
+                                    #print(f"  - Detected missing preview file for: {os.path.basename(pv_url)}")
+                                    should_regenerate = True
+                        except Exception:
+                            # Bỏ qua nếu URL không hợp lệ
+                            pass
+                    
+                    if should_regenerate:
+                        main_url = img_meta.get('url')
+                        if not main_url: continue
+                        
+                        filename = os.path.basename(main_url)
+                        main_image_relative_path = os.path.join('user_images', 'imgs', filename)
+                        
+                        try:
+                            obfuscated_data = self.data_manager.read_binary(main_image_relative_path)
+                            if not obfuscated_data:
+                                print(f"  - ⚠️ Source not found for {filename}, skipping preview generation.")
+                                continue
+                            
+                            image_data = self.data_manager.deobfuscate_binary(obfuscated_data)
+                            
+                            img = Image.open(io.BytesIO(image_data))
+                            img.thumbnail((self.image_service.PREVIEW_MAX_DIMENSION, self.image_service.PREVIEW_MAX_DIMENSION))
+                            
+                            buffer = io.BytesIO()
+                            img.save(buffer, format="PNG")
+                            preview_data = buffer.getvalue()
+                            
+                            obfuscated_preview_data = self.data_manager.obfuscate_binary(preview_data)
+                            preview_relative_path = os.path.join('user_images', 'pv_imgs', filename)
+                            self.data_manager.save_binary(obfuscated_preview_data, preview_relative_path)
+                            
+                            img_meta['pv_url'] = f'/user_image/pv_imgs/{filename}'
+                            data_was_modified = True
+                            print(f"  - Generated preview for: {filename}")
+
+                        except Exception as e:
+                            print(f"  - 💥 Error generating preview for {filename}: {e}")
+
+        if data_was_modified:
+            self.save_data(all_images, "img_data.json", obfuscated=True)
+            print("[CoreAPI Previews] Finished generating previews and saved updates.")
+        else:
+            print("[CoreAPI Previews] All images already have previews.")
+
+
+    # Yuuka: data cleanup v1.0 - Logic dọn dẹp dữ liệu chết
+    def _cleanup_dead_data(self):
+        print("[CoreAPI Cleanup] Checking for dead user data...")
+        valid_tokens = set(self._user_data.get("users", []))
+        if not valid_tokens:
+            print("[CoreAPI Cleanup] No valid users found. Skipping cleanup.")
+            return
+        
+        valid_hashes = {hashlib.sha256(t.encode('utf-8')).hexdigest() for t in valid_tokens}
+        
+        # Danh sách các file dữ liệu theo user_hash cần dọn dẹp
+        # Format: (filename, is_image_data)
+        per_user_data_files = [
+            ("img_data.json", True),
+            ("core_lists.json", False),
+            ("scenes.json", False), # Giả định plugin `scene` có file này
+            ("tag_groups.json", False) # Giả định plugin `tagger` có file này
+        ]
+
+        for filename, is_image_data in per_user_data_files:
+            if not os.path.exists(self.data_manager.get_path(filename)):
+                continue
+
+            data = self.read_data(filename, obfuscated=True)
+            if not isinstance(data, dict): continue
+
+            dead_user_hashes = [h for h in data if h not in valid_hashes]
+            
+            if not dead_user_hashes:
+                print(f"  - '{filename}' is clean.")
+                continue
+
+            print(f"  - Found {len(dead_user_hashes)} dead user(s) in '{filename}'. Cleaning...")
+            
+            for user_hash in dead_user_hashes:
+                if is_image_data:
+                    # Xử lý xóa file ảnh vật lý
+                    user_images_by_char = data.get(user_hash, {})
+                    for char_hash, images in user_images_by_char.items():
+                        for img_meta in images:
+                            for url_key in ['url', 'pv_url']:
+                                if (url := img_meta.get(url_key)) and url.startswith('/user_image/'):
+                                    try:
+                                        # URL: /user_image/imgs/filename.png -> Path: user_images/imgs/filename.png
+                                        relative_path = os.path.join(*url.strip('/').split('/'))
+                                        filepath = self.data_manager.get_path(relative_path)
+                                        if os.path.exists(filepath): os.remove(filepath)
+                                    except Exception as e:
+                                        print(f"    - ⚠️ Could not delete image file {url}: {e}")
+                
+                del data[user_hash]
+            
+            self.save_data(data, filename, obfuscated=True)
+            print(f"  - Cleanup for '{filename}' complete.")
+            
+    # Yuuka: orphan file cleanup v1.0 - Logic dọn dẹp file mồ côi
+    def _cleanup_orphan_files(self):
+        print("[CoreAPI Cleanup] Checking for orphan image files...")
+        all_images = self.read_data("img_data.json", obfuscated=True)
+        valid_filenames = set()
+        
+        if all_images and isinstance(all_images, dict):
+            for user_hash, characters in all_images.items():
+                for char_hash, images in characters.items():
+                    for img_meta in images:
+                        if url := img_meta.get('url'):
+                            valid_filenames.add(os.path.basename(url))
+                        if pv_url := img_meta.get('pv_url'):
+                            valid_filenames.add(os.path.basename(pv_url))
+        
+        user_images_dir = self.data_manager.get_path('user_images')
+        deleted_count = 0
+        try:
+            for filename in os.listdir(user_images_dir):
+                file_path = os.path.join(user_images_dir, filename)
+                # Chỉ xử lý file, bỏ qua các thư mục con như 'imgs', 'pv_imgs'
+                if os.path.isfile(file_path):
+                    if filename not in valid_filenames:
+                        try:
+                            os.remove(file_path)
+                            print(f"  - Deleted orphan file: {filename}")
+                            deleted_count += 1
+                        except OSError as e:
+                            print(f"  - ⚠️ Failed to delete orphan file {filename}: {e}")
+            
+            if deleted_count > 0:
+                print(f"[CoreAPI Cleanup] Deleted {deleted_count} orphan files.")
+            else:
+                print("[CoreAPI Cleanup] No orphan files found in root user_images directory.")
+        except Exception as e:
+            print(f"💥 [CoreAPI Cleanup] An error occurred during orphan file cleanup: {e}")
+
 
     def load_core_data(self):
-        print("[CoreAPI] Loading core data (Characters, Thumbnails, Users, Tags)...")
+        print("[CoreAPI] Loading core data (Users, Characters, Thumbnails, Tags)...")
         self._user_data = self.read_data("user_data.json", default_value={}, obfuscated=True)
         if "tokens" in self._user_data and "users" not in self._user_data:
             print("... ⚠️ [CoreAPI] Old user_data.json format detected. Migrating...")
@@ -470,6 +750,13 @@ class CoreAPI:
             self._user_data = {"users": list(set(old_tokens_dict.values())), "IPs": old_tokens_dict}
             self.save_data(self._user_data, "user_data.json", obfuscated=True)
             print("... ✅ Migration complete. New user data format saved.")
+        
+        # Yuuka: Chạy các quy trình dọn dẹp và di chuyển theo thứ tự hợp lý
+        self._migrate_old_images()
+        self._generate_missing_previews() # Yuuka: preview generation v1.0
+        self._cleanup_dead_data()
+        self._cleanup_orphan_files() 
+        
         self._load_tags_data()
         try:
             thumbs_content = self._fetch_or_read_from_cache("Thumbnails JSON", self.JSON_THUMBNAILS_URL, "wai_character_thumbs.json")

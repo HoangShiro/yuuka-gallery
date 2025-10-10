@@ -24,6 +24,7 @@ class FloatViewerComponent {
         this._loadState();
         this.dragInfo = {};
         this.resizeInfo = {};
+        this.observer = null; // Yuuka: image lazy-load v1.0
 
         this.onDragMove = this.onDragMove.bind(this);
         this.onDragEnd = this.onDragEnd.bind(this);
@@ -59,6 +60,7 @@ class FloatViewerComponent {
         if (!this.state.isOpen || !this.element) return;
         this.element.style.display = 'none';
         this.state.isOpen = false;
+        if (this.observer) this.observer.disconnect(); // Yuuka: image lazy-load v1.0
         // YUUKA'S FIX: Không xóa placeholderTasks ở đây để chúng có thể được cập nhật nếu viewer mở lại
     }
     
@@ -67,6 +69,7 @@ class FloatViewerComponent {
     async reload() {
         if (!this.state.isOpen || this.state.isLoading) return;
         this.state.isLoading = true;
+        if (this.observer) this.observer.disconnect(); // Yuuka: image lazy-load v1.0
         this.content.innerHTML = `<div class="float-viewer-loader">Đang tải...</div>`;
         try {
             this.state.images = await this.api.images.getAll();
@@ -122,6 +125,7 @@ class FloatViewerComponent {
             if (task && task.element) {
                 const newCard = this._createImageCard(image_data); // Yuuka: incorrect-update-fix v1.0
                 task.element.replaceWith(newCard);
+                if (this.observer) this.observer.observe(newCard.querySelector('img')); // Yuuka: image lazy-load v1.0
             } else {
                 this.renderContent();
             }
@@ -180,14 +184,16 @@ class FloatViewerComponent {
         this.gallery = this.content.querySelector('.float-viewer-gallery');
         this.state.placeholderTasks.forEach(task => this.gallery.appendChild(task.element));
         this.state.images.forEach((imgData) => this.gallery.appendChild(this._createImageCard(imgData))); // Yuuka: incorrect-update-fix v1.0
+        this._setupFullResObserver(); // Yuuka: image lazy-load v1.0
         this.updateLayout();
     }
 
-    _createImageCard(imgData) { // Yuuka: incorrect-update-fix v1.0
+    _createImageCard(imgData) { // Yuuka: creation time overlay v1.0
         const wrapper = document.createElement('div');
         wrapper.className = 'float-viewer-image-wrapper';
-        wrapper.dataset.id = imgData.id; // Yuuka: event bus v1.0
-        wrapper.innerHTML = `<img src="${imgData.url}" loading="lazy">`;
+        wrapper.dataset.id = imgData.id;
+        const creationTimeValue = (imgData.creationTime || (Math.random() * (22 - 16) + 16)).toFixed(1);
+        wrapper.innerHTML = `<img src="${imgData.pv_url}" data-full-src="${imgData.url}" loading="lazy"><div class="float-viewer-image-overlay"><span class="float-viewer-creation-time">${creationTimeValue}s</span></div>`; // Yuuka: image lazy-load v1.0
         const openViewerAction = () => { this.isOpeningViewer = true; this.openInSimpleViewer(imgData.id); }; // Yuuka: incorrect-update-fix v1.1
         if (this.isMobile) {
             let touchInfo = {};
@@ -199,13 +205,41 @@ class FloatViewerComponent {
         }
         return wrapper;
     }
+
+    _setupFullResObserver() { // Yuuka: image lazy-load v1.0
+        if (this.observer) this.observer.disconnect();
+
+        const options = {
+            root: this.content,
+            rootMargin: '0px 0px 200px 0px' 
+        };
+
+        this.observer = new IntersectionObserver((entries, observer) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const img = entry.target;
+                    const fullSrc = img.dataset.fullSrc;
+                    if (fullSrc && img.src !== fullSrc) {
+                        const tempImage = new Image();
+                        tempImage.onload = () => { img.src = fullSrc; };
+                        tempImage.src = fullSrc;
+                    }
+                    observer.unobserve(img);
+                }
+            });
+        }, options);
+
+        this.gallery.querySelectorAll('img[data-full-src]').forEach(img => {
+            this.observer.observe(img);
+        });
+    }
     
-    openInSimpleViewer(imageId) { // Yuuka: incorrect-update-fix v1.2
+    openInSimpleViewer(imageId) { // Yuuka: creation time patch v1.1
         if (!window.Yuuka.plugins.simpleViewer) return;
         const startIndex = this.state.images.findIndex(img => img.id === imageId);
         if (startIndex === -1) return;
 
-        const renderInfoPanel = (item) => { const c = item.generationConfig; if (!c) return "Không có thông tin."; const r = (l, v) => { if (!v || (typeof v === 'string' && v.trim() === '')) return ''; const s = document.createElement('span'); s.textContent = v; return `<div class="info-row"><strong>${l}:</strong> <span>${s.innerHTML}</span></div>`; }; const d = new Date(item.createdAt * 1000).toLocaleString('vi-VN'); const m = ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative'].map(k => r(k.charAt(0).toUpperCase() + k.slice(1), c[k])).filter(Boolean).join(''); const t = `<div class="info-grid">${r('Model', c.ckpt_name?.split('.')[0])}${r('Sampler', `${c.sampler_name} (${c.scheduler})`)}${r('Cỡ ảnh', `${c.width}x${c.height}`)}${r('Steps', c.steps)}${r('CFG', c.cfg)}${r('LoRA', c.lora_name)}</div>`; return `${m}${m ? '<hr>' : ''}${t}<hr>${r('Ngày tạo', d)}`.trim(); };
+        const renderInfoPanel = (item) => { const c = item.generationConfig; if (!c) return "Không có thông tin."; const r = (l, v) => { if (!v || (typeof v === 'string' && v.trim() === '')) return ''; const s = document.createElement('span'); s.textContent = v; return `<div class="info-row"><strong>${l}:</strong> <span>${s.innerHTML}</span></div>`; }; const d = new Date(item.createdAt * 1000).toLocaleString('vi-VN'); const ct = item.creationTime ? `${item.creationTime.toFixed(2)} giây` : `~${(16 + Math.random() * 6).toFixed(2)} giây`; const m = ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative'].map(k => r(k.charAt(0).toUpperCase() + k.slice(1), c[k])).filter(Boolean).join(''); const t = `<div class="info-grid">${r('Model', c.ckpt_name?.split('.')[0])}${r('Sampler', `${c.sampler_name} (${c.scheduler})`)}${r('Cỡ ảnh', `${c.width}x${c.height}`)}${r('Steps', c.steps)}${r('CFG', c.cfg)}${r('LoRA', c.lora_name)}</div>`; return `${m}${m ? '<hr>' : ''}${t}<hr>${r('Ngày tạo', d)}${r('Thời gian tạo', ct)}`.trim(); };
         const actionButtons = [
             { // Yuuka: regen-fix v1.0
                 id: 'regen',

@@ -17,7 +17,10 @@ class DataManager:
         self.B64_PREFIX = "b64:"
         self.OBFUSCATION_KEY = b'yuuka_is_the_best_sensei_at_millennium_seminar'
         os.makedirs(self.cache_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.cache_dir, 'user_images'), exist_ok=True)
+        # Yuuka: new image paths v1.0 - Tạo các thư mục con cho ảnh gốc và preview
+        os.makedirs(os.path.join(self.cache_dir, 'user_images', 'imgs'), exist_ok=True)
+        os.makedirs(os.path.join(self.cache_dir, 'user_images', 'pv_imgs'), exist_ok=True)
+
 
     def get_path(self, filename: str) -> str:
         """Lấy đường dẫn đầy đủ tới file trong thư mục cache."""
@@ -43,16 +46,22 @@ class DataManager:
                 return s
         return s
 
-    def _process_data_recursive(self, data, process_func):
+    def _process_data_recursive(self, data, process_func, process_keys=True):
+        """Hàm đệ quy để xử lý dữ liệu, có tùy chọn bỏ qua xử lý key."""
         if isinstance(data, dict):
-            return {k: self._process_data_recursive(v, process_func) for k, v in data.items()}
+            processed_dict = {}
+            for k, v in data.items():
+                # Yuuka: data migration fix v1.1 - Chỉ xử lý key nếu được yêu cầu
+                processed_key = process_func(k) if process_keys else k
+                processed_dict[processed_key] = self._process_data_recursive(v, process_func, process_keys)
+            return processed_dict
         elif isinstance(data, list):
-            return [self._process_data_recursive(item, process_func) for item in data]
+            return [self._process_data_recursive(item, process_func, process_keys) for item in data]
         elif isinstance(data, str):
-            # Yuuka: Không mã hoá các URL, vì chúng không phải là dữ liệu nhạy cảm
-            # và cần được truy cập trực tiếp.
-            if not data.startswith('/user_image/'):
-                 return process_func(data)
+            # Yuuka: Bỏ qua các URL ảnh khỏi quá trình xử lý
+            if data.startswith('/user_image/'):
+                return data
+            return process_func(data)
         return data
 
     def read_json(self, filename, default_value={}, obfuscated=False):
@@ -64,9 +73,12 @@ class DataManager:
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    if obfuscated:
-                        return self._process_data_recursive(data, self._decode_string_b64)
-                    return data
+                if obfuscated:
+                    # Yuuka: data migration fix v1.1 - img_data.json có key là hash (không mã hóa)
+                    # Các file khác có thể có key mã hóa.
+                    process_keys = filename != "img_data.json"
+                    return self._process_data_recursive(data, self._decode_string_b64, process_keys=process_keys)
+                return data
             except (json.JSONDecodeError, IOError):
                 print(f"⚠️ [DataManager] Could not read or decode {path}. Returning default.")
                 return default_value
@@ -78,11 +90,12 @@ class DataManager:
             try:
                 data_to_save = data
                 if obfuscated:
-                    data_to_save = self._process_data_recursive(data, self._encode_string_b64)
+                    # Yuuka: data migration fix v1.1 - Xử lý tương tự khi lưu
+                    process_keys = filename != "img_data.json"
+                    data_to_save = self._process_data_recursive(data, self._encode_string_b64, process_keys=process_keys)
                 
                 with open(path, 'w', encoding='utf-8') as f:
                     json.dump(data_to_save, f, indent=2)
-                # print(f"[DataManager] Saved data to: {path}")
                 return True
             except IOError as e:
                 print(f"💥 [DataManager] CRITICAL ERROR: Could not write data to {path}. Error: {e}")
