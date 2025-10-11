@@ -75,6 +75,10 @@ class AlbumPlugin:
             }
             target_address = (server_address or final_config.get('server_address', '127.0.0.1:8888')).strip()
 
+            # Yuuka: comfyui fetch optimization v1.0
+            if request.args.get('no_choices', 'false').lower() == 'true':
+                return jsonify({"last_config": final_config})
+
             try:
                 all_choices = self.core_api.comfy_api_client.get_full_object_info(target_address)
                 all_choices['sizes'] = [{"name": "IL 832x1216 - Chân dung (Khuyến nghị)", "value": "832x1216"}, {"name": "IL 1216x832 - Phong cảnh", "value": "1216x832"}, {"name": "IL 1344x768", "value": "1344x768"}, {"name": "IL 1024x1024 - Vuông", "value": "1024x1024"}]

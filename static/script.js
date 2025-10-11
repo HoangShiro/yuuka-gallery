@@ -100,7 +100,7 @@ window.Yuuka = {
             document.body.appendChild(modal);
             modal.innerHTML = `<div class="modal-dialog"><h3>Đang tải...</h3></div>`;
             const close = () => modal.remove();
-            modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+            // Yuuka: comfyui fetch optimization v1.0 - Xóa event listener đóng modal khi click ra ngoài
 
             try {
                 const { last_config, global_choices } = await options.fetchInfo();
@@ -123,7 +123,31 @@ window.Yuuka = {
                 dialog.querySelector('.btn-cancel').addEventListener('click', close);
                 dialog.querySelector('.btn-copy').addEventListener('click',()=>{const p=['outfits','expression','action','context','quality','negative'];options.promptClipboard=new Map(p.map(k=>[k,form.elements[k]?form.elements[k].value.trim():'']));showError("Prompt đã sao chép.");});
                 dialog.querySelector('.btn-paste').addEventListener('click',()=>{if(!options.promptClipboard){showError("Chưa có prompt.");return;}options.promptClipboard.forEach((v,k)=>{if(form.elements[k])form.elements[k].value=v;});dialog.querySelectorAll('textarea').forEach(t=>t.dispatchEvent(new Event('input',{bubbles:true})));showError("Đã dán prompt.");});
-                dialog.querySelector('.connect-btn').addEventListener('click',async()=>{const a=dialog.querySelector('[name="server_address"]').value.trim();const b=dialog.querySelector('.connect-btn');const o=b.textContent;b.textContent='...';b.disabled=true;try{await api.server.checkComfyUIStatus(a);showError("Kết nối thành công!");}catch(e){showError("Kết nối thất bại.");}finally{b.textContent='Connect';b.disabled=false;}});
+                
+                // Yuuka: comfyui fetch optimization v1.0 - Nâng cấp logic nút Connect
+                const connectBtn = dialog.querySelector('.connect-btn');
+                connectBtn.addEventListener('click', async (e) => {
+                    const btn = e.currentTarget;
+                    const address = dialog.querySelector('[name="server_address"]').value.trim();
+
+                    if (options.onConnect) {
+                        await options.onConnect(address, btn, close);
+                    } else {
+                        // Logic mặc định nếu plugin không cung cấp onConnect
+                        const originalText = 'Connect';
+                        btn.textContent = '...';
+                        btn.disabled = true;
+                        try {
+                            await api.server.checkComfyUIStatus(address);
+                            showError("Kết nối thành công!");
+                        } catch (err) {
+                            showError("Kết nối thất bại.");
+                        } finally {
+                            btn.textContent = originalText;
+                            btn.disabled = false;
+                        }
+                    }
+                });
                 
                 form.addEventListener('submit', async(e) => {
                     e.preventDefault();
@@ -140,8 +164,15 @@ window.Yuuka = {
                 });
 
             } catch (e) {
-                 modal.querySelector('.modal-dialog').innerHTML = `<h3>Lỗi</h3><p>${e.message}</p><div class="modal-actions"><button class="btn-cancel">Đóng</button></div>`;
-                 modal.querySelector('.btn-cancel').addEventListener('click', close);
+                 // Yuuka: ComfyUI connection error handling v1.0
+                 close(); // Đóng modal "Đang tải..."
+                 let friendlyMessage = "Lỗi: Không thể tải cấu hình.";
+                 if (e.message && (e.message.includes("10061") || e.message.toLowerCase().includes("connection refused"))) {
+                     friendlyMessage = "Lỗi: Không thể kết nối tới ComfyUI để lấy cấu hình.";
+                 } else if (e.message) {
+                     friendlyMessage = `Lỗi tải cấu hình: ${e.message}`;
+                 }
+                 showError(friendlyMessage);
             }
         },
 
@@ -257,6 +288,22 @@ async function checkGlobalGenerationStatus() {
         const status = await api.generation.getStatus();
         // YUUKA'S FIX: Lấy keys từ `status.tasks` thay vì `status`
         const serverTaskIds = new Set(Object.keys(status.tasks || {}));
+
+        // Yuuka: ComfyUI connection error handling v1.0
+        Object.values(status.tasks || {}).forEach(task => {
+            if (!task.is_running && task.error_message && state.generationStatus.knownTasks.has(task.task_id)) {
+                let friendlyMessage = "Tạo ảnh thất bại. Lỗi không xác định.";
+                const rawError = task.error_message.startsWith('Lỗi: ') ? task.error_message.substring(5) : task.error_message;
+
+                if (rawError.includes("10061") || rawError.toLowerCase().includes("connection refused")) {
+                    friendlyMessage = "Lỗi tạo ảnh: Không thể kết nối tới ComfyUI.";
+                } else {
+                    friendlyMessage = `Tạo ảnh thất bại: ${rawError.substring(0, 100)}${rawError.length > 100 ? '...' : ''}`;
+                }
+                showError(friendlyMessage);
+                // The task will be removed from knownTasks by the logic below, preventing repeated errors.
+            }
+        });
 
         // Event cho các task mới bắt đầu
         serverTaskIds.forEach(taskId => {

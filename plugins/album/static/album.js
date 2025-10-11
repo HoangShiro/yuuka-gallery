@@ -10,6 +10,7 @@ class AlbumComponent {
             allImageData: [],
             promptClipboard: null,
             isComfyUIAvaidable: false,
+            cachedComfyGlobalChoices: null, // Yuuka: comfyui fetch optimization v1.0
         };
         this.viewer = window.Yuuka.plugins.simpleViewer;
         
@@ -164,10 +165,10 @@ class AlbumComponent {
         const navibar = window.Yuuka.services.navibar;
         if (!navibar) return;
         let mainNavButtons = [], toolButtons = [];
-        const corePlugin = this.activePlugins.find(p => p.id === 'core');
+        const characterListPlugin = this.activePlugins.find(p => p.id === 'character-list');
         const scenePlugin = this.activePlugins.find(p => p.id === 'scene');
 
-        if (corePlugin?.ui?.tab) mainNavButtons.push({ id: 'browse-tab', group: 'main', icon: corePlugin.ui.tab.icon, title: corePlugin.ui.tab.label, onClick: () => Yuuka.ui.switchTab(corePlugin.ui.tab.id), isActive: () => false });
+        if (characterListPlugin?.ui?.tab) mainNavButtons.push({ id: 'browse-tab', group: 'main', icon: characterListPlugin.ui.tab.icon, title: characterListPlugin.ui.tab.label, onClick: () => Yuuka.ui.switchTab(characterListPlugin.ui.tab.id), isActive: () => false });
         if (scenePlugin?.ui?.tab) mainNavButtons.push({ id: 'scene-tab', group: 'main', icon: scenePlugin.ui.tab.icon, title: scenePlugin.ui.tab.label, onClick: () => Yuuka.ui.switchTab(scenePlugin.ui.tab.id) });
         
         if (this.state.viewMode === 'album') {
@@ -272,6 +273,7 @@ class AlbumComponent {
     
     async showCharacterSelectionGrid() {
         this.state.selectedCharacter = null;
+        this.state.cachedComfyGlobalChoices = null; // Yuuka: comfyui fetch optimization v1.0
         this.updateUI('loading', 'Đang tải danh sách album...');
         try {
             const hashesWithAlbums = await this.api.album.get('/characters_with_albums');
@@ -367,13 +369,43 @@ class AlbumComponent {
         if (!this.state.isComfyUIAvaidable) { showError("ComfyUI chưa kết nối."); return; }
         await Yuuka.ui.openSettingsModal({
             title: `Cấu hình cho ${this.state.selectedCharacter.name}`,
+            // Yuuka: comfyui fetch optimization v1.0
             fetchInfo: async () => {
-                const info = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}`);
-                if (info.last_config && this.state.selectedCharacter) info.last_config.character = this.state.selectedCharacter.name;
-                return info;
+                let finalInfo = {};
+                if (this.state.cachedComfyGlobalChoices) {
+                    const configData = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}&no_choices=true`);
+                    finalInfo = {
+                        last_config: configData.last_config,
+                        global_choices: this.state.cachedComfyGlobalChoices
+                    };
+                } else {
+                    const fullData = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}`);
+                    if (fullData.global_choices) {
+                        this.state.cachedComfyGlobalChoices = fullData.global_choices;
+                    }
+                    finalInfo = fullData;
+                }
+                if (finalInfo.last_config && this.state.selectedCharacter) {
+                    finalInfo.last_config.character = this.state.selectedCharacter.name;
+                }
+                return finalInfo;
             },
             onSave: (updatedConfig) => this.api.album.post(`/${this.state.selectedCharacter.hash}/config`, updatedConfig),
-            promptClipboard: this.state.promptClipboard
+            promptClipboard: this.state.promptClipboard,
+            // Yuuka: comfyui fetch optimization v1.0
+            onConnect: async (address, btn, close) => {
+                btn.textContent = '...';
+                btn.disabled = true;
+                try {
+                    await this.api.server.checkComfyUIStatus(address);
+                    this.state.cachedComfyGlobalChoices = null; // Xóa cache
+                    close(); // Đóng modal hiện tại
+                    await this.openSettings(); // Mở lại để tải lại dữ liệu mới
+                } catch (e) {
+                    showError(`Lỗi kết nối hoặc làm mới: ${e.message}`);
+                    // Nút sẽ tự reset khi người dùng mở lại modal
+                }
+            }
         });
     }
 }

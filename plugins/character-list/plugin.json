@@ -1,0 +1,25 @@
+{
+    "id": "character-list",
+    "name": "Character List",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Cung cấp tab 'Duyệt' và thư viện nhân vật cốt lõi.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:CharacterListPlugin",
+        "frontend_component": "CharacterListComponent"
+    },
+    "assets": {
+        "js": ["character_list.js"],
+        "css": ["character_list.css"]
+    },
+    "ui": {
+        "tab": {
+            "id": "browse",
+            "label": "Browse",
+            "icon": "grid_view",
+            "show_search": true
+        },
+        "order": 0
+    }
+}

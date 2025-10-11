@@ -1,14 +1,14 @@
-#--- MODIFIED FILE: plugins/core/backend.py ---
+#--- MODIFIED FILE: plugins/character-list/backend.py ---
 from flask import Blueprint, jsonify, request
 
-class CorePlugin:
+class CharacterListPlugin:
     """
-    Backend cho plugin Core.
+    Backend cho plugin Character List.
     Xử lý việc lưu và tải danh sách Favourite/Blacklist của người dùng.
     """
     def __init__(self, core_api):
         self.core_api = core_api
-        self.blueprint = Blueprint('core', __name__)
+        self.blueprint = Blueprint('character-list', __name__)
         
         @self.blueprint.route('/lists', methods=['GET', 'POST'])
         def handle_user_lists():
@@ -59,10 +59,10 @@ class CorePlugin:
                  return jsonify({"error": str(e)}), 401
 
 
-        print("[Plugin:Core] Backend initialized with API routes.")
+        print("[Plugin:CharacterList] Backend initialized with API routes.")
 
     def get_blueprint(self):
         """
         Cung cấp blueprint và prefix cho PluginManager.
         """
-        return self.blueprint, "/api/plugin/core"
+        return self.blueprint, "/api/plugin/character-list"

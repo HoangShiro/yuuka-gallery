@@ -136,46 +136,73 @@ class ScenePlugin:
             except Exception as e:
                 abort(500, description=f"Failed to get info from ComfyUI: {e}")
 
-    def _find_next_stage(self, user_scenes, last_completed_stage_id): # Yuuka: live-editing fix v2.0
+    def _find_next_stage(self, all_scenes_latest, last_completed_stage_id): # Yuuka: Logic phục hồi v1.0
         """
         Tìm scene và stage hợp lệ tiếp theo để chạy, dựa trên dữ liệu scene mới nhất.
         Hàm này có khả năng chống lỗi khi người dùng chỉnh sửa scene trong lúc đang chạy.
         """
-        # Nếu chưa có stage nào hoàn thành, bắt đầu tìm từ đầu.
         found_last_completed = not last_completed_stage_id
 
-        for scene in user_scenes:
+        for scene in all_scenes_latest:
             if scene.get('bypassed'):
                 continue
 
             for stage in scene.get('stages', []):
                 if found_last_completed:
-                    # Đây là stage đầu tiên chúng ta gặp sau stage đã hoàn thành (hoặc từ đầu).
-                    # Nếu nó không bị bỏ qua, đây chính là mục tiêu.
                     if not stage.get('bypassed'):
                         return scene, stage
-                elif stage['id'] == last_completed_stage_id:
-                    # Đã tìm thấy stage vừa hoàn thành.
-                    # Đánh dấu để lần lặp tiếp theo sẽ chọn stage kế tiếp.
+                elif stage.get('id') == last_completed_stage_id:
                     found_last_completed = True
         
-        # Nếu duyệt hết mà không tìm thấy, nghĩa là đã hoàn thành.
         return None, None
 
+    def _get_first_stage_id_from_job(self, job): # Yuuka: Logic mới để lấy điểm bắt đầu v1.0
+        """Lấy ID của stage đầu tiên không bị bypass từ job."""
+        for scene in job.get('scenes', []):
+            if not scene.get('bypassed'):
+                for stage in scene.get('stages', []):
+                    if not stage.get('bypassed'):
+                        return stage.get('id')
+        return None
+
+    def _find_stage_before(self, all_scenes_latest, target_stage_id): # Yuuka: Logic mới để "mồi" con trỏ v1.0
+        """Tìm ID của stage ngay trước một stage mục tiêu trong dữ liệu mới nhất."""
+        previous_stage_id = None
+        for scene in all_scenes_latest:
+            for stage in scene.get('stages', []):
+                if stage.get('id') == target_stage_id:
+                    return previous_stage_id
+                previous_stage_id = stage.get('id')
+        return None
+
+    # Yuuka: hot-edit bug fix v2.0 - Viết lại hoàn toàn logic với cơ chế "mồi" và "con trỏ".
     def _run_scene_generation_task(self, job, user_hash):
         try:
             user_tag_groups_raw = self.core_api.data_manager.load_user_data(self.TAG_GROUPS_FILENAME, user_hash, [], obfuscated=True)
             all_groups_map = {g['id']: g for g in user_tag_groups_raw}
-            last_completed_scene_id, last_completed_stage_id = None, None
-            
+
+            # 1. Xác định điểm bắt đầu từ job
+            first_stage_to_run_id = self._get_first_stage_id_from_job(job)
+            if not first_stage_to_run_id:
+                print("[Plugin:Scene] No valid stages to run in the job.")
+                return 
+
+            # 2. "Mồi" con trỏ: Tìm stage ngay trước stage bắt đầu trong cấu trúc DỮ LIỆU HIỆN TẠI
+            all_scenes_initial = self.core_api.data_manager.load_user_data(self.SCENE_DATA_FILENAME, user_hash, default_value=[])
+            last_completed_stage_id = self._find_stage_before(all_scenes_initial, first_stage_to_run_id)
+
             while True:
                 with self.scene_run_lock:
                     if self.scene_run_state['cancel_requested']: raise InterruptedError("Scene run cancelled.")
                 
-                all_user_scenes = self.core_api.data_manager.load_user_data(self.SCENE_DATA_FILENAME, user_hash, default_value=[])
-                scene, stage = self._find_next_stage(all_user_scenes, last_completed_stage_id) # Yuuka: live-editing fix v2.1
-                if not scene or not stage: break
+                # 3. Luôn đọc dữ liệu mới nhất và tìm stage tiếp theo
+                all_scenes_latest = self.core_api.data_manager.load_user_data(self.SCENE_DATA_FILENAME, user_hash, default_value=[])
+                scene, stage = self._find_next_stage(all_scenes_latest, last_completed_stage_id)
                 
+                if not scene or not stage: 
+                    break # Hoàn thành công việc
+                
+                # 4. Xử lý và thực thi stage tìm được
                 scene_config, prompt_parts, char_name = scene.get('generationConfig', {}), {'outfits': [], 'expression': [], 'action': [], 'context': []}, None
                 for category, group_ids in stage.get('tags', {}).items():
                     if not group_ids: continue
@@ -187,13 +214,13 @@ class ScenePlugin:
                             if group := all_groups_map.get(group_id): prompt_parts[key].extend(group['tags'])
                 
                 if not char_name:
-                    last_completed_scene_id, last_completed_stage_id = scene['id'], stage['id']
+                    last_completed_stage_id = stage['id']
                     continue
                 
                 clean_name = str(char_name).replace(':', '').replace('  ', ' ').strip()
                 char_info = next((c for c in self.core_api.get_all_characters_list() if str(c['name']).replace(':', '').replace('  ', ' ').strip() == clean_name), None)
                 if not char_info:
-                    last_completed_scene_id, last_completed_stage_id = scene['id'], stage['id']
+                    last_completed_stage_id = stage['id']
                     continue
                 
                 char_hash, final_prompt = char_info['hash'], {k: ', '.join(v) for k, v in prompt_parts.items()}
@@ -229,7 +256,8 @@ class ScenePlugin:
                         
                         time.sleep(2) 
 
-                last_completed_scene_id, last_completed_stage_id = scene['id'], stage['id']
+                # 5. Cập nhật con trỏ
+                last_completed_stage_id = stage['id']
         
         except InterruptedError:
             print(f"✅ [Plugin:Scene] Scene run for user {user_hash} was cancelled.")
@@ -238,6 +266,7 @@ class ScenePlugin:
         finally:
             with self.scene_run_lock:
                 self.scene_run_state.update({"is_running": False, "cancel_requested": False})
+
 
     def get_blueprint(self):
         return self.blueprint, "/api/plugin/scene"

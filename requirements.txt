@@ -1,3 +1,4 @@
 requests
 flask
 websocket-client
+PIL

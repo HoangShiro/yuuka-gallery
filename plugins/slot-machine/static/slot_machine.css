@@ -1,0 +1,518 @@
+/* --- NEW FILE: plugins/slot-machine/static/slot_machine.css --- */
+/* Yuuka: Slot Machine Redesign v2.0 */
+
+:root {
+    --slot-card-width: 150px;
+    --slot-card-height: 200px; /* Bao gồm cả tên */
+    --slot-frame-width: 520px; /* Yuuka: 3x3 grid v1.0 - Tăng chiều rộng từ 170px lên để bao trọn 3 card */
+}
+
+/* 1. Backdrop & Layout chính */
+.slot-machine-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    animation: fadeIn 0.3s ease;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 2800;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    /* Yuuka: Jackpot fade-in/out v1.0 - Thêm thuộc tính để pseudo-element hoạt động đúng */
+    /* Yuuka: bug fix v1.0 - Xóa bỏ `position: relative` bị xung đột */
+    isolation: isolate;
+}
+
+/* Yuuka: Jackpot fade-in/out v1.0 - Pseudo-element chứa nền gradient động */
+.slot-machine-backdrop::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1; /* Nằm dưới nội dung của backdrop */
+    background: linear-gradient(270deg, rgba(0,0,0,0.6), rgba(88,12,77,0.6), rgba(27,31,105,0.6), rgba(8,73,79,0.6), rgba(46,90,46,0.6), rgba(83,90,46,0.6), rgba(90,46,46,0.6), rgba(0,0,0,0.6));
+    background-size: 1200% 1200%;
+    animation: rainbow-background-scroll 30s ease infinite;
+    /* Trạng thái mặc định: trong suốt */
+    opacity: 0;
+    /* Hiệu ứng chuyển đổi cho opacity */
+    transition: opacity 1.5s ease;
+}
+
+/* Yuuka: Jackpot fade-in/out v1.0 - Khi có class .is-jackpot, nền sẽ hiện ra */
+.slot-machine-backdrop.is-jackpot::before {
+    opacity: 0.6; /* Độ mờ của nền khi hiện ra */
+}
+
+
+/* 2. Container cho các hàng quay và khung kết quả */
+.slot-machine-reels-container {
+    /* Yuuka: responsive fix v2.0 - Dùng 100vw để tràn viền, bỏ qua thanh cuộn */
+    width: 100vw; 
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+    /* Bỏ margin-bottom vì nút controls sẽ được định vị tuyệt đối */
+}
+
+/* Khung dọc mờ để hiển thị kết quả */
+.slot-machine-frame {
+    position: absolute;
+    left: 50%;
+    top: -20px;
+    transform: translateX(-50%);
+    width: var(--slot-frame-width);
+    height: calc(var(--slot-card-height) * 3 + var(--spacing-4) * 2 + 40px); 
+    border-radius: var(--rounded-lg);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
+    pointer-events: none;
+    z-index: 10;
+    /* Yuuka: frame glow v1.0 - Thêm transition cho box-shadow để xóa hiệu ứng mượt hơn */
+    transition: box-shadow 0.3s ease-out;
+}
+
+/* 3. Các hàng quay (thay cho cột) */
+.slot-row {
+    display: flex;
+    will-change: transform;
+}
+
+.slot-row:nth-child(even) {
+    transform: translateX(100vw);
+}
+
+/* 4. Card nhân vật (tái sử dụng style từ core) */
+.slot-row .character-card {
+    background-color: var(--color-card-bg);
+    border-radius: var(--rounded-md);
+    box-shadow: 0 4px 6px -1px var(--color-shadow);
+    overflow: hidden;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    width: var(--slot-card-width);
+    height: var(--slot-card-height);
+    flex-shrink: 0; 
+    margin: 0 var(--spacing-2);
+    cursor: pointer;
+    /* Yuuka: card pick v1.0 - Thêm transition và filter */
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    filter: brightness(1);
+}
+.slot-row .character-card img {
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+    background-color: var(--color-border);
+}
+.slot-row .character-card .name {
+    padding: var(--spacing-3) var(--spacing-2);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 50px;
+}
+
+/* Yuuka: card pick v1.0 - Style cho card được chọn và các card khác */
+.slot-row .character-card.is-picked {
+    transform: scale(1.05);
+    box-shadow: 0 0 15px 5px var(--color-accent), 0 6px 10px -1px var(--color-shadow);
+    z-index: 5;
+}
+
+.slot-machine-reels-container.has-picked-card .slot-row .character-card:not(.is-picked) {
+    transform: scale(0.95);
+    filter: brightness(0.6);
+}
+
+
+/* 5. Nút điều khiển */
+.slot-controls {
+    /* Yuuka: responsive fix v2.0 - Định vị tuyệt đối để căn giữa theo viewport */
+    position: absolute;
+    bottom: var(--spacing-6);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    /* Yuuka: free spin v2.0 - Thêm thuộc tính này để định vị indicator */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Yuuka: free spin v2.0 - Thêm style cho chỉ số phí/free spin */
+.slot-cost-indicator {
+    position: absolute;
+    right: 100%;
+    margin-right: var(--spacing-4);
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    color: white;
+    font-size: 1.2em;
+    font-weight: var(--font-weight-medium);
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+    padding: var(--spacing-2) var(--spacing-3);
+    border-radius: var(--rounded-md);
+    background-color: rgba(0,0,0,0);
+    transition: color 0.2s, text-shadow 0.2s;
+    width: 110px;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+.slot-cost-indicator .material-symbols-outlined {
+    font-size: 1.3em;
+}
+
+.slot-cost-indicator > div {
+    display: none;
+    align-items: center;
+    gap: var(--spacing-2);
+}
+
+.slot-cost-indicator > div.is-visible {
+    display: flex;
+}
+
+.slot-controls.has-picked-card .slot-cost-indicator {
+    color: #ffd700;
+    text-shadow: 0 0 8px rgba(255, 215, 100, 0.7);
+}
+
+
+/* Nút Spin mới dạng icon */
+.slot-spin-btn {
+    width: 70px;
+    height: 70px;
+    border-radius: var(--rounded-full);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    background: transparent;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    transform: scale(0);
+    opacity: 0;
+    animation: slot-button-appear 0.5s 1s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.slot-spin-btn .material-symbols-outlined {
+    font-size: 2.5em;
+    font-variation-settings: 'FILL' 0;
+    transition: font-variation-settings 0.2s;
+}
+.slot-spin-btn:not(:disabled):hover {
+    background-color: var(--color-accent);
+    border-color: var(--color-accent);
+    transform: scale(1.1);
+}
+.slot-spin-btn:not(:disabled):hover .material-symbols-outlined {
+    font-variation-settings: 'FILL' 1;
+}
+.slot-spin-btn:active {
+    transform: scale(1) !important;
+}
+.slot-spin-btn:disabled {
+    color: var(--color-secondary-text);
+    cursor: not-allowed;
+    border-color: var(--color-border);
+}
+
+.slot-close-btn {
+    position: absolute;
+    top: var(--spacing-3);
+    right: var(--spacing-3);
+    background: transparent;
+    border: none;
+    color: var(--color-secondary-text);
+    cursor: pointer;
+    padding: var(--spacing-2);
+    z-index: 30; /* Yuuka: score system v1.0 - Đảm bảo nút đóng ở trên cùng */
+}
+
+/* 6. Hiệu ứng Jackpot mới: Mưa card */
+.jackpot-rain-card {
+    position: absolute;
+    top: -250px; 
+    will-change: transform, opacity;
+    /* Yuuka: Jackpot glow v1.0 - Thêm animation glow */
+    animation: jackpot-fall linear forwards, rainbow-glow 2s linear infinite;
+    pointer-events: none;
+    
+    /* Yuuka: Jackpot rain effect v2.1 - Thêm kích thước chuẩn để scale */
+    width: var(--slot-card-width);
+    height: var(--slot-card-height);
+}
+
+/* Yuuka: Jackpot rain effect v2.1 - Đảm bảo style của card con đúng */
+.jackpot-rain-card .name {
+    height: 50px;
+    flex-grow: 0;
+}
+
+
+/* Yuuka: score system v1.0 - Thêm CSS cho bảng thành tích */
+.slot-stats {
+    position: absolute;
+    top: var(--spacing-3);
+    right: calc(var(--spacing-3) + 48px);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-4);
+    color: white;
+    background: rgba(0, 0, 0, 0);
+    padding: var(--spacing-2) var(--spacing-4);
+    border-radius: var(--rounded-md);
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-medium);
+    text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    position: relative; /* Yuuka: stat delta v1.0 - Cần cho định vị absolute của delta */
+}
+
+.stat-item .material-symbols-outlined {
+    font-size: 1.2em;
+    opacity: 0.8;
+}
+
+/* Yuuka: high score v1.0 - Cập nhật selector và tăng chiều rộng */
+.stat-item .stat-value {
+    min-width: 120px; 
+    text-align: left;
+    font-family: monospace;
+}
+
+/* Yuuka: score popup v1.0 */
+.slot-score-popup-container {
+    position: absolute;
+    top: calc(50% - var(--slot-card-height) * 1.5 - var(--spacing-4));
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 25;
+    pointer-events: none;
+    width: 400px;
+    height: 150px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Yuuka: score popup redesign v2.0 */
+.slot-score-popup {
+    position: absolute; /* Wrapper for random positioning */
+}
+
+.popup-inner {
+    position: relative; /* Container cho text và score, sẽ nhận animation */
+    animation: score-popup-float 2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+
+.popup-text, .popup-score {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%); /* Căn giữa ban đầu */
+    white-space: nowrap;
+    text-shadow: 2px 2px 8px rgba(0,0,0,0.8);
+    font-weight: 700;
+    color: white;
+    opacity: 0;
+}
+
+.popup-inner .popup-text {
+    animation: fadeIn 0.3s ease-out forwards;
+}
+.popup-inner .popup-score {
+    animation: fadeIn 0.3s ease-out 0.5s forwards;
+}
+
+.popup-score {
+    font-weight: 900;
+    font-size: 2em;
+}
+
+/* Kích thước chữ cho các loại win khác nhau */
+.score-popup--normal .popup-text { font-size: 2.5em; }
+.score-popup--normal .popup-score { font-size: 2em; color: #ffd700;}
+
+.score-popup--nearmiss .popup-text { font-size: 3.5em; }
+.score-popup--nearmiss .popup-score { font-size: 2em; color: #ffd700;}
+
+.score-popup--penalty .popup-text { font-size: 2em; }
+.score-popup--penalty .popup-score { font-size: 1.5em; color: var(--color-accent-hover); }
+
+
+@keyframes score-popup-float {
+    0% { transform: translateY(20px) scale(0.5); opacity: 0; }
+    50% { transform: translateY(-50px) scale(1.1); opacity: 1; }
+    100% { transform: translateY(-120px) scale(1); opacity: 0; }
+}
+
+.score-popup--jackpot .popup-text {
+    font-size: 5em;
+    font-weight: 900;
+    background: linear-gradient(45deg, #ffd700, #f0f0f0, #ffd700, #c0c0c0);
+    background-size: 400% 400%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: fadeIn 0.3s ease-out forwards, jackpot-text-glow 1s ease-in-out infinite alternate, jackpot-text-gradient 10s linear infinite;
+}
+
+.score-popup--jackpot .popup-score {
+    display: none;
+}
+
+
+@keyframes jackpot-text-glow {
+    from { text-shadow: 0 0 10px #fff, 0 0 20px #fff, 0 0 30px #ffdd75; }
+    to { text-shadow: 0 0 20px #fff, 0 0 30px #ffdd75, 0 0 40px #ffdd75; }
+}
+
+@keyframes jackpot-text-gradient {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+
+/* 7. Keyframes cho các animation */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slot-button-appear {
+    to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes jackpot-fall {
+    /* Yuuka: Jackpot rain effect v2.1 - Animation được viết lại hoàn toàn */
+    from {
+        transform: translateY(0) rotate(0) scale(var(--card-scale, 0.8));
+        opacity: 1;
+    }
+    70% {
+        opacity: 1;
+    }
+    to {
+        transform: translateY(120vh) rotate(var(--card-rotation, 60deg)) scale(var(--card-scale, 0.8));
+        opacity: 0;
+    }
+}
+
+/* Yuuka: Jackpot background v1.0 - Keyframes cho nền */
+@keyframes rainbow-background-scroll {
+    0% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+/* Yuuka: Jackpot glow v1.0 - Keyframes cho viền card */
+@keyframes rainbow-glow {
+    0%   { box-shadow: 0 0 12px 3px rgba(255, 0, 0, 0.7); }
+    15%  { box-shadow: 0 0 12px 3px rgba(255, 127, 0, 0.7); }
+    30%  { box-shadow: 0 0 12px 3px rgba(255, 255, 0, 0.7); }
+    45%  { box-shadow: 0 0 12px 3px rgba(0, 255, 0, 0.7); }
+    60%  { box-shadow: 0 0 12px 3px rgba(0, 0, 255, 0.7); }
+    75%  { box-shadow: 0 0 12px 3px rgba(75, 0, 130, 0.7); }
+    90%  { box-shadow: 0 0 12px 3px rgba(143, 0, 255, 0.7); }
+    100% { box-shadow: 0 0 12px 3px rgba(255, 0, 0, 0.7); }
+}
+
+/* Yuuka: frame glow v1.0 - Thêm hiệu ứng phát sáng cho khung kết quả */
+@keyframes frame-glow-pulse {
+    50% { box-shadow: 0 0 12px 4px var(--glow-color); }
+}
+
+@keyframes frame-glow-rainbow {
+    0%   { box-shadow: 0 0 18px 6px rgba(255, 0, 0, 0.8); }
+    15%  { box-shadow: 0 0 18px 6px rgba(255, 127, 0, 0.8); }
+    30%  { box-shadow: 0 0 18px 6px rgba(255, 255, 0, 0.8); }
+    45%  { box-shadow: 0 0 18px 6px rgba(0, 255, 0, 0.8); }
+    60%  { box-shadow: 0 0 18px 6px rgba(0, 0, 255, 0.8); }
+    75%  { box-shadow: 0 0 18px 6px rgba(75, 0, 130, 0.8); }
+    90%  { box-shadow: 0 0 18px 6px rgba(143, 0, 255, 0.8); }
+    100% { box-shadow: 0 0 18px 6px rgba(255, 0, 0, 0.8); }
+}
+
+.slot-machine-frame.is-normal-win {
+    --glow-color: rgba(255, 215, 0, 0.4);
+    animation: frame-glow-pulse 1.2s ease-in-out 2;
+}
+
+.slot-machine-frame.is-nearmiss {
+    --glow-color: rgba(200, 220, 255, 1);
+    animation: frame-glow-pulse 0.8s ease-in-out 3;
+}
+
+.slot-machine-frame.is-jackpot {
+    animation: frame-glow-rainbow 2s linear infinite;
+}
+
+/* Yuuka: winning card glow v1.0 - Thêm hiệu ứng cho các card thắng */
+.character-card.is-winning-card-normal-win {
+    --glow-color: rgba(255, 215, 0, 0.9);
+    /* Dùng keyframe của frame nhưng cho card */
+    animation: frame-glow-pulse 1.2s ease-in-out 2;
+}
+.character-card.is-winning-card-nearmiss {
+    --glow-color: rgba(200, 220, 255, 1);
+    animation: frame-glow-pulse 0.8s ease-in-out 3;
+}
+.character-card.is-winning-card-jackpot {
+    /* Dùng keyframe của jackpot rain card */
+    animation: rainbow-glow 2s linear infinite;
+}
+
+/* Yuuka: stat delta v1.0 - CSS cho animation thay đổi chỉ số */
+.stat-delta {
+    position: absolute;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 1.1em;
+    font-weight: 700;
+    opacity: 0;
+    pointer-events: none;
+    white-space: nowrap;
+}
+.stat-delta.is-positive {
+    color: #a5d6a7; /* Light green */
+}
+.stat-delta.is-negative {
+    color: #ef9a9a; /* Light red */
+}
+.stat-delta.animate {
+    animation: stat-delta-float 1.2s ease-out forwards;
+}
+
+@keyframes stat-delta-float {
+    0% { transform: translate(-50%, 0); opacity: 1; }
+    100% { transform: translate(-50%, -25px); opacity: 0; }
+}

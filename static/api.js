@@ -37,7 +37,7 @@ const api = (() => {
             generateTokenForIP: () => _request('/api/auth/token', { method: 'POST' }),
             login: (token) => _request('/api/auth/login', { method: 'POST', body: { token } }),
             logout: () => _request('/api/auth/logout', { method: 'POST' }),
-            shareTokenWithIP: (ip) => _request('/api/plugin/core/share_token', { method: 'POST', body: { ip_address: ip } }),
+            shareTokenWithIP: (ip) => _request('/api/plugin/character-list/share_token', { method: 'POST', body: { ip_address: ip } }),
         },
         server: {
             shutdown: () => _request('/api/server/shutdown', { method: 'POST' }),

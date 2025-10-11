@@ -3,13 +3,22 @@ import sys
 import os
 import subprocess
 import time
-
-# Đảm bảo module `update` có thể được import
-project_root = os.path.dirname(os.path.abspath(__file__))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
+import logging
 import update
+from werkzeug.serving import WSGIRequestHandler
+
+class No200RequestHandler(WSGIRequestHandler):
+    def log_request(self, code='-', size='-'):
+        # code có thể là str hoặc int; chuẩn hoá về int nếu được
+        try:
+            code_int = int(code)
+        except Exception:
+            # nếu không parse được, cứ log như bình thường
+            return super().log_request(code, size)
+        # ✂️ Bỏ qua 200
+        if code_int == 200:
+            return
+        return super().log_request(code, size)
 
 UPDATE_STATUS = {
     'UP_TO_DATE': 0,
@@ -84,7 +93,7 @@ def main():
         initialize_server() # Yuuka: fix app call v1.0
         
         # Khởi chạy server Flask
-        app.run(host='0.0.0.0', debug=False, port=5000)
+        app.run(host='0.0.0.0', debug=False, port=5000, request_handler=No200RequestHandler)
 
     except ImportError as e:
         print(f"LỖI NGHIÊM TRỌNG: Không thể import ứng dụng Flask. Lỗi: {e}")

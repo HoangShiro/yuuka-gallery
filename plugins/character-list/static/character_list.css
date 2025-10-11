@@ -1,9 +1,9 @@
-/*--- MODIFIED FILE: plugins/core/static/core_plugin.css ---*/
+/*--- MODIFIED FILE: plugins/character-list/static/character_list.css ---*/
 /* --- Modal Styles (Moved from core style.css and updated for icons) --- */
 #modal {
     display: none;
     position: fixed;
-    z-index: 1000;
+    z-index: 1900;
     left: 0;
     top: 0;
     width: 100%;
@@ -111,4 +111,17 @@
 
 .card-album-btn .material-symbols-outlined {
     font-size: 20px;
+}
+
+/* Yuuka: grid zoom v2.0 - Override core #gallery style */
+#gallery {
+    /* Use a variable for item size, with a fallback */
+    grid-template-columns: repeat(auto-fill, minmax(var(--gallery-item-size, 150px), 1fr));
+    transition: grid-template-columns 0.1s ease-out; /* Add a little transition */
+}
+
+/* Yuuka: grid zoom v2.0 - Add styles for the zoom drag action */
+body.is-zooming {
+    cursor: ew-resize; /* East-West resize cursor */
+    user-select: none; /* Prevent text selection during drag */
 }
