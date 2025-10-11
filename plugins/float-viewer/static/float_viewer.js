@@ -155,7 +155,16 @@ class FloatViewerComponent {
         const placeholder = document.createElement('div');
         placeholder.className = 'float-viewer-placeholder-card placeholder-card';
         placeholder.id = `fv-placeholder-${taskId}`;
-        placeholder.innerHTML = `<div class="float-viewer-progress-bar-container"><div class="float-viewer-progress-bar"></div></div><div class="float-viewer-progress-text">${initialMessage}</div>`;
+        // Yuuka: global cancel v1.0
+        placeholder.innerHTML = `
+            <div class="float-viewer-progress-bar-container"><div class="float-viewer-progress-bar"></div></div>
+            <div class="float-viewer-progress-text">${initialMessage}</div>
+            <button class="float-viewer-cancel-btn" data-task-id="${taskId}"><span class="material-symbols-outlined">stop</span> Hủy</button>
+        `;
+        placeholder.querySelector('.float-viewer-cancel-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.api.generation.cancel(taskId).catch(err => showError(`Lỗi hủy: ${err.message}`));
+        });
         return placeholder;
     }
     // --- KẾT THÚC CÁC HÀM XỬ LÝ SỰ KIỆN ---

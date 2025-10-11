@@ -78,6 +78,30 @@
     max-width: 100%;
 }
 
+/* Yuuka: global cancel v1.0 */
+.plugin-album__cancel-btn {
+    margin-top: var(--spacing-2);
+    background-color: var(--color-accent-hover);
+    color: white;
+    border: none;
+    border-radius: var(--rounded-full);
+    padding: var(--spacing-1) var(--spacing-3);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    transition: background-color 0.2s;
+}
+.plugin-album__cancel-btn:hover {
+    background-color: color-mix(in srgb, var(--color-accent-hover) 80%, black);
+}
+.plugin-album__cancel-btn .material-symbols-outlined {
+    font-size: 1.2em;
+}
+
+
 /* --- YUUKA: STYLE MỚI CHO CARD NHÂN VẬT ĐANG GEN --- */
 .character-card.is-generating {
     animation: float 2s ease-in-out infinite;

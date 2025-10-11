@@ -191,7 +191,8 @@ class GenerationService:
             user_tasks["tasks"][task_id] = {
                 "task_id": task_id, "is_running": True, "character_hash": character_hash,
                 "progress_message": "Đang khởi tạo...", "progress_percent": 0,
-                "cancel_requested": False, "prompt_id": None, "context": context
+                "cancel_requested": False, "prompt_id": None, "context": context,
+                "generation_config": gen_config # Yuuka: global cancel v1.0
             }
             thread = threading.Thread(target=self._run_task, args=(user_hash, task_id, character_hash, gen_config))
             thread.start()
@@ -213,10 +214,36 @@ class GenerationService:
     def request_cancellation(self, user_hash, task_id):
         with self._get_user_lock(user_hash):
             task = self.user_states.get(user_hash, {}).get("tasks", {}).get(task_id)
-            if task and task["is_running"]:
-                task["cancel_requested"] = True
-                return True
-        return False
+            if not task or not task["is_running"]:
+                return False
+
+            # Yuuka: global cancel v1.0 - Logic hủy nâng cao
+            prompt_id = task.get("prompt_id")
+            gen_config = task.get("generation_config", {})
+            server_address = gen_config.get("server_address")
+
+            if prompt_id and server_address:
+                try:
+                    queue_details = self.core_api.comfy_api_client.get_queue_details_sync(server_address)
+                    
+                    # Kiểm tra xem prompt có đang chạy không
+                    is_running = any(p[1] == prompt_id for p in queue_details.get("queue_running", []))
+                    if is_running:
+                        print(f"[GenService] Task {task_id} (prompt {prompt_id}) is running. Sending interrupt to {server_address}...")
+                        self.core_api.comfy_api_client.interrupt_execution(server_address)
+                    
+                    # Kiểm tra xem prompt có đang chờ không
+                    is_pending = any(p[1] == prompt_id for p in queue_details.get("queue_pending", []))
+                    if is_pending:
+                        print(f"[GenService] Task {task_id} (prompt {prompt_id}) is pending. Deleting from queue on {server_address}...")
+                        self.core_api.comfy_api_client.delete_queued_item(prompt_id, server_address)
+                        
+                except Exception as e:
+                    print(f"💥 [GenService] Error during ComfyUI cancellation for task {task_id}: {e}")
+            
+            # Đặt cờ hủy nội bộ để dừng vòng lặp trong _run_task
+            task["cancel_requested"] = True
+            return True
 
     def _add_event(self, user_hash, event_type, data):
         with self._get_user_lock(user_hash):

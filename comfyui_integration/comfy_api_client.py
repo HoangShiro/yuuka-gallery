@@ -134,3 +134,56 @@ def get_queue_details_sync(server_address: str) -> dict:
     except Exception as e:
         print(f"Exception getting queue details: {e}")
         return {}
+
+# Yuuka: scene cancel v1.0
+def interrupt_execution(server_address: str) -> bool:
+    """
+    Attempts to interrupt the currently executing task on the ComfyUI server.
+    Sends a POST request to /interrupt.
+    Returns True if the request was likely successful (200 OK), False otherwise.
+    Note: This interrupts the *current* task, not a specific one by ID from this endpoint.
+    """
+    req = urllib.request.Request(f"http://{server_address}/interrupt", method='POST')
+    try:
+        with urllib.request.urlopen(req) as response:
+            print(f"Interrupt request to {server_address} returned status: {response.status}")
+            return response.status == 200
+    except urllib.error.URLError as e:
+        print(f"Failed to interrupt execution at {server_address} (URLError): {e.reason}")
+    except Exception as e:
+        print(f"Failed to interrupt execution at {server_address} (Exception): {e}")
+    return False
+
+# Yuuka: scene cancel v1.0
+def delete_queued_item(prompt_id: str, server_address: str) -> bool:
+    """
+    Attempts to delete a specific item from the ComfyUI queue using its prompt_id.
+    Sends a POST request to /queue with a payload like {"delete": ["prompt_id"]}.
+    Returns True if the deletion was likely successful (200 OK, or 404 if not found), False otherwise.
+    """
+    payload = {"delete": [prompt_id]}
+    headers = {'Content-Type': 'application/json'}
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(f"http://{server_address}/queue", data=data, headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(req) as response:
+            print(f"Delete queued item {prompt_id} request to {server_address} returned status: {response.status}")
+            # ComfyUI returns the queue state on successful deletion.
+            return response.status == 200
+    except urllib.error.HTTPError as e:
+        # If ComfyUI returns 404, it means the prompt_id was not found in the queue.
+        # This can be considered a "successful" deletion attempt if the goal is to ensure it's not queued.
+        if e.code == 404:
+            print(f"Prompt {prompt_id} not found in queue at {server_address} for deletion (HTTP 404). It might have been processed or was never queued/invalid.")
+            return True 
+        print(f"Failed to delete queued item {prompt_id} from {server_address} (HTTPError {e.code}): {e.reason}")
+        try:
+            error_body = e.read().decode('utf-8', errors='ignore')
+            print(f"Error body from delete_queued_item: {error_body[:200]}")
+        except Exception:
+            pass # Ignore if reading error body fails
+    except urllib.error.URLError as e:
+        print(f"Failed to delete queued item {prompt_id} from {server_address} (URLError): {e.reason}")
+    except Exception as e:
+        print(f"Failed to delete queued item {prompt_id} from {server_address} (Exception): {e}")
+    return False

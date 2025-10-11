@@ -1,4 +1,4 @@
-# --- FILE: plugins/scene/backend.py ---
+# --- MODIFIED FILE: plugins/scene/backend.py ---
 import uuid
 import time
 import threading
@@ -103,18 +103,55 @@ class ScenePlugin:
 
         @self.blueprint.route('/cancel', methods=['POST'])
         def scene_cancel():
+            # Yuuka: scene cancel v1.0
             user_hash = self.core_api.verify_token_and_get_user_hash()
-            cancelled_count = 0
+            
             with self.scene_run_lock:
                 self.scene_run_state['cancel_requested'] = True
-                
-            all_status = self.core_api.generation_service.get_user_status(user_hash)
-            for task_id, task_data in all_status.get("tasks", {}).items():
-                if task_data.get("context", {}).get("source") == "scene":
-                    if self.core_api.generation_service.request_cancellation(user_hash, task_id):
-                        cancelled_count += 1
             
-            return jsonify({"status": "success", "message": f"Requested cancellation for {cancelled_count} tasks."})
+            all_status = self.core_api.generation_service.get_user_status(user_hash)
+            scene_tasks = {
+                tid: tdata for tid, tdata in all_status.get("tasks", {}).items()
+                if tdata.get("context", {}).get("source") == "scene" and tdata.get("prompt_id")
+            }
+            
+            if not scene_tasks:
+                return jsonify({"status": "success", "message": "Không có tác vụ Scene nào đang chạy."})
+
+            tasks_by_server = {}
+            for task_id, task_data in scene_tasks.items():
+                server_address = task_data.get("generation_config", {}).get("server_address")
+                if server_address:
+                    tasks_by_server.setdefault(server_address, []).append(task_data)
+            
+            cancelled_count = 0
+            interrupted_servers = set()
+
+            for server_address, tasks in tasks_by_server.items():
+                try:
+                    queue_details = self.core_api.comfy_api_client.get_queue_details_sync(server_address)
+                    running_prompts = {p[1] for p in queue_details.get("queue_running", [])}
+                    pending_prompts = {p[1] for p in queue_details.get("queue_pending", [])}
+
+                    for task_data in tasks:
+                        prompt_id = task_data['prompt_id']
+                        
+                        if prompt_id in running_prompts and server_address not in interrupted_servers:
+                            print(f"[Plugin:Scene] Interrupting execution on {server_address}")
+                            self.core_api.comfy_api_client.interrupt_execution(server_address)
+                            interrupted_servers.add(server_address)
+                        
+                        if prompt_id in pending_prompts:
+                            print(f"[Plugin:Scene] Deleting queued item {prompt_id} on {server_address}")
+                            self.core_api.comfy_api_client.delete_queued_item(prompt_id, server_address)
+                        
+                        if self.core_api.generation_service.request_cancellation(user_hash, task_data['task_id']):
+                             cancelled_count += 1
+
+                except Exception as e:
+                    print(f"💥 [Plugin:Scene] Error during cancellation on {server_address}: {e}")
+
+            return jsonify({"status": "success", "message": f"Đã yêu cầu hủy {cancelled_count} tác vụ."})
 
         @self.blueprint.route('/status', methods=['GET'])
         def scene_status():

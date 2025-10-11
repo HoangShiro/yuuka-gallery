@@ -11,6 +11,17 @@ class SceneComponent {
             tagPredictions: [],
             selected: { type: null, id: null, parentId: null },
             dragged: { element: null, type: null, id: null, parentId: null, category: null, width: 0, height: 0 },
+            // Yuuka: touch drag v1.0 - Thêm state quản lý kéo thả cảm ứng
+            touchDrag: {
+                active: false,
+                target: null,
+                longPressTimeout: null,
+                initialX: 0,
+                initialY: 0,
+                offsetX: 0,
+                offsetY: 0,
+                hasMoved: false,
+            },
             placeholder: null,
             generation: { 
                 isSceneRunning: false,
@@ -24,6 +35,10 @@ class SceneComponent {
         this.handleDrop = this.handleDrop.bind(this);
         this.handleDragEnd = this.handleDragEnd.bind(this);
         this.handleGenerationUpdate = this.handleGenerationUpdate.bind(this);
+        // Yuuka: touch drag v1.0 - Bind các hàm xử lý cảm ứng
+        this.handleTouchStart = this.handleTouchStart.bind(this);
+        this.handleTouchMove = this.handleTouchMove.bind(this);
+        this.handleTouchEnd = this.handleTouchEnd.bind(this);
     }
 
     async init() {
@@ -65,8 +80,8 @@ class SceneComponent {
         this.container.classList.remove('plugin-scene');
     }
     
-    attachEventListeners() { this.container.addEventListener('click', this.handleClick); this.container.addEventListener('dragstart', this.handleDragStart); this.container.addEventListener('dragover', this.handleDragOver); this.container.addEventListener('drop', this.handleDrop); this.container.addEventListener('dragend', this.handleDragEnd); }
-    detachEventListeners() { this.container.removeEventListener('click', this.handleClick); this.container.removeEventListener('dragstart', this.handleDragStart); this.container.removeEventListener('dragover', this.handleDragOver); this.container.removeEventListener('drop', this.handleDrop); this.container.removeEventListener('dragend', this.handleDragEnd); }
+    attachEventListeners() { this.container.addEventListener('click', this.handleClick); this.container.addEventListener('dragstart', this.handleDragStart); this.container.addEventListener('dragover', this.handleDragOver); this.container.addEventListener('drop', this.handleDrop); this.container.addEventListener('dragend', this.handleDragEnd); this.container.addEventListener('touchstart', this.handleTouchStart, { passive: false }); } // Yuuka: reload lag fix v1.0 - Cần passive: false để có thể preventDefault trong touchmove
+    detachEventListeners() { this.container.removeEventListener('click', this.handleClick); this.container.removeEventListener('dragstart', this.handleDragStart); this.container.removeEventListener('dragover', this.handleDragOver); this.container.removeEventListener('drop', this.handleDrop); this.container.removeEventListener('dragend', this.handleDragEnd); this.container.removeEventListener('touchstart', this.handleTouchStart); window.removeEventListener('touchmove', this.handleTouchMove); window.removeEventListener('touchend', this.handleTouchEnd); window.removeEventListener('touchcancel', this.handleTouchEnd); } // Yuuka: touch drag v1.0
     
     async saveScenes() { try { await this.api.scene.post('', this.state.scenes); } catch (e) { showError("Lỗi lưu scene."); } }
 
@@ -105,8 +120,9 @@ class SceneComponent {
         const buttons = this._createUIElement('div', { className: 'header-buttons' });
         const isRunning = this.state.generation.isSceneRunning;
         
+        // Yuuka: generate button consistency v1.0
         buttons.innerHTML = `
-            <button class="header-btn" data-action="generate" title="${isRunning ? 'Dừng' : 'Chạy'}"><span class="material-symbols-outlined">${isRunning ? 'stop' : 'play_arrow'}</span></button>
+            <button class="header-btn" data-action="generate" title="${isRunning ? 'Hủy & chạy lại từ đây' : 'Chạy từ đây'}"><span class="material-symbols-outlined">play_arrow</span></button>
             <button class="header-btn" data-action="toggle-collapse" title="${item.isCollapsed ? 'Mở rộng' : 'Thu gọn'}"><span class="material-symbols-outlined">${item.isCollapsed ? 'unfold_more' : 'unfold_less'}</span></button>
             <button class="header-btn" data-action="toggle-bypass" title="${item.bypassed ? 'Kích hoạt' : 'Bỏ qua'}"><span class="material-symbols-outlined">${item.bypassed ? 'visibility' : 'visibility_off'}</span></button>
             ${type === 'scene' ? `<button class="header-btn" data-action="settings" title="Cấu hình"><span class="material-symbols-outlined">tune</span></button>` : ''}
@@ -156,6 +172,17 @@ class SceneComponent {
     _createUIElement(tag, {className, textContent, dataset, draggable}={}) { const el=document.createElement(tag); if(className)el.className=className; if(textContent)el.textContent=textContent; if(draggable)el.draggable=draggable; if(dataset)Object.entries(dataset).forEach(([k,v])=>el.dataset[k]=v); return el; }
     
     handleClick(e) { 
+        // Yuuka: touch click fix v1.0 - Bỏ qua click nếu một thao tác kéo vừa kết thúc
+        if (this.state.touchDrag.active) return;
+
+        // Yuuka: stage stop button v1.0
+        const stageCancelBtn = e.target.closest('.stage-cancel-btn');
+        if (stageCancelBtn) {
+            e.stopPropagation();
+            this.cancelGeneration();
+            return;
+        }
+
         const addScene=e.target.closest('.add-scene-btn');
         const addStage=e.target.closest('.add-stage-btn');
         const addTag=e.target.closest('.add-tag-group-btn');
@@ -173,8 +200,8 @@ class SceneComponent {
             const parentId = isScene ? null : itemEl.dataset.sceneId;
 
             switch (action) {
-                case 'generate':
-                    this.state.generation.isSceneRunning ? this.cancelGeneration() : this.startGeneration(isScene ? 'scene' : 'stage', id, parentId);
+                case 'generate': // Yuuka: generate button consistency v1.0
+                    this.handleGenerateClick(isScene ? 'scene' : 'stage', id, parentId);
                     break;
                 case 'toggle-collapse':
                     this.toggleCollapse(isScene ? 'scene' : 'stage', id, parentId);
@@ -253,6 +280,16 @@ class SceneComponent {
     addScene() { const lastScene = this.state.scenes.at(-1); const newScene = { id: `s_${Date.now()}`, stages: [], bypassed: false, isCollapsed: false, generationConfig: lastScene ? JSON.parse(JSON.stringify(lastScene.generationConfig || {})) : {} }; this.state.scenes.push(newScene); this.saveScenes(); this.render(); }
     addStage(sceneId) { const scene = this.state.scenes.find(sc => sc.id === sceneId); if (!scene) return; const lastStage = scene.stages.at(-1); const newStage = { id: `st_${Date.now()}`, tags: lastStage ? JSON.parse(JSON.stringify(lastStage.tags || {})) : {}, bypassed: false, isCollapsed: false }; scene.stages.push(newStage); this.saveScenes(); this.render(); }
     
+    // Yuuka: generate button consistency v1.0
+    async handleGenerateClick(type, id, parentId) {
+        if (this.state.generation.isSceneRunning) {
+            await this.cancelGeneration();
+            showError("Đang hủy tiến trình cũ, vui lòng chờ giây lát...");
+            await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+        this.startGeneration(type, id, parentId);
+    }
+
     async startGeneration(type, id, parentId) { // Yuuka: generate logic fix v1.0
         if (!type || !id) return;
 
@@ -352,7 +389,12 @@ class SceneComponent {
                 let bar = stageEl.querySelector('.scene-generation-progress-bar');
                 if (!bar) {
                     bar = this._createUIElement('div', { className: 'scene-generation-progress-bar' });
-                    bar.innerHTML = `<div class="plugin-scene__progress-bar-container"><div class="plugin-scene__progress-bar"></div></div><div class="plugin-scene__progress-text"></div>`;
+                    // Yuuka: stage stop button v1.0
+                    bar.innerHTML = `
+                        <div class="plugin-scene__progress-text"></div>
+                        <div class="plugin-scene__progress-bar-container"><div class="plugin-scene__progress-bar"></div></div>
+                        <button class="stage-cancel-btn"><span class="material-symbols-outlined">stop</span> Hủy</button>
+                    `;
                     stageEl.appendChild(bar);
                 }
                 const textEl = bar.querySelector('.plugin-scene__progress-text');
@@ -527,7 +569,213 @@ class SceneComponent {
         }
     }
     
-    handleDrop(e) { e.preventDefault(); e.stopPropagation(); if (!this.state.placeholder?.parentElement) return; const parent = this.state.placeholder.parentElement, targetIndex = Array.from(parent.children).indexOf(this.state.placeholder); if (this.state.dragged.type === 'scene') { const idx = this.state.scenes.findIndex(s => s.id === this.state.dragged.id); if (idx > -1) { const [item] = this.state.scenes.splice(idx, 1); this.state.scenes.splice(targetIndex, 0, item); } } else if (this.state.dragged.type === 'stage') { const fromScene = this.state.scenes.find(s => s.id === this.state.dragged.parentId); const toSceneId = parent.closest('.scene-row').dataset.sceneId; const toScene = this.state.scenes.find(s => s.id === toSceneId); if (fromScene && toScene) { const idx = fromScene.stages.findIndex(st => st.id === this.state.dragged.id); if (idx > -1) { const [item] = fromScene.stages.splice(idx, 1); toScene.stages.splice(targetIndex, 0, item); } } } else if (this.state.dragged.type === 'tag_group') { const toStageBlock = parent.closest('.stage-block'); const fromScene = this.state.scenes.find(s => s.stages.some(st => st.id === this.state.dragged.parentId)); const fromStage = fromScene?.stages.find(st => st.id === this.state.dragged.parentId); const toScene = this.state.scenes.find(s => s.id === toStageBlock.dataset.sceneId); const toStage = toScene?.stages.find(st => st.id === toStageBlock.dataset.stageId); if (fromStage && toStage) { const fromTags = fromStage.tags[this.state.dragged.category] || []; const idx = fromTags.indexOf(this.state.dragged.id); if (idx > -1) { const [movedId] = fromTags.splice(idx, 1); if (!toStage.tags[this.state.dragged.category]) toStage.tags[this.state.dragged.category] = []; toStage.tags[this.state.dragged.category].splice(targetIndex, 0, movedId); } } } this.saveScenes(); this.render(); }
+    // Yuuka: touch drag v1.0 - Tách logic drop để tái sử dụng
+    _finalizeDrop(placeholder) {
+        if (!placeholder?.parentElement) return;
+        const parent = placeholder.parentElement;
+        const targetIndex = Array.from(parent.children).indexOf(placeholder);
+
+        const { type, id, parentId, category } = this.state.dragged;
+
+        if (type === 'scene') {
+            const idx = this.state.scenes.findIndex(s => s.id === id);
+            if (idx > -1) {
+                const [item] = this.state.scenes.splice(idx, 1);
+                this.state.scenes.splice(targetIndex, 0, item);
+            }
+        } else if (type === 'stage') {
+            const fromScene = this.state.scenes.find(s => s.id === parentId);
+            const toSceneId = parent.closest('.scene-row').dataset.sceneId;
+            const toScene = this.state.scenes.find(s => s.id === toSceneId);
+            if (fromScene && toScene) {
+                const idx = fromScene.stages.findIndex(st => st.id === id);
+                if (idx > -1) {
+                    const [item] = fromScene.stages.splice(idx, 1);
+                    toScene.stages.splice(targetIndex, 0, item);
+                }
+            }
+        } else if (type === 'tag_group') {
+            const toStageBlock = parent.closest('.stage-block');
+            const fromScene = this.state.scenes.find(s => s.stages.some(st => st.id === parentId));
+            const fromStage = fromScene?.stages.find(st => st.id === parentId);
+            const toScene = this.state.scenes.find(s => s.id === toStageBlock.dataset.sceneId);
+            const toStage = toScene?.stages.find(st => st.id === toStageBlock.dataset.stageId);
+            if (fromStage && toStage) {
+                const fromTags = fromStage.tags[category] || [];
+                const idx = fromTags.indexOf(id);
+                if (idx > -1) {
+                    const [movedId] = fromTags.splice(idx, 1);
+                    if (!toStage.tags[category]) toStage.tags[category] = [];
+                    toStage.tags[category].splice(targetIndex, 0, movedId);
+                }
+            }
+        }
+        this.saveScenes();
+        this.render();
+    }
+
+    handleDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        this._finalizeDrop(this.state.placeholder);
+    }
+    
+    // Yuuka: reload lag fix v1.0 - Logic xử lý chạm mới
+    handleTouchStart(e) {
+        const target = e.target.closest('.scene-header, .stage-header, .tag-group-block');
+        if (!target) return;
+
+        const { touchDrag } = this.state;
+        touchDrag.target = target;
+        touchDrag.hasMoved = false;
+        const touch = e.touches[0];
+        touchDrag.initialX = touch.clientX;
+        touchDrag.initialY = touch.clientY;
+
+        touchDrag.longPressTimeout = setTimeout(() => {
+            if (touchDrag.target && !touchDrag.hasMoved) {
+                this._startTouchDrag(e);
+            }
+        }, 500);
+
+        window.addEventListener('touchmove', this.handleTouchMove, { passive: false });
+        window.addEventListener('touchend', this.handleTouchEnd);
+        window.addEventListener('touchcancel', this.handleTouchEnd);
+    }
+    
+    _startTouchDrag(e) {
+        const { touchDrag } = this.state;
+        if (!touchDrag.target) return;
+
+        touchDrag.active = true;
+        this.container.classList.add('plugin-scene--is-dragging');
+        this.container.querySelectorAll('.add-scene-btn, .add-stage-btn').forEach(btn => btn.classList.add('is-hidden-during-drag'));
+
+        const target = touchDrag.target.closest('.scene-row, .stage-block, .tag-group-block');
+        this.state.dragged.element = target;
+        const rect = target.getBoundingClientRect();
+        const touch = e.touches[0];
+        
+        touchDrag.offsetX = touch.clientX - rect.left;
+        touchDrag.offsetY = touch.clientY - rect.top;
+
+        target.classList.add('touch-dragging');
+        target.style.width = `${rect.width}px`;
+        target.style.left = `${touch.clientX - touchDrag.offsetX}px`;
+        target.style.top = `${touch.clientY - touchDrag.offsetY}px`;
+        
+        this.state.placeholder = document.createElement('div');
+        this.state.placeholder.style.width = `${rect.width}px`;
+        this.state.placeholder.style.height = `${rect.height}px`;
+
+        if (target.classList.contains('scene-row')) {
+            this.state.dragged.type = 'scene';
+            this.state.dragged.id = target.dataset.sceneId;
+            this.state.placeholder.className = 'drag-placeholder';
+        } else if (target.classList.contains('stage-block')) {
+            this.state.dragged.type = 'stage';
+            this.state.dragged.id = target.dataset.stageId;
+            this.state.dragged.parentId = target.dataset.sceneId;
+            this.state.placeholder.className = 'drag-placeholder stage-placeholder';
+        } else if (target.classList.contains('tag-group-block')) {
+            this.state.dragged.type = 'tag_group';
+            this.state.dragged.id = target.dataset.groupId;
+            this.state.dragged.parentId = target.closest('.stage-block').dataset.stageId;
+            this.state.dragged.category = target.dataset.category;
+            this.state.placeholder.className = 'drag-placeholder tag-group-placeholder';
+        }
+        
+        target.parentElement.insertBefore(this.state.placeholder, target);
+    }
+
+    handleTouchMove(e) {
+        const { touchDrag } = this.state;
+        if (!touchDrag.target) return;
+        
+        const touch = e.touches[0];
+        const dx = touch.clientX - touchDrag.initialX;
+        const dy = touch.clientY - touchDrag.initialY;
+
+        if (!touchDrag.hasMoved && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+            touchDrag.hasMoved = true;
+            clearTimeout(touchDrag.longPressTimeout); 
+        }
+
+        if (!touchDrag.active) return;
+        
+        // Chỉ preventDefault nếu đang kéo-thả thực sự
+        e.preventDefault();
+
+        const draggedEl = this.state.dragged.element;
+        draggedEl.style.left = `${touch.clientX - touchDrag.offsetX}px`;
+        draggedEl.style.top = `${touch.clientY - touchDrag.offsetY}px`;
+
+        draggedEl.style.display = 'none';
+        const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+        draggedEl.style.display = '';
+        if (!elUnder) return;
+
+        let dropTarget = null;
+        let container = null;
+        const { type: draggedType, category: draggedCategory } = this.state.dragged;
+
+        if (draggedType === 'scene') {
+            dropTarget = elUnder.closest('.scene-row, .add-scene-btn, .drag-placeholder');
+            container = this.container;
+        } else if (draggedType === 'stage') {
+            dropTarget = elUnder.closest('.stage-block, .add-stage-btn, .drag-placeholder');
+            container = elUnder.closest('.stages-wrapper');
+        } else if (draggedType === 'tag_group') {
+            container = elUnder.closest('.stage-category-tags');
+            if (container?.dataset.category === draggedCategory) {
+                dropTarget = elUnder.closest('.tag-group-block, .add-tag-group-btn, .drag-placeholder');
+            } else {
+                container = null;
+            }
+        }
+
+        if (container && dropTarget && dropTarget !== this.state.placeholder) {
+            const rect = dropTarget.getBoundingClientRect();
+            const isHorizontal = window.innerWidth > 768 && draggedType !== 'scene';
+            const offset = isHorizontal ? touch.clientX - rect.left : touch.clientY - rect.top;
+            const threshold = (isHorizontal ? rect.width : rect.height) / 2;
+            if (offset < threshold) {
+                container.insertBefore(this.state.placeholder, dropTarget);
+            } else {
+                container.insertBefore(this.state.placeholder, dropTarget.nextElementSibling);
+            }
+        }
+    }
+    
+    handleTouchEnd(e) {
+        const { touchDrag } = this.state;
+        clearTimeout(touchDrag.longPressTimeout);
+
+        if (touchDrag.active) {
+            this._finalizeDrop(this.state.placeholder);
+        }
+
+        this.container.classList.remove('plugin-scene--is-dragging');
+        this.container.querySelectorAll('.add-scene-btn, .add-stage-btn').forEach(btn => btn.classList.remove('is-hidden-during-drag'));
+        
+        this.state.dragged.element?.classList.remove('touch-dragging');
+        if (this.state.dragged.element) {
+            this.state.dragged.element.style.width = '';
+            this.state.dragged.element.style.left = '';
+            this.state.dragged.element.style.top = '';
+        }
+
+        this.state.placeholder?.remove();
+        this.state.placeholder = null;
+        this.state.dragged = { element: null, type: null, id: null, parentId: null, category: null, width: 0, height: 0 };
+        // Reset state hoàn toàn
+        this.state.touchDrag = { active: false, target: null, longPressTimeout: null, initialX: 0, initialY: 0, offsetX: 0, offsetY: 0, hasMoved: false };
+
+        window.removeEventListener('touchmove', this.handleTouchMove);
+        window.removeEventListener('touchend', this.handleTouchEnd);
+        window.removeEventListener('touchcancel', this.handleTouchEnd);
+    }
+    
     _createModal(contentHtml, isPersistent = false) { const modal = this._createUIElement('div', { className: 'modal-backdrop plugin-scene__modal' }); modal.innerHTML = `<div class="modal-dialog">${contentHtml}</div>`; const close = () => modal.remove(); if (!isPersistent) modal.addEventListener('click', (e) => e.target === modal && close()); document.body.appendChild(modal); return { modal, dialog: modal.querySelector('.modal-dialog'), close }; }
     async _openSceneSettingsModal(scene) { const defaults = { quantity_per_stage: 1, quality: '', negative: '', lora_name: '', steps: 25, cfg: 3.0, seed: 0, sampler_name: 'euler_ancestral', scheduler: 'karras', ckpt_name: '', server_address: '127.0.0.1:8888', width: 832, height: 1216 }; const config = { ...defaults, ...(scene.generationConfig || {}) }; const currentSize = `${config.width}x${config.height}`; const cNum=(k,l,v,min,max,step)=>`<div class="form-group"><label>${l}</label><input type="number" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}"></div>`; const cTxt=(k,l,v)=>`<div class="form-group"><label>${l}</label><textarea name="${k}" rows="2">${v}</textarea></div>`; const cSli=(k,l,v,min,max,step)=>`<div class="form-group form-group-slider"><label>${l}: <span id="val-${k}">${v}</span></label><input type="range" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}" oninput="this.previousElementSibling.textContent = this.value"></div>`; const cSel=(k,l,opts,v)=>`<div class="form-group"><label>${l}</label><select name="${k}">${opts.map(o=>`<option value="${o.value}" ${o.value==v?'selected':''}>${o.name}</option>`).join('')}</select></div>`; const cInp=(k,l,v)=>`<div class="form-group"><label>${l}</label><input type="text" name="${k}" value="${v}"></div>`; const cInpBtn=(k,l,v)=>`<div class="form-group"><label>${l}</label><div class="input-with-button"><input type="text" name="${k}" value="${v}"><button type="button" class="connect-btn">Connect</button></div></div>`; const modalHtml = `<h3>Cấu hình cho Scene</h3><div class="settings-form-container"><form id="scene-cfg-form">${cNum('quantity_per_stage', 'Số lượng ảnh mỗi Stage', config.quantity_per_stage, 1, 10, 1)}${cTxt('quality', 'Quality', config.quality)}${cTxt('negative', 'Negative', config.negative)}${cInp('lora_name', 'LoRA Name', config.lora_name)}${cSli('steps', 'Steps', config.steps, 10, 50, 1)}${cSli('cfg', 'CFG', config.cfg, 1.0, 7.0, 0.1)}${cNum('seed', 'Seed (0 = random)', config.seed, 0, Number.MAX_SAFE_INTEGER, 1)}${cSel('size', 'W x H', [{ name: 'Đang tải...', value: currentSize }], currentSize)}${cSel('sampler_name', 'Sampler', [{ name: 'Đang tải...', value: config.sampler_name }], config.sampler_name)}${cSel('scheduler', 'Scheduler', [{ name: 'Đang tải...', value: config.scheduler }], config.scheduler)}${cSel('ckpt_name', 'Checkpoint', [{ name: 'Đang tải...', value: config.ckpt_name }], config.ckpt_name)}${cInpBtn('server_address', 'Server Address', config.server_address)}</form></div><div class="modal-actions"><button id="btn-cancel" class="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button><button id="btn-save" class="btn-save" title="Lưu"><span class="material-symbols-outlined">save</span></button></div>`; const { dialog, close } = this._createModal(modalHtml, true); const form = dialog.querySelector('form'); const connectBtn = dialog.querySelector('.connect-btn'); const serverAddressInput = form.elements['server_address']; const loadAndPopulateOptions = async (address) => { try { const { global_choices } = await this.api.scene.get(`/comfyui/info?server_address=${encodeURIComponent(address)}`); const populate = (key, choices, currentValue) => { const select = form.elements[key]; select.innerHTML = choices.map(c => `<option value="${c.value}" ${c.value == currentValue ? 'selected' : ''}>${c.name}</option>`).join(''); }; populate('size', global_choices.sizes, form.elements['size'].value); populate('sampler_name', global_choices.samplers, form.elements['sampler_name'].value); populate('scheduler', global_choices.schedulers, form.elements['scheduler'].value); populate('ckpt_name', global_choices.checkpoints, form.elements['ckpt_name'].value); } catch (err) { showError(`Không thể tải dữ liệu từ ComfyUI: ${err.message}`); } }; connectBtn.addEventListener('click', async () => { const address = serverAddressInput.value.trim(); if (!address) { showError("Vui lòng nhập địa chỉ server."); return; } connectBtn.textContent = '...'; connectBtn.disabled = true; try { await this.api.server.checkComfyUIStatus(address); showError("Kết nối thành công!"); await loadAndPopulateOptions(address); } catch (e) { showError("Kết nối thất bại."); } finally { connectBtn.textContent = 'Connect'; connectBtn.disabled = false; } }); dialog.querySelector('#btn-cancel').onclick = close; dialog.querySelector('#btn-save').onclick = () => { const updates = {}; ['quality','negative','lora_name','server_address','sampler_name','scheduler','ckpt_name'].forEach(k => updates[k] = form.elements[k].value); ['steps','cfg'].forEach(k => updates[k] = parseFloat(form.elements[k].value)); ['quantity_per_stage','seed'].forEach(k => updates[k] = parseInt(form.elements[k].value, 10)); const [w,h] = form.elements['size'].value.split('x').map(Number); updates.width = w; updates.height = h; scene.generationConfig = updates; this.saveScenes(); showError("Lưu cấu hình Scene thành công."); close(); }; loadAndPopulateOptions(serverAddressInput.value.trim()); }
     openTagSelector(category, sceneId, stageId) { const stage = this.state.scenes.find(s=>s.id===sceneId)?.stages.find(st=>st.id===stageId); if (!stage) return; const assignedIds = new Set(stage.tags[category] || []); const buttonsHTML = (this.state.tagGroups.grouped[category] || []).map(g => `<button class="tag-group-select-btn ${assignedIds.has(g.id) ? 'selected' : ''}" data-group-id="${g.id}">${g.name}</button>`).join(''); const modalHtml = `<h3>Chọn Group cho ${category}</h3><div class="tag-group-selector-grid">${buttonsHTML}</div><div class="modal-actions"><button id="btn-new" title="Tạo mới"><span class="material-symbols-outlined">add</span></button><div style="flex-grow:1"></div><button id="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button><button id="btn-done" title="Xong"><span class="material-symbols-outlined">check</span></button></div>`; const { dialog, close } = this._createModal(modalHtml); dialog.querySelector('.tag-group-selector-grid').addEventListener('click', e => e.target.matches('.tag-group-select-btn') && e.target.classList.toggle('selected')); dialog.querySelector('#btn-new').onclick = () => { close(); this.openTagEditor(null, category, { sceneId, stageId }); }; dialog.querySelector('#btn-cancel').onclick = close; dialog.querySelector('#btn-done').onclick = () => { const selectedIds = Array.from(dialog.querySelectorAll('.tag-group-select-btn.selected')).map(btn => btn.dataset.groupId); if (category === 'Character') { stage.tags[category] = selectedIds.slice(-1); } else { stage.tags[category] = selectedIds; } this.saveScenes(); this.render(); close(); }; }

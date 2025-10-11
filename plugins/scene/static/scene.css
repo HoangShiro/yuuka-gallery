@@ -170,6 +170,29 @@ html.dark-mode .plugin-scene .scene-row.selected {
     text-overflow: ellipsis;
 }
 
+/* Yuuka: stage stop button v1.0 */
+.stage-cancel-btn {
+    margin-top: var(--spacing-2);
+    background-color: var(--color-accent-hover);
+    color: white;
+    border: none;
+    border-radius: var(--rounded-full);
+    padding: var(--spacing-1) var(--spacing-3);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    transition: background-color 0.2s;
+}
+.stage-cancel-btn:hover {
+    background-color: color-mix(in srgb, var(--color-accent-hover) 80%, black);
+}
+.stage-cancel-btn .material-symbols-outlined {
+    font-size: 1.2em;
+}
+
 
 
 
@@ -218,3 +241,28 @@ html.dark-mode .plugin-scene__modal .tag-group-select-btn.selected { background-
 .plugin-scene__modal .input-with-button { display: flex; gap: 8px; }
 .plugin-scene__modal .input-with-button button { padding: 8px 12px; border: 1px solid var(--color-border); background-color: var(--color-primary-bg); color: var(--color-primary-text); border-radius: 4px; cursor: pointer; font-weight: 500; }
 .plugin-scene__modal .input-with-button button:hover { background-color: var(--color-border); }
+
+/* Yuuka: mobile UI v1.0 - Giao diện cho màn hình nhỏ */
+@media (max-width: 768px) {
+    .plugin-scene .stages-wrapper {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .plugin-scene .stage-block,
+    .plugin-scene .add-stage-btn {
+        width: 100%;
+    }
+    .plugin-scene .drag-placeholder.stage-placeholder {
+        width: 100%;
+    }
+}
+
+/* Yuuka: touch drag v1.0 - Style cho phần tử đang được kéo bằng cảm ứng */
+.touch-dragging {
+    position: fixed !important;
+    z-index: 2000;
+    pointer-events: none;
+    opacity: 0.8;
+    transform: rotate(3deg);
+    transition: none !important; /* Tắt transition khi đang kéo */
+}

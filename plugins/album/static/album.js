@@ -216,6 +216,11 @@ class AlbumComponent {
             const tempPlaceholder = document.getElementById(tempTaskId);
             if (tempPlaceholder) {
                 tempPlaceholder.id = response.task_id;
+                // Yuuka: cancel task fix v1.0
+                const cancelButton = tempPlaceholder.querySelector('.plugin-album__cancel-btn');
+                if (cancelButton) {
+                    cancelButton.dataset.taskId = response.task_id;
+                }
             }
 
         } catch(err) {
@@ -329,7 +334,18 @@ class AlbumComponent {
         const placeholder = document.createElement('div');
         placeholder.className = 'plugin-album__album-card placeholder-card';
         placeholder.id = taskId;
-        placeholder.innerHTML = `<div class="plugin-album__progress-bar-container"><div class="plugin-album__progress-bar"></div></div><div class="plugin-album__progress-text">Đang khởi tạo...</div>`;
+        // Yuuka: global cancel v1.0
+        placeholder.innerHTML = `
+            <div class="plugin-album__progress-bar-container"><div class="plugin-album__progress-bar"></div></div>
+            <div class="plugin-album__progress-text">Đang khởi tạo...</div>
+            <button class="plugin-album__cancel-btn" data-task-id="${taskId}"><span class="material-symbols-outlined">stop</span> Hủy</button>
+        `;
+        placeholder.querySelector('.plugin-album__cancel-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Yuuka: cancel task fix v1.0 - Đọc ID từ data attribute
+            const currentTaskId = e.currentTarget.dataset.taskId;
+            this.api.generation.cancel(currentTaskId).catch(err => showError(`Lỗi hủy: ${err.message}`));
+        });
         return placeholder;
     }
     
