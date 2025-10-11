@@ -26,15 +26,32 @@ html.dark-mode .plugin-scene .scene-row.selected {
 }
 
 .plugin-scene .scene-row.bypassed { opacity: 0.6; }
-/* Yuuka: Drag animation v1.0 - Ẩn phần tử gốc khi đang kéo. */
-.plugin-scene .scene-row.dragging { opacity: 0; }
+/* Yuuka: Drag fix v2.0 - Cập nhật style khi kéo Scene, thu gọn cả W và H */
+.plugin-scene .scene-row.dragging {
+    opacity: 0.5;
+    width: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-width: 0 !important;
+    overflow: hidden;
+}
 .plugin-scene .stages-wrapper { display: flex; gap: var(--spacing-4); flex-wrap: wrap; padding-bottom: var(--spacing-2); transition: all 0.3s ease-out; }
 .plugin-scene .stage-block, .plugin-scene .add-stage-btn { flex-shrink: 0; width: 240px; }
 .plugin-scene .stage-block { border: 2px solid var(--color-border); border-radius: var(--rounded-md); padding: var(--spacing-3); transition: all 0.2s ease; position: relative; overflow: hidden; display: flex; flex-direction: column; gap: var(--spacing-3);}
 .plugin-scene .stage-block.selected { border-color: var(--color-accent); box-shadow: 0 0 8px rgba(255, 72, 0, 0.25); }
 .plugin-scene .stage-block.bypassed { border-color: transparent; background-color: rgba(0,0,0,0.05); }
-/* Yuuka: Drag animation v1.0 - Ẩn phần tử gốc khi đang kéo. */
-.plugin-scene .stage-block.dragging { opacity: 0; transform: rotate(3deg); }
+/* Yuuka: Drag fix v2.0 - Cập nhật style khi kéo Stage, thu gọn cả W và H */
+.plugin-scene .stage-block.dragging {
+    opacity: 0.5;
+    transform: rotate(3deg);
+    width: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-width: 0 !important;
+    overflow: hidden;
+}
 .plugin-scene .stage-category { margin-bottom: var(--spacing-2); }
 .plugin-scene .stage-category-label { font-size: 0.75em; font-weight: 600; color: var(--color-secondary-text); margin-bottom: 4px; display: block; }
 .plugin-scene .stage-category-tags { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; }
@@ -45,6 +62,27 @@ html.dark-mode .plugin-scene .scene-row.selected {
 .plugin-scene .add-scene-btn, .plugin-scene .add-stage-btn { border: 2px dashed var(--color-border); border-radius: var(--rounded-lg); display: flex; align-items: center; justify-content: center; font-size: 2em; color: var(--color-secondary-text); cursor: pointer; transition: all 0.2s ease; }
 .plugin-scene .add-stage-btn { border-radius: var(--rounded-md); align-self: stretch; }
 .plugin-scene .add-scene-btn:hover, .plugin-scene .add-stage-btn:hover { background-color: var(--color-border); color: var(--color-primary-text); }
+
+/* Yuuka: Drag fix v3.0 - Ẩn các nút "Add" một cách ổn định hơn */
+.add-scene-btn.is-hidden-during-drag,
+.add-stage-btn.is-hidden-during-drag {
+    width: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-width: 0 !important;
+    font-size: 0 !important;
+    overflow: hidden;
+    opacity: 0;
+}
+/* Yuuka: Drag fix v3.0 - Thêm style cho vùng thả của scene trống */
+.plugin-scene--is-dragging .scene-row .stages-wrapper:not(:has(.stage-block)) {
+    min-height: 100px;
+    padding: var(--spacing-4);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--rounded-md);
+}
+
 .plugin-scene .drag-placeholder { background-color: rgba(255, 60, 0, 0.1); border: 2px dashed var(--color-accent); border-radius: var(--rounded-lg); box-sizing: border-box; flex-shrink: 0; }
 .plugin-scene .drag-placeholder.stage-placeholder { border-radius: var(--rounded-md); width: 240px; }
 .plugin-scene .drag-placeholder.tag-group-placeholder { border-radius: 4px; padding: 14px 8px; }
@@ -54,25 +92,11 @@ html.dark-mode .plugin-scene .scene-row.selected {
     width: 100%;
 }
 
-/* Yuuka: Drag animation v1.0 - Ẩn các nút "Add" khi đang kéo để tránh lỗi. */
-.plugin-scene.plugin-scene--is-dragging .add-scene-btn,
-.plugin-scene.plugin-scene--is-dragging .add-stage-btn {
-    display: none;
-}
-
 /* --- Yuuka: scene header v1.2 --- */
 .scene-header, .stage-header { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-4); cursor: grab; }
 .stage-header { padding: 0; border: none; margin: 0; }
 .header-name { font-weight: 600; font-size: 1em; flex-grow: 1; cursor: pointer; padding: 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .header-name:hover { background-color: var(--color-border); }
-/* Yuuka: Stage name v1.0 - Vô hiệu hóa tương tác cho tên của Stage. */
-.stage-header .header-name {
-    cursor: default;
-    font-size: 1.2em;
-}
-.stage-header .header-name:hover {
-    background-color: transparent;
-}
 .header-name-edit { width: 100%; font-size: inherit; font-weight: inherit; border: 1px solid var(--color-accent); background: var(--color-primary-bg); border-radius: 4px; padding: 3px; }
 .header-buttons { display: flex; align-items: center; gap: var(--spacing-1); flex-shrink: 0; }
 .header-btn { width: 32px; height: 32px; border: none; background: transparent; color: var(--color-secondary-text); border-radius: var(--rounded-full); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background-color 0.2s, color 0.2s; }
