@@ -8,7 +8,7 @@ class NavibarPlugin:
     """
     def __init__(self, core_api):
         self.core_api = core_api
-        print("[Plugin:Navibar] Backend initialized (placeholder).")
+        print("[Plugin:Navibar] Backend initialized.")
 
     def get_blueprint(self):
         """

@@ -88,11 +88,15 @@ class CharacterListComponent {
 
     destroy() {
         console.log("[Plugin:CharacterList] Destroying...");
+        // Yuuka: navibar integration v2.0 - Hide search bar on exit
+        const navibar = window.Yuuka.services.navibar;
+        if (navibar && navibar._isSearchActive) {
+            navibar.showSearchBar(null);
+        }
         // Yuuka: Grid zoom v2.0 - clean up zoom state
         if (this.zoomState.active) {
             this.handleZoomEnd();
         }
-        this.floatingSearchBar.classList.remove('show');
         this.resultFooter.style.display = 'none';
         this.observer.disconnect();
         this.detachEventListeners();
@@ -117,84 +121,55 @@ class CharacterListComponent {
     }
     
     _updateNav() {
-        // YUUKA: Chuyển sang sử dụng service của plugin navibar
         const navibar = window.Yuuka.services.navibar;
-        if (!navibar) return;
-
-        const mainNavButtons = [];
-        let toolButtons = [];
-
-        // 1. Lấy thông tin các plugin khác
-        const scenePlugin = this.activePlugins.find(p => p.id === 'scene');
-        const albumPlugin = this.activePlugins.find(p => p.id === 'album');
-        
-        // 2. Tạo nút Scene nếu có
-        if (scenePlugin?.ui?.tab) {
-             mainNavButtons.push({
-                id: `scene-tab`, group: 'main', icon: scenePlugin.ui.tab.icon, title: scenePlugin.ui.tab.label,
-                onClick: () => Yuuka.ui.switchTab(scenePlugin.ui.tab.id)
-            });
+        if (!navibar) {
+            console.warn("[CharacterList] Navibar service not yet available.");
+            return;
         }
-        
-        // 3. Tạo nút Album nếu có
-        if (albumPlugin?.ui?.tab) {
-             mainNavButtons.push({
-                id: `album-tab`, group: 'main', icon: albumPlugin.ui.tab.icon, title: albumPlugin.ui.tab.label,
-                onClick: () => Yuuka.ui.switchTab(albumPlugin.ui.tab.id)
-            });
-        }
-        
-        // 4. Thêm nút Browse (chính plugin này)
-        mainNavButtons.push({
-            id: 'browse-tab', group: 'main', icon: 'grid_view', title: 'Duyệt / Trộn ngẫu nhiên',
-            isActive: () => this.state.displayMode === 'browse',
-            onClick: () => {
-                if (this.state.displayMode === 'browse') { 
-                    // Yuuka: Card enter animation v1.1 - Randomly select an animation
-                    const animName = this.enterAnimations[Math.floor(Math.random() * this.enterAnimations.length)];
-                    this.state.currentAnimationClass = `card-anim-${animName}`;
-                    this.state.animateNextLoad = true; 
-                    this._shuffleSessionOrder(); 
-                    this.resetAndLoad(); 
-                } 
-                else { 
-                    this.state.displayMode = 'browse';
-                    this.state.animateNextLoad = true; // Yuuka: Tab switch animation v1.0
-                    this.state.currentAnimationClass = 'card-anim-rise'; // Yuuka: Tab switch animation v1.0
-                    this.resetAndLoad(); 
-                    this._updateNav();
-                }
-            }
-        });
 
-        // 5. Thêm nút List (Favourite/Blacklist)
-        mainNavButtons.push({
-            id: 'lists-tab', group: 'main', 
+        // Yuuka: navibar auto-init v1.0 - Gỡ bỏ việc đăng ký nút chính 'cl-browse'
+        // Navibar sẽ tự động đăng ký nút này từ manifest.
+
+        // Register the tool button for Favourites/Blacklist
+        navibar.registerButton({
+            id: 'cl-lists',
+            type: 'tools',
+            pluginId: 'character-list',
+            order: 10,
             icon: this.state.displayMode === 'blacklist' ? 'block' : 'favorite',
             title: this.state.displayMode === 'blacklist' ? 'Danh sách đen' : 'Yêu thích',
             isActive: () => ['favourites', 'blacklist'].includes(this.state.displayMode),
             onClick: () => {
                 this.state.displayMode = (this.state.displayMode === 'favourites') ? 'blacklist' : 'favourites';
-                this.state.animateNextLoad = true; // Yuuka: Tab switch animation v1.0
-                this.state.currentAnimationClass = 'card-anim-rise'; // Yuuka: Tab switch animation v1.0
-                this.resetAndLoad(); 
+                this.state.animateNextLoad = true;
+                this.state.currentAnimationClass = 'card-anim-rise';
+                this.resetAndLoad();
                 this._updateNav();
             }
         });
         
-        // 6. Tạo nút Search (công cụ)
-        toolButtons.push({
-            id: 'search', group: 'tools', icon: 'search', title: 'Tìm kiếm',
-            isActive: () => this.floatingSearchBar.classList.contains('show'),
+        // Register the tool button for Search
+        navibar.registerButton({
+            id: 'cl-search',
+            type: 'tools',
+            pluginId: 'character-list',
+            order: 20,
+            icon: 'search',
+            title: 'Tìm kiếm',
+            isActive: () => navibar._isSearchActive, // Check navibar's state
             onClick: () => {
-                this.floatingSearchBar.classList.toggle('show');
-                if (this.floatingSearchBar.classList.contains('show')) this.searchBox.focus();
-                else this.searchBox.blur();
-                this._updateNav();
+                const searchFormElement = document.getElementById('search-form');
+                if (navibar._isSearchActive) {
+                    navibar.showSearchBar(null);
+                } else {
+                    navibar.showSearchBar(searchFormElement);
+                    this.searchBox.focus();
+                }
             }
         });
-        
-        navibar.setButtons([...mainNavButtons, ...toolButtons]);
+
+        // Tell navibar this plugin is active so it shows the tool buttons
+        navibar.setActivePlugin('character-list');
     }
 
     _shuffleSessionOrder() { let b = this.state.allCharacters.filter(c => !this.state.blacklist.includes(c.hash)); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[b[i], b[j]] = [b[j], b[i]]; } this.state.sessionBrowseOrder = b; }

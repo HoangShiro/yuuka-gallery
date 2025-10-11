@@ -1,39 +1,67 @@
-/* --- NEW FILE: plugins/navibar/static/navibar.css --- */
-
+/* --- MODIFIED FILE: plugins/navibar/static/navibar.css --- */
 #main-nav { 
     position: fixed; 
-    bottom: var(--spacing-4); 
-    left: 50%; 
-    transform: translateX(-50%); 
-    z-index: 1600; /* Yuuka: z-index bump v1.1 */
-    display: flex; 
-    align-items: center; 
-    width: auto; 
-    max-width: 90%; 
+    bottom: var(--spacing-3); 
+    left: 0;
+    width: 100vw; /* Yuuka: centering fix v1.0 - Use full viewport width */
+    z-index: 1600;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-2);
+    pointer-events: none; /* Yuuka: centering fix v1.0 - Allow clicks to pass through the container */
+}
+
+.navibar-container {
+    width: 350px;
+    max-width: 90vw;
+    background: rgba(255, 255, 255, 0.7); 
+    backdrop-filter: blur(12px); 
+    -webkit-backdrop-filter: blur(12px); 
+    border-radius: var(--rounded-lg);
+    border: 1px solid rgba(255, 255, 255, 0.2); 
+    box-shadow: 0 4px 12px var(--color-shadow); 
+    padding: var(--spacing-3);
+    
+    transform: translateY(10px) scale(0.95);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), 
+                opacity 0.3s ease;
+    pointer-events: auto; /* Yuuka: centering fix v1.0 - Re-enable pointer events for this element */
+}
+html.dark-mode .navibar-container {
+    background: rgba(42, 39, 38, 0.7); 
+    border: 1px solid rgba(255, 255, 255, 0.1); 
+}
+
+.navibar-container.is-open {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#navibar-main-bar {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--spacing-2);
+    width: 350px;
+    max-width: 90vw;
     background: rgba(255, 255, 255, 0.6); 
     backdrop-filter: blur(10px); 
     -webkit-backdrop-filter: blur(10px); 
     padding: var(--spacing-2); 
     border-radius: var(--rounded-full); 
     border: 1px solid rgba(255, 255, 255, 0.2); 
-    box-shadow: 0 4px 12px var(--color-shadow); 
+    box-shadow: 0 4px 12px var(--color-shadow);
+    pointer-events: auto; /* Yuuka: centering fix v1.0 - Re-enable pointer events for this element */
 }
-html.dark-mode #main-nav { 
+html.dark-mode #navibar-main-bar {
     background: rgba(42, 39, 38, 0.6); 
     border: 1px solid rgba(255, 255, 255, 0.1); 
 }
 
-.nav-group { 
-    display: flex; 
-    gap: var(--spacing-2); 
-    align-items: center;
-}
-.nav-spacer { 
-    flex-grow: 1; 
-    min-width: var(--spacing-4); 
-}
-
-.nav-btn { 
+.nav-btn, .main-bar-slot { /* Yuuka: ghost row v2.4 - Áp dụng style chung cho cả slot */
     width: 52px; 
     height: 52px; 
     border-radius: var(--rounded-full); 
@@ -44,38 +72,75 @@ html.dark-mode #main-nav {
     align-items: center; 
     justify-content: center; 
     color: var(--color-primary-text); 
-    flex-shrink: 0;
-    overflow: hidden;
-
-    /* YUUKA: Thêm transition cho animation */
-    transition: background-color 0.2s, color 0.2s, transform 0.1s ease-out, 
-                opacity 0.3s ease, width 0.3s ease, 
-                padding 0.3s ease, margin 0.3s ease;
+    transition: all 0.2s ease;
+    padding: 0; /* Yuuka: ghost row v2.4 */
 }
-
-.nav-btn:hover { 
+.nav-btn:not(.is-placeholder):hover { 
     background: rgba(0, 0, 0, 0.05); 
 }
-.nav-btn:active { 
+.nav-btn:not(.is-placeholder):active { 
     transform: scale(0.9); 
 }
-html.dark-mode .nav-btn:hover { 
+html.dark-mode .nav-btn:not(.is-placeholder):hover { 
     background: rgba(255, 255, 255, 0.1); 
 }
 
-.nav-btn.active { 
+.nav-btn.active:not(.is-placeholder) { 
     background-color: var(--color-accent); 
     color: white; 
 }
-.nav-btn.active .material-symbols-outlined { 
+.nav-btn.active:not(.is-placeholder) .material-symbols-outlined { 
     font-variation-settings: 'FILL' 1; 
 }
 
-/* YUUKA: CSS cho animation thêm/xóa/ẩn button */
-.nav-btn.is-hidden {
-    width: 0;
-    opacity: 0;
-    padding: 0;
-    margin: 0 !important; /* Quan trọng để xóa gap */
-    pointer-events: none;
+/* Yuuka: placeholder style v2.4 - Bỏ nền */
+.nav-btn.is-placeholder {
+    cursor: default;
+    background: transparent;
+}
+
+
+/* Yuuka: category separator v2.3 */
+#navibar-categories .category-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--spacing-2);
+    padding-bottom: var(--spacing-2);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    margin-bottom: var(--spacing-2);
+}
+#navibar-categories .category-row:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+html.dark-mode #navibar-categories .category-row {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+
+/* Yuuka: Drag and Drop styles v2.0 - Thêm hiệu ứng cho category */
+.nav-btn.is-dragging {
+    opacity: 0.5;
+    transform: scale(0.9);
+}
+
+/* Yuuka: ghost row v2.4 - Áp dụng cho cả button và slot trống */
+.main-bar-slot.drop-target-hover,
+.nav-btn.drop-target-hover { 
+    background-color: var(--color-accent) !important;
+    opacity: 0.3;
+    transform: scale(1.1);
+}
+
+/* Yuuka: empty placeholder v1.0 */
+.category-row.is-empty-placeholder {
+    min-height: 52px; /* Chiều cao của một nút */
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+    grid-template-columns: 1fr; /* Chỉ cần một cột để giữ chỗ */
+}
+.category-row.is-empty-placeholder .nav-btn {
+    visibility: hidden; /* Ẩn placeholder nhưng vẫn chiếm không gian */
 }

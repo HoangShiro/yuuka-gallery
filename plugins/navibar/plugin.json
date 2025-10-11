@@ -1,9 +1,9 @@
 {
     "id": "navibar",
     "name": "Navigation Bar",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "author": "Yuuka",
-    "description": "Cung cấp thanh điều hướng chính dạng singleton cho toàn bộ ứng dụng.",
+    "description": "Cung cấp thanh điều hướng chính dạng singleton với các slot có thể tùy chỉnh và một container mở rộng.",
     "static_folder": "static",
     "entry_points": {
         "backend": "backend:NavibarPlugin",

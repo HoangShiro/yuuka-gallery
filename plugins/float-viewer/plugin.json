@@ -15,6 +15,13 @@
     },
     "ui": {
         "is_singleton": true,
-        "needs_generation_poller": true
+        "needs_generation_poller": true,
+        "tab": {
+            "id": "float-viewer",
+            "icon": "wallpaper_slideshow",
+            "label": "Floating Image Viewer",
+            "is_service_launcher": true
+        },
+        "order": 30
     }
 }

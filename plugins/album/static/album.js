@@ -35,6 +35,9 @@ class AlbumComponent {
         Yuuka.events.on('generation:update', this.handleGenerationUpdate);
         Yuuka.events.on('image:deleted', this.handleImageDeleted); // Yuuka: event bus v1.0
 
+        // Yuuka: navibar v2.0 integration - Đăng ký button một lần
+        this._registerNavibarButtons();
+
         const initialState = window.Yuuka.initialPluginState.album;
         if (initialState) {
             this.state.selectedCharacter = initialState.character;
@@ -57,6 +60,9 @@ class AlbumComponent {
         Yuuka.events.off('generation:update', this.handleGenerationUpdate);
         Yuuka.events.off('image:deleted', this.handleImageDeleted); // Yuuka: event bus v1.0
         
+        // Yuuka: navibar state fix v1.0 - Gỡ bỏ việc gọi setActivePlugin(null).
+        // Component mới được init sẽ chịu trách nhiệm set active plugin.
+
         this.contentArea.innerHTML = '';
         this.container.classList.remove('plugin-album');
     }
@@ -160,27 +166,54 @@ class AlbumComponent {
     }
 
     // --- END OF REFACTORED HANDLERS ---
+    
+    // Yuuka: navibar v2.0 integration
+    _registerNavibarButtons() {
+        const navibar = window.Yuuka.services.navibar;
+        if (!navibar) return;
+
+        // Yuuka: navibar auto-init v1.0 - Gỡ bỏ việc đăng ký nút chính 'album-main'
+        // Navibar sẽ tự động đăng ký nút này từ manifest.
+
+        // 2. Tool buttons (only visible when active)
+        navibar.registerButton({
+            id: 'album-settings',
+            type: 'tools',
+            pluginId: 'album',
+            order: 1,
+            icon: 'tune',
+            title: 'Cấu hình',
+            onClick: () => this.openSettings()
+        });
+
+        navibar.registerButton({
+            id: 'album-generate',
+            type: 'tools',
+            pluginId: 'album',
+            order: 2,
+            icon: 'auto_awesome',
+            title: 'Tạo ảnh mới',
+            onClick: () => {
+                // Logic kiểm tra điều kiện được chuyển vào đây
+                const tasksForThisChar = this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length;
+                if (tasksForThisChar >= 5) {
+                    showError("Đã đạt giới hạn 5 tác vụ đồng thời.");
+                    return;
+                }
+                if (!this.state.isComfyUIAvaidable) {
+                    showError("ComfyUI chưa kết nối.");
+                    return;
+                }
+                this._startGeneration();
+            }
+        });
+    }
 
     _updateNav() {
         const navibar = window.Yuuka.services.navibar;
         if (!navibar) return;
-        let mainNavButtons = [], toolButtons = [];
-        const characterListPlugin = this.activePlugins.find(p => p.id === 'character-list');
-        const scenePlugin = this.activePlugins.find(p => p.id === 'scene');
-
-        if (characterListPlugin?.ui?.tab) mainNavButtons.push({ id: 'browse-tab', group: 'main', icon: characterListPlugin.ui.tab.icon, title: characterListPlugin.ui.tab.label, onClick: () => Yuuka.ui.switchTab(characterListPlugin.ui.tab.id), isActive: () => false });
-        if (scenePlugin?.ui?.tab) mainNavButtons.push({ id: 'scene-tab', group: 'main', icon: scenePlugin.ui.tab.icon, title: scenePlugin.ui.tab.label, onClick: () => Yuuka.ui.switchTab(scenePlugin.ui.tab.id) });
-        
-        if (this.state.viewMode === 'album') {
-            const tasksForThisChar = this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length;
-            const hasReachedLimit = tasksForThisChar >= 5;
-            toolButtons = [
-                { id: 'settings', group: 'tools', icon: 'tune', title: 'Cấu hình', onClick: () => this.openSettings() },
-                { id: 'generate', group: 'tools', icon: 'auto_awesome', title: hasReachedLimit ? 'Đã đạt giới hạn' : 'Tạo ảnh mới', onClick: () => this._startGeneration(), disabled: () => hasReachedLimit || !this.state.isComfyUIAvaidable },
-            ];
-            mainNavButtons.push({ id: `album-back-btn`, group: 'main', icon: 'arrow_back', title: 'Quay lại Album chính', isActive: () => true, onClick: () => { this.state.viewMode = 'grid'; this.showCharacterSelectionGrid(); this._updateNav(); } });
-        } 
-        navibar.setButtons([...mainNavButtons, ...toolButtons]);
+        // Chỉ cần báo cho navibar biết plugin nào đang hoạt động
+        navibar.setActivePlugin(this.state.viewMode === 'album' ? 'album' : null);
     }
     
     async checkComfyUIStatus() { try{const s=await this.api.album.get('/comfyui/info').catch(()=>({}));const t=s?.last_config?.server_address||'127.0.0.1:8888';await this.api.server.checkComfyUIStatus(t);this.state.isComfyUIAvaidable=true;}catch(e){this.state.isComfyUIAvaidable=false;showError("Album: Không thể kết nối ComfyUI.");}}
@@ -274,7 +307,13 @@ class AlbumComponent {
         }
     }
 
-    updateUI(state, text='') { const f=this.container.querySelector('.plugin-album__footer');if(state==='error'){this.contentArea.innerHTML=`<div class="error-msg">${text}</div>`;if(f)f.style.display='none';}else if(state==='loading'){this.contentArea.innerHTML=`<div class="loader visible">${text}</div>`;if(f)f.style.display='none';}else{if(f){f.textContent=text;f.style.display=text?'block':'none';}}}
+    updateUI(state, text='') {
+        if (state === 'error') {
+            this.contentArea.innerHTML = `<div class="error-msg">${text}</div>`;
+        } else if (state === 'loading') {
+            this.contentArea.innerHTML = `<div class="loader visible">${text}</div>`;
+        }
+    }
     
     async showCharacterSelectionGrid() {
         this.state.selectedCharacter = null;
@@ -315,13 +354,15 @@ class AlbumComponent {
         }
     }
     
-    renderCharacterAlbumView() { this.contentArea.innerHTML=`<div class="plugin-album__grid image-grid"></div><div class="plugin-album__footer"></div>`;this._renderImageGrid();}
+    renderCharacterAlbumView() { 
+        this.contentArea.innerHTML = `<div class="plugin-album__grid image-grid"></div>`;
+        this._renderImageGrid();
+    }
     
     _renderImageGrid() {
         const grid = this.contentArea.querySelector('.plugin-album__grid');
         if (!grid) return;
         grid.innerHTML = '';
-        this.updateUI('content', `Album: ${this.state.selectedCharacter.name}`);
         this.state.allImageData.forEach(imgData => grid.appendChild(this._createImageCard(imgData)));
         if (this.state.allImageData.length === 0 && grid.children.length === 0) {
              grid.innerHTML = `<p class="plugin-album__empty-msg">Album này chưa có ảnh.</p>`;
@@ -352,12 +393,13 @@ class AlbumComponent {
     renderImageViewer(imgData) {
         const i = this.state.allImageData.findIndex(img => img.id === imgData.id);
         const tasksForThisChar = this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length;
+        const isGenDisabled = tasksForThisChar >= 5 || !this.state.isComfyUIAvaidable;
         this.viewer.open({
             items: this.state.allImageData.map(d => ({ ...d, imageUrl: d.url })),
             startIndex: i,
             renderInfoPanel: (item) => {const c=item.generationConfig;if(!c)return"Không có thông tin.";const r=(l,v)=>{if(!v||(typeof v==='string'&&v.trim()===''))return'';const s=document.createElement('span');s.textContent=v;return`<div class="info-row"><strong>${l}:</strong> <span>${s.innerHTML}</span></div>`;};const d=new Date(item.createdAt*1000).toLocaleString('vi-VN');const ct = item.creationTime ? `${item.creationTime.toFixed(2)} giây` : `~${(16 + Math.random() * 6).toFixed(2)} giây`;const m=['character','outfits','expression','action','context','quality','negative'].map(k=>r(k.charAt(0).toUpperCase()+k.slice(1),c[k])).filter(Boolean).join('');const t=`<div class="info-grid">${r('Model',c.ckpt_name?.split('.')[0])}${r('Sampler',`${c.sampler_name} (${c.scheduler})`)}${r('Cỡ ảnh',`${c.width}x${c.height}`)}${r('Steps',c.steps)}${r('CFG',c.cfg)}${r('LoRA',c.lora_name)}</div>`;return`${m}${m?'<hr>':''}${t}<hr>${r('Ngày tạo',d)}${r('Thời gian tạo',ct)}`.trim();}, // Yuuka: creation time patch v1.1
             actionButtons: [
-                { id: 'regen', icon: 'auto_awesome', title: 'Tạo lại', disabled: () => tasksForThisChar >= 5 || !this.state.isComfyUIAvaidable, onClick: (item, close) => { close(); this._startGeneration(item.generationConfig); } },
+                { id: 'regen', icon: 'auto_awesome', title: 'Tạo lại', disabled: isGenDisabled, onClick: (item, close) => { close(); this._startGeneration(item.generationConfig); } },
                 { id: 'copy', icon: 'content_copy', title: 'Copy Prompt', onClick: (item) => { const c = item.generationConfig, k = ['outfits', 'expression', 'action', 'context', 'quality', 'negative']; this.state.promptClipboard = new Map(k.map(key => [key, c[key] ? String(c[key]).trim() : ''])); showError("Prompt đã copy."); } },
                 { id: 'delete', icon: 'delete', title: 'Xóa',
                     onClick: async (item, close, updateItems) => {

@@ -17,8 +17,7 @@
         "tab": {
             "id": "album",
             "label": "Album",
-            "icon": "photo_album",
-            "show_search": false
+            "icon": "photo_album"
         },
         "order": 10,
         "needs_generation_poller": true

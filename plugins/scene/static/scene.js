@@ -46,7 +46,7 @@ class SceneComponent {
         this.container.classList.add('plugin-scene');
         this.container.innerHTML = `<div class="loader visible">Đang tải Scene...</div>`;
 
-        if (this.floatViewer) this.floatViewer.open();
+        // Yuuka: independent float viewer v1.0 - Gỡ bỏ việc tự động mở float-viewer
 
         try {
             const [scenes, tagGroups, tagPredictions] = await Promise.all([
@@ -72,7 +72,7 @@ class SceneComponent {
 
     destroy() {
         console.log("[Plugin:Scene] Destroying...");
-        if (this.floatViewer) this.floatViewer.close();
+        // Yuuka: independent float viewer v1.0 - Gỡ bỏ việc tự động đóng float-viewer
         this.detachEventListeners();
         Yuuka.events.off('generation:update', this.handleGenerationUpdate);
         clearInterval(this.state.generation.sceneRunInterval);
@@ -89,19 +89,9 @@ class SceneComponent {
         this.container.innerHTML = '';
         this.state.scenes.forEach((scene, index) => this.container.appendChild(this.createSceneRow(scene, index)));
         this.container.appendChild(this._createUIElement('div', { className: 'add-scene-btn', textContent: '+' }));
-        this._updateNav();
         this._updateGeneratingFX();
     }
     
-    _updateNav() {
-        const navibar = window.Yuuka.services.navibar; if (!navibar) return;
-        const characterListPlugin = this.activePlugins.find(p => p.id === 'character-list');
-        let mainNavButtons = [];
-        if (characterListPlugin?.ui?.tab) mainNavButtons.push({ id: 'browse-tab', group: 'main', icon: characterListPlugin.ui.tab.icon, title: characterListPlugin.ui.tab.label, onClick: () => Yuuka.ui.switchTab(characterListPlugin.ui.tab.id), isActive: () => false });
-        
-        navibar.setButtons([...mainNavButtons]);
-    }
-
     _createHeader(item, type, index) {
         const header = this._createUIElement('div', { className: `${type}-header` });
 

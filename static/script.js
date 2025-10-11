@@ -250,7 +250,7 @@ function renderLoginForm(message = '') {
 }
 
 async function switchTab(tabName) {
-    if (state.activeTab === tabName) return;
+    // Yuuka: reload on active tab click v1.0 - Gỡ bỏ điều kiện return sớm để cho phép tải lại.
     state.activeTab = tabName;
 
     if (state.currentPluginInstance && typeof state.currentPluginInstance.destroy === 'function') {
@@ -394,7 +394,13 @@ async function initializeAppUI() {
         const ComponentClass = window.Yuuka.components[componentName];
 
         if (ComponentClass) {
-            if (plugin.ui?.tab) {
+            // Yuuka: service launcher fix v1.0 - Thay đổi thứ tự logic
+            if (plugin.ui?.is_singleton) {
+                console.log(`[Core] Initializing singleton UI plugin: ${plugin.id}`);
+                const serviceInstance = new ComponentClass(null, api, activePluginsUI);
+                window.Yuuka.services[plugin.id] = serviceInstance;
+            } 
+            else if (plugin.ui?.tab) {
                 const tabBtn = document.createElement('button');
                 tabBtn.className = 'tab-btn';
                 tabBtn.dataset.tab = plugin.ui.tab.id;
@@ -410,11 +416,6 @@ async function initializeAppUI() {
                         mainContainer.appendChild(pluginContainer);
                     }
                 }
-            } 
-            else if (plugin.ui?.is_singleton) {
-                console.log(`[Core] Initializing singleton UI plugin: ${plugin.id}`);
-                const serviceInstance = new ComponentClass(null, api);
-                window.Yuuka.services[plugin.id] = serviceInstance;
             }
             else {
                  console.log(`[Core] Initializing pure JS service plugin: ${plugin.id}`);

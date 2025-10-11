@@ -17,8 +17,7 @@
         "tab": {
             "id": "browse",
             "label": "Browse",
-            "icon": "grid_view",
-            "show_search": true
+            "icon": "grid_view"
         },
         "order": 0
     }

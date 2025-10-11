@@ -14,6 +14,13 @@
         "css": ["slot_machine.css"]
     },
     "ui": {
-        "is_singleton": true
+        "is_singleton": true,
+        "tab": {
+            "id": "slot-machine",
+            "icon": "casino",
+            "label": "Slot Machine",
+            "is_service_launcher": true
+        },
+        "order": 35
     }
 }

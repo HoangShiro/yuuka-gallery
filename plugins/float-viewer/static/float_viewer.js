@@ -43,9 +43,20 @@ class FloatViewerComponent {
         Yuuka.events.on('generation:task_ended', this.handleTaskEnded);
         Yuuka.events.on('image:added', this.handleImageAdded);
         Yuuka.events.on('image:deleted', this.handleImageDeleted);
+        
+        // Yuuka: startup bug fix v2.0 - Sửa logic khởi động lại
+        if (this.state.isOpen) {
+            this.initDOM(); // Tạo DOM
+            this.element.style.display = 'flex'; // Hiển thị ngay lập tức
+            this.reload();  // Tải dữ liệu cho viewer đã hiển thị
+        }
     }
 
     // --- Public API Methods ---
+    start() { // Yuuka: service launcher v1.0
+        this.toggle();
+    }
+
     open() {
         if (this.state.isOpen) return;
         if (!this.element) this.initDOM();
@@ -53,6 +64,7 @@ class FloatViewerComponent {
         this.updatePositionAndSize();
         this.element.style.display = 'flex';
         this.state.isOpen = true;
+        this._saveState(); // Yuuka: independent float viewer v1.0
         this.reload();
     }
 
@@ -60,6 +72,7 @@ class FloatViewerComponent {
         if (!this.state.isOpen || !this.element) return;
         this.element.style.display = 'none';
         this.state.isOpen = false;
+        this._saveState(); // Yuuka: independent float viewer v1.0
         if (this.observer) this.observer.disconnect(); // Yuuka: image lazy-load v1.0
         // YUUKA'S FIX: Không xóa placeholderTasks ở đây để chúng có thể được cập nhật nếu viewer mở lại
     }
@@ -83,23 +96,25 @@ class FloatViewerComponent {
     
     // --- YUUKA: CÁC HÀM XỬ LÝ SỰ KIỆN TỪ EVENT BUS ---
     handleGenerationStarted(taskData) {
-        if (!this.state.isOpen) this.open();
+        // Yuuka: independent float viewer v1.0 - Gỡ bỏ việc tự động mở float-viewer
         const taskId = taskData.task_id;
         if (this.state.placeholderTasks.has(taskId)) return;
 
         const placeholder = this._createPlaceholderElement(taskId, taskData.progress_message);
         this.state.placeholderTasks.set(taskId, { element: placeholder });
 
-        // YUUKA'S FIX: Đảm bảo gallery tồn tại trước khi thêm placeholder
-        if (!this.gallery) {
-            this.renderContent();
-        }
-        
-        const emptyMsg = this.content.querySelector('.float-viewer-loader');
-        if(emptyMsg) emptyMsg.style.display = 'none';
+        // Nếu viewer đang mở, thêm placeholder vào UI ngay lập tức
+        if (this.state.isOpen) {
+            if (!this.gallery) {
+                this.renderContent();
+            }
+            
+            const emptyMsg = this.content.querySelector('.float-viewer-loader');
+            if(emptyMsg) emptyMsg.style.display = 'none';
 
-        this.gallery.prepend(placeholder);
-        this.updateLayout();
+            this.gallery.prepend(placeholder);
+            this.updateLayout();
+        }
     }
 
     handleGenerationUpdate(allTasksStatus) {
@@ -169,8 +184,8 @@ class FloatViewerComponent {
     }
     // --- KẾT THÚC CÁC HÀM XỬ LÝ SỰ KIỆN ---
 
-    _saveState() { const stateToSave = { pos: this.state.pos, size: this.state.size, snapEdge: this.state.snapEdge, preSnapState: this.state.preSnapState }; localStorage.setItem('yuuka-float-viewer-state', JSON.stringify(stateToSave)); }
-    _loadState() { const savedStateJSON = localStorage.getItem('yuuka-float-viewer-state'); if (savedStateJSON) { try { const savedState = JSON.parse(savedStateJSON); if (savedState.pos && savedState.size) { this.state.pos = savedState.pos; this.state.size = savedState.size; this.state.snapEdge = savedState.snapEdge || null; this.state.preSnapState = savedState.preSnapState || null; } } catch (e) { console.error("Yuuka: Lỗi khi đọc trạng thái float-viewer, sẽ dùng giá trị mặc định.", e); } } }
+    _saveState() { const stateToSave = { pos: this.state.pos, size: this.state.size, snapEdge: this.state.snapEdge, preSnapState: this.state.preSnapState, isOpen: this.state.isOpen }; localStorage.setItem('yuuka-float-viewer-state', JSON.stringify(stateToSave)); } // Yuuka: independent float viewer v1.0
+    _loadState() { const savedStateJSON = localStorage.getItem('yuuka-float-viewer-state'); if (savedStateJSON) { try { const savedState = JSON.parse(savedStateJSON); if (savedState.pos && savedState.size) { this.state.pos = savedState.pos; this.state.size = savedState.size; this.state.snapEdge = savedState.snapEdge || null; this.state.preSnapState = savedState.preSnapState || null; this.state.isOpen = savedState.isOpen || false; } } catch (e) { console.error("Yuuka: Lỗi khi đọc trạng thái float-viewer, sẽ dùng giá trị mặc định.", e); } } } // Yuuka: independent float viewer v1.0
     _ensureOnScreen() { const { w, h } = this.state.size; let { x, y } = this.state.pos; const winW = window.innerWidth; const winH = window.innerHeight; const newW = Math.min(w, winW); const newH = Math.min(h, winH); const newX = Math.max(0, Math.min(x, winW - newW)); const newY = Math.max(0, Math.min(y, winH - newH)); this.state.pos = { x: newX, y: newY }; this.state.size = { w: newW, h: newH }; }
 
     initDOM() {

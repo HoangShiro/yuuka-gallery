@@ -1,4 +1,4 @@
-// --- NEW FILE: plugins/slot-machine/static/slot_machine.js ---
+// --- MODIFIED FILE: plugins/slot-machine/static/slot_machine.js ---
 // Yuuka: Slot Machine plugin refactor v1.0
 
 class SlotMachineService {
@@ -41,10 +41,8 @@ class SlotMachineService {
         this.totalSpins = parseInt(localStorage.getItem('yuuka-slot-total-spins') || '0', 10);
         this.highScore = parseInt(localStorage.getItem('yuuka-slot-high-score') || '0', 10);
         this.totalJackpots = parseInt(localStorage.getItem('yuuka-slot-total-jackpots') || '0', 10);
-    }
-    
-    // Yuuka: plugin refactor v1.0 - Thêm hàm init để đăng ký listener toàn cục
-    init() {
+
+        // Yuuka: Logic initialization moved to constructor v1.0
         console.log("[Plugin:SlotMachine] Service initialized, registering global triggers.");
         
         // Trigger 1: Lệnh /jackpot
@@ -63,16 +61,23 @@ class SlotMachineService {
                  this.start();
              }
         });
+
+        // Yuuka: navibar auto-init v1.0 - Gỡ bỏ việc đăng ký nút thủ công
     }
 
-    // Yuuka: plugin refactor v1.0 - Hàm start giờ sẽ tự fetch dữ liệu
+    // Yuuka: plugin refactor v1.0 - async start()
     async start(options = {}) {
         if (this.backdrop) return; // Đang chạy rồi thì thôi
+
+        // Yuuka: session state reset v1.0
+        this.sessionSpins = 0;
+        this.sessionScore = 0;
+        this.sessionJackpots = 0;
 
         try {
             const [charResponse, listsResponse] = await Promise.all([
                 this.api.getAllCharacters(),
-                this.api.core.get('/lists') // API từ plugin core
+                this.api['character-list'].get('/lists') // Yuuka: api fix v1.1 - Sửa lại lời gọi API
             ]);
             
             const allCharacters = charResponse.characters;
