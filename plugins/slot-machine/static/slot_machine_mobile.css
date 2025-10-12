@@ -1,0 +1,136 @@
+/* --- MODIFIED FILE: plugins/slot-machine/static/slot_machine_mobile.css --- */
+/* 
+ * ===============================================
+ *  YUUKA-WEB - SLOT MACHINE PLUGIN (MOBILE) - v2.0 REWORK
+ * ===============================================
+ */
+
+/* Chỉ áp dụng các style này khi backdrop có class 'is-mobile' */
+.slot-machine-backdrop.is-mobile {
+    /* Yuuka: mobile layout v2.1 - Thêm biến scale và căn giữa */
+    --slot-card-mobile-scale: 0.4;
+    justify-content: center; /* Căn giữa theo chiều dọc */
+}
+
+/* 1. Container chính cho các cột quay */
+.is-mobile .slot-machine-reels-container {
+    display: flex;
+    flex-direction: row; /* Các cột xếp thành hàng ngang */
+    justify-content: center;
+    align-items: center;
+    gap: var(--spacing-2); /* Yuuka: mobile layout v2.1 - Giảm gap */
+    position: relative; /* Context cho frame */
+    height: 100vh; /* Yuuka: mobile layout v2.2 - Phủ hết chiều cao màn hình */
+}
+
+/* 2. Cột quay (viewport) */
+.is-mobile .slot-column {
+    /* Yuuka: mobile layout v2.1 - Cập nhật width theo biến scale */
+    width: calc(var(--slot-card-width) * var(--slot-card-mobile-scale));
+    height: 100%;
+    overflow: hidden; /* QUAN TRỌNG: Ẩn các card ngoài viewport */
+    position: relative;
+    /* Yuuka: mobile layout v2.1 - Thêm hiệu ứng mờ dần ở biên */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+}
+
+/* 3. Dải thẻ bài (phần được animation) */
+.is-mobile .slot-strip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* Hiệu ứng chuyển động mượt mà */
+    transition: transform 4s cubic-bezier(0.25, 1, 0.5, 1);
+    will-change: transform;
+}
+
+/* 4. Khung kết quả, giờ là một hàng ngang bao quanh các cột */
+.is-mobile .slot-machine-frame {
+    /* Yuuka: mobile layout v2.1 - Cập nhật kích thước theo biến scale */
+    width: calc(var(--slot-card-width) * var(--slot-card-mobile-scale) * 3 + var(--spacing-2) * 4); /* Rộng bằng 3 cột + padding */
+    height: calc((var(--slot-card-height) * var(--slot-card-mobile-scale) * 3) + (var(--spacing-2) * 2) + 20px); /* Yuuka: mobile frame fix v1.0 - Cao bằng 3 card + gap */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: var(--rounded-lg);
+    border: 2px solid rgba(255, 255, 255, 0.3); /* Yuuka: mobile frame fix v1.0 - Tăng độ dày */
+}
+
+/* 5. Card nhân vật cho mobile (không thay đổi nhiều) */
+.is-mobile .slot-strip .character-card {
+    /* Yuuka: mobile layout v2.1 - Thu nhỏ card và đổi margin */
+    margin: 0 0 var(--spacing-2) 0;
+    width: calc(var(--slot-card-width) * var(--slot-card-mobile-scale));
+    height: calc(var(--slot-card-height) * var(--slot-card-mobile-scale));
+    flex-shrink: 0;
+}
+
+.is-mobile .slot-strip .character-card img {
+    /* Yuuka: mobile layout v2.1 - Cập nhật theo scale */
+    height: calc(150px * var(--slot-card-mobile-scale));
+}
+.is-mobile .slot-strip .character-card .name {
+    /* Yuuka: mobile layout v2.1 - Cập nhật theo scale */
+    height: calc(50px * var(--slot-card-mobile-scale));
+    padding: var(--spacing-1); /* Giảm padding cho vừa */
+    font-size: 0.4em; /* Giảm cỡ chữ */
+}
+
+.is-mobile .slot-machine-reels-container.has-picked-card .character-card:not(.is-picked) {
+    transform: scale(0.9);
+    filter: brightness(0.6);
+}
+
+/* 6. Nút điều khiển được bố trí lại */
+.is-mobile .slot-controls {
+    width: 100%;
+    bottom: var(--spacing-4);
+    position: absolute;
+}
+
+.is-mobile .slot-spin-btn {
+    width: 80px;
+    height: 80px;
+}
+.is-mobile .slot-spin-btn .material-symbols-outlined {
+    font-size: 3em;
+}
+
+.is-mobile .slot-cost-indicator {
+    bottom: 100%;
+    left: 50%;
+    right: auto;
+    top: auto;
+    transform: translate(-50%, -10px);
+    margin-right: 0;
+    width: auto;
+    background-color: rgba(0,0,0,0.3);
+}
+
+/* 7. Hiệu ứng popup điểm và stats */
+.is-mobile .slot-stats {
+    top: var(--spacing-2);
+    left: 50%;
+    transform: translateX(-50%);
+    right: auto;
+    gap: var(--spacing-3);
+    font-size: var(--font-size-base);
+    width: 95vw;
+    justify-content: center;
+}
+.is-mobile .stat-item .stat-value {
+    min-width: 80px;
+}
+
+.is-mobile .slot-score-popup-container {
+    width: 100vw;
+    height: 100px;
+    top: 25%; /* Đẩy lên cao hơn */
+}
+
+/* 8. Hiệu ứng mưa jackpot, scale nhỏ hơn */
+.is-mobile .jackpot-rain-card {
+    width: calc(var(--slot-card-width) * 0.7);
+    height: calc(var(--slot-card-height) * 0.7);
+}
