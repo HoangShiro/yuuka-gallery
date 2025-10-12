@@ -10,8 +10,8 @@
         "frontend_component": "SlotMachineService"
     },
     "assets": {
-        "js": ["slot_machine.js"],
-        "css": ["slot_machine.css"]
+        "js": ["slot_machine.js", "slot_machine_mobile.js"],
+        "css": ["slot_machine.css", "slot_machine_mobile.css"]
     },
     "ui": {
         "is_singleton": true,

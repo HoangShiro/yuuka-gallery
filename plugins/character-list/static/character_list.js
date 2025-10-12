@@ -183,34 +183,6 @@ class CharacterListComponent {
         }
     }
 
-    _copyToClipboard(text) {
-        return new Promise((resolve, reject) => {
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(text).then(resolve).catch(reject);
-            } else {
-                const textArea = document.createElement("textarea");
-                textArea.value = text;
-                textArea.style.position = 'fixed'; 
-                textArea.style.left = '-9999px';
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                try {
-                    const successful = document.execCommand('copy');
-                    if (successful) {
-                        resolve();
-                    } else {
-                        reject(new Error('Copy command was not successful'));
-                    }
-                } catch (err) {
-                    reject(err);
-                } finally {
-                    document.body.removeChild(textArea);
-                }
-            }
-        });
-    }
-
     async handleSearchSubmit(e) { 
         e.preventDefault(); 
         const q = this.searchBox.value.trim(); 
@@ -234,7 +206,8 @@ class CharacterListComponent {
         if (q === '/token') {
             const t = localStorage.getItem('yuuka-auth-token');
             if (t) {
-                this._copyToClipboard(t)
+                // Yuuka: auth rework v1.1 - Use global clipboard utility
+                Yuuka.ui.copyToClipboard(t)
                     .then(() => showError('Token đã sao chép.'))
                     .catch(() => showError('Lỗi: Không thể sao chép.'));
             } else {
@@ -246,7 +219,8 @@ class CharacterListComponent {
 
         if (q === '/blacklist share') {
             const s = 'BL-' + btoa(JSON.stringify(this.state.blacklist));
-            this._copyToClipboard(s)
+             // Yuuka: auth rework v1.1 - Use global clipboard utility
+            Yuuka.ui.copyToClipboard(s)
                 .then(() => showError('Mã chia sẻ blacklist đã sao chép.'))
                 .catch(() => showError('Lỗi: Không thể sao chép.'));
             this.searchBox.value = '';
@@ -255,18 +229,27 @@ class CharacterListComponent {
 
         if (q === '/favourite share') {
             const s = 'FV-' + btoa(JSON.stringify(this.state.favourites));
-            this._copyToClipboard(s)
+             // Yuuka: auth rework v1.1 - Use global clipboard utility
+            Yuuka.ui.copyToClipboard(s)
                 .then(() => showError('Mã chia sẻ favourite đã sao chép.'))
                 .catch(() => showError('Lỗi: Không thể sao chép.'));
             this.searchBox.value = '';
             return;
         }
 
-        const l = q.match(/^\/login\s+(.+)/);
-        if (l) {
-            const i = l[1];
-            try { await this.api.auth.shareTokenWithIP(i); showError(`Token đã chia sẻ cho IP: ${i}`); } 
-            catch (err) { showError(`Lỗi: ${err.message}`); }
+        const wl = q.match(/^\/whitelist\s+(.+)/);
+        if (wl) {
+            const tokenToAdd = wl[1].trim();
+            if (tokenToAdd) {
+                try {
+                    const result = await this.api['character-list'].post('/whitelist/add', { token: tokenToAdd });
+                    showError(result.message);
+                } catch (err) {
+                    showError(`Lỗi: ${err.message}`);
+                }
+            } else {
+                showError("Lỗi: Lệnh không hợp lệ. Cú pháp: /whitelist <token>");
+            }
             this.searchBox.value = '';
             return;
         }
@@ -289,7 +272,8 @@ class CharacterListComponent {
             const token = localStorage.getItem('yuuka-auth-token');
             if (token) {
                 try {
-                    await this._copyToClipboard(token);
+                    // Yuuka: auth rework v1.1 - Use global clipboard utility
+                    await Yuuka.ui.copyToClipboard(token);
                     sessionStorage.setItem('yuuka-logout-message', 'Đã đăng xuất. Token của bạn đã được sao chép vào clipboard.');
                 } catch (err) {
                     console.warn("Could not copy token to clipboard:", err);

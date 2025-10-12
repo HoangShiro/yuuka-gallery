@@ -86,6 +86,40 @@ window.Yuuka = {
         },
 
         /**
+         * YUUKA: HÀM MỚI ĐỂ SAO CHÉP VĂN BẢN VÀO CLIPBOARD
+         * @param {string} text - Nội dung cần sao chép.
+         * @returns {Promise<void>}
+         */
+        copyToClipboard(text) {
+            return new Promise((resolve, reject) => {
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).then(resolve).catch(reject);
+                } else {
+                    // Fallback for older browsers or non-secure contexts
+                    const textArea = document.createElement("textarea");
+                    textArea.value = text;
+                    textArea.style.position = 'fixed'; 
+                    textArea.style.left = '-9999px';
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    try {
+                        const successful = document.execCommand('copy');
+                        if (successful) {
+                            resolve();
+                        } else {
+                            reject(new Error('Copy command was not successful'));
+                        }
+                    } catch (err) {
+                        reject(err);
+                    } finally {
+                        document.body.removeChild(textArea);
+                    }
+                }
+            });
+        },
+
+        /**
          * YUUKA: SERVICE MỚI ĐỂ MỞ MODAL CẤU HÌNH
          * @param {object} options
          * @param {string} options.title - Tiêu đề của modal.
@@ -240,8 +274,18 @@ function renderLoginForm(message = '') {
 
     document.getElementById('generate-token-btn').addEventListener('click', async () => { 
         try { 
-            const data = await api.auth.generateTokenForIP(); 
-            localStorage.setItem('yuuka-auth-token', data.token); 
+            const data = await api.auth.generateToken(); 
+            localStorage.setItem('yuuka-auth-token', data.token);
+            
+            // Yuuka: auth rework v1.1 - Tự động sao chép token mới
+            try {
+                await Yuuka.ui.copyToClipboard(data.token);
+                showError("Token mới đã được tạo và sao chép!");
+            } catch (copyError) {
+                console.error("Failed to copy token:", copyError);
+                showError("Đã tạo token mới (không thể tự sao chép).");
+            }
+            
             await startApplication(); 
         } catch (error) { 
             renderLoginForm(`Lỗi tạo token: ${error.message}`); 
@@ -433,6 +477,7 @@ async function initializeAppUI() {
     }
 }
 
+// Yuuka: auth rework v1.0 - Viết lại hoàn toàn luồng khởi động
 async function startApplication() {
     console.log("[Core] Yuuka is waking up...");
     const token = localStorage.getItem('yuuka-auth-token');
@@ -444,8 +489,10 @@ async function startApplication() {
 
     if (token) {
         try {
+            // Thử khởi tạo UI. Các request API bên trong sẽ tự xác thực token.
             await initializeAppUI();
         } catch (error) {
+            // Nếu có lỗi 401 (Unauthorized), token đã hết hạn hoặc không hợp lệ.
             if (error.status === 401) {
                 localStorage.removeItem('yuuka-auth-token');
                 renderLoginForm("Token không hợp lệ. Vui lòng đăng nhập lại.");
@@ -455,17 +502,8 @@ async function startApplication() {
             }
         }
     } else {
-        try {
-            const data = await api.auth.checkTokenForIP();
-            localStorage.setItem('yuuka-auth-token', data.token);
-            await initializeAppUI();
-        } catch (error) {
-            if (error.status === 404) {
-                renderLoginForm(logoutMessage || '');
-            } else {
-                authContainer.innerHTML = `<p class="error-msg">Lỗi kết nối server: ${error.message}</p>`;
-            }
-        }
+        // Nếu không có token trong localStorage, hiển thị form đăng nhập.
+        renderLoginForm(logoutMessage || '');
     }
 }
 

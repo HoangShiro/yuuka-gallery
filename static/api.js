@@ -33,11 +33,10 @@ const api = (() => {
     const coreApi = {
         _request: _request, // Expose hàm nội bộ nếu cần
         auth: {
-            checkTokenForIP: () => _request('/api/auth/token'),
-            generateTokenForIP: () => _request('/api/auth/token', { method: 'POST' }),
+            // Yuuka: auth rework v1.0 - Đổi tên hàm cho rõ ràng và xóa hàm không cần thiết
+            generateToken: () => _request('/api/auth/token', { method: 'POST' }),
             login: (token) => _request('/api/auth/login', { method: 'POST', body: { token } }),
             logout: () => _request('/api/auth/logout', { method: 'POST' }),
-            shareTokenWithIP: (ip) => _request('/api/plugin/character-list/share_token', { method: 'POST', body: { ip_address: ip } }),
         },
         server: {
             shutdown: () => _request('/api/server/shutdown', { method: 'POST' }),

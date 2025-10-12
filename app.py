@@ -56,13 +56,15 @@ def get_active_plugins_ui():
 
 # --- Yuuka: Các route tiện ích cốt lõi mà mọi plugin đều có thể cần ---
 
-@app.route('/api/auth/token', methods=['GET', 'POST'])
-def handle_auth_token():
-    """Xử lý việc tạo và kiểm tra token cho một địa chỉ IP."""
-    if request.method == 'GET':
-        return plugin_manager.core_api.get_token_for_ip()
-    elif request.method == 'POST':
-        return plugin_manager.core_api.generate_token_for_ip()
+# Yuuka: auth rework v1.0 - Route giờ chỉ dùng để tạo token mới
+@app.route('/api/auth/token', methods=['POST'])
+def handle_generate_token():
+    """Tạo một token mới."""
+    try:
+        return plugin_manager.core_api.generate_token()
+    except Exception as e:
+        # Yuuka: auth rework v1.0 - Trả về lỗi nếu waitlist đầy
+        return jsonify({"error": str(e)}), 429 # 429 Too Many Requests
 
 @app.route('/api/auth/login', methods=['POST'])
 def handle_auth_login():
@@ -74,8 +76,8 @@ def handle_auth_login():
 
 @app.route('/api/auth/logout', methods=['POST'])
 def handle_auth_logout():
-    """Xử lý đăng xuất, xóa liên kết IP-token."""
-    return plugin_manager.core_api.logout_from_ip()
+    """Xử lý đăng xuất.""" # Yuuka: auth rework v1.0 - Logic server-side không còn cần thiết
+    return plugin_manager.core_api.logout()
 
 @app.route('/api/characters')
 def get_characters():
@@ -254,4 +256,4 @@ def initialize_server():
 # === Run Server ===
 if __name__ == '__main__':
     initialize_server() # Yuuka: main.py compatibility v1.0
-    app.run(host='0.0.0.0', debug=False, port=5000)
+    app.run(host='127.0.0.1', debug=False, port=5000)

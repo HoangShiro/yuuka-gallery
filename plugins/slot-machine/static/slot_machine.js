@@ -185,9 +185,6 @@ class SlotMachineService {
         
         this.spinBtn.addEventListener('click', () => this._handleSpin());
         this.backdrop.querySelector('.slot-close-btn').addEventListener('click', () => this.close());
-        this.backdrop.addEventListener('click', (e) => {
-            if (e.target === this.backdrop) this.close();
-        });
         this.reelsContainer.addEventListener('click', this._handleCardPick.bind(this));
         
         this._updateStatsDisplay();

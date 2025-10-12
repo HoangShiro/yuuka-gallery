@@ -380,6 +380,10 @@ class CoreAPI:
         self._thumbnails_data_dict = {}
         self._user_data = {}
         self._tag_predictions = [] # Yuuka: Thêm cache cho tags
+        # Yuuka: auth rework v1.0 - Thêm cache cho whitelist và waitlist
+        self._whitelist_users = []
+        self._waitlist_users = []
+
         # Yuuka: Khởi tạo các dịch vụ tích hợp
         self.workflow_builder = WorkflowBuilderService()
         self.comfy_api_client = comfy_api_client
@@ -407,82 +411,92 @@ class CoreAPI:
     # def save_user_image(self, image_base64: str) -> str: ...
 
     # --- 2. Dịch vụ Xác thực & Người dùng (Auth & User Services) ---
+    # Yuuka: auth rework v1.0 - Viết lại hoàn toàn logic xác thực
     def verify_token_and_get_user_hash(self):
+        """
+        Xác thực token từ header, có logic đặc biệt cho localhost.
+        Trả về user_hash nếu hợp lệ, nếu không sẽ raise Exception.
+        """
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
             raise Exception("Authorization header is missing or invalid.")
         token = auth_header.split(' ')[1]
         
-        user_ips = self._user_data.get("IPs", {})
         client_ip = request.remote_addr
+        is_localhost = client_ip == '127.0.0.1'
 
-        # Yuuka's Fix: Cho phép token hợp lệ dù không có trong IP list (ví dụ: mới login)
-        if user_ips.get(client_ip) == token or token in self._user_data.get("users", []):
-             return hashlib.sha256(token.encode('utf-8')).hexdigest()
+        is_valid = False
+        if is_localhost:
+            # Ở localhost, token phải có trong whitelist
+            if token in self._whitelist_users:
+                is_valid = True
+        else:
+            # Ở môi trường khác, token phải có trong user_data
+            if token in self._user_data.get("users", []):
+                is_valid = True
+        
+        if is_valid:
+            return hashlib.sha256(token.encode('utf-8')).hexdigest()
         
         raise Exception("Invalid token.")
 
-
-    def get_token_for_ip(self):
-        client_ip = request.remote_addr
-        token = self._user_data.get("IPs", {}).get(client_ip)
-        if token:
-            return jsonify({"status": "exists", "token": token})
-        return jsonify({"status": "not_found"}), 404
-
-    def generate_token_for_ip(self):
-        client_ip = request.remote_addr
+    # Yuuka: auth rework v1.0 - Logic tạo token mới
+    def generate_token(self):
+        """
+        Tạo token mới. Lưu vào waitlist nếu từ localhost, nếu không lưu vào user_data.
+        """
         new_token = str(uuid.uuid4())
-        
-        self._user_data.setdefault("users", []).append(new_token)
-        self._user_data.setdefault("IPs", {})[client_ip] = new_token
-        
-        self.save_data(self._user_data, "user_data.json", obfuscated=True)
-        print(f"[CoreAPI] Generated new token for IP: {client_ip}")
-        return jsonify({"status": "created", "token": new_token})
-        
-    def login_with_token(self, token: str):
-        """Xác thực token và gán nó cho IP hiện tại nếu hợp lệ."""
         client_ip = request.remote_addr
-        all_users = self._user_data.get("users", [])
-        
-        if token in all_users:
-            self._user_data.setdefault("IPs", {})[client_ip] = token
+        is_localhost = client_ip == '127.0.0.1'
+
+        if is_localhost:
+            # Lưu vào waitlist
+            if len(self._waitlist_users) >= 100:
+                raise Exception("Waitlist is full. Please contact administrator.")
+            
+            if new_token not in self._waitlist_users:
+                self._waitlist_users.append(new_token)
+                self.save_data(self._waitlist_users, "waitlist.json", obfuscated=True)
+                print(f"[CoreAPI] New token for localhost added to waitlist.")
+
+        else:
+            # Lưu vào user_data như bình thường
+            self._user_data.setdefault("users", []).append(new_token)
             self.save_data(self._user_data, "user_data.json", obfuscated=True)
-            print(f"[CoreAPI] User with token logged in from IP: {client_ip}")
+            print(f"[CoreAPI] Generated new token for remote user.")
+            
+        return jsonify({"status": "created", "token": new_token})
+
+    # Yuuka: auth rework v1.0 - Logic đăng nhập chỉ để xác thực token
+    def login_with_token(self, token: str):
+        """Xác thực một token có tồn tại hay không."""
+        all_users = self._user_data.get("users", [])
+        if token in all_users or token in self._whitelist_users:
+            print(f"[CoreAPI] User with token logged in successfully.")
             return jsonify({"status": "success", "token": token})
         else:
             return jsonify({"error": "Invalid token"}), 401
 
-    def logout_from_ip(self):
-        """Xóa token khỏi danh sách IP đang hoạt động (logout)."""
-        try:
-            auth_header = request.headers.get('Authorization')
-            token = auth_header.split(' ')[1]
-            user_ips = self._user_data.get("IPs", {})
+    # Yuuka: auth rework v1.0 - Logout không cần làm gì ở server
+    def logout(self):
+        """Xử lý đăng xuất. Client sẽ tự xóa token."""
+        return jsonify({"status": "success", "message": "Logged out successfully."})
 
-            ips_to_remove = [ip for ip, t in user_ips.items() if t == token]
-            if not ips_to_remove:
-                 return jsonify({"status": "not_found", "message": "Token not associated with any active IP."})
+    # Yuuka: auth rework v1.1 - Hàm để quản lý whitelist
+    def add_token_to_whitelist(self, token_to_add: str):
+        """Thêm một token vào whitelist và xóa khỏi waitlist nếu có."""
+        if token_to_add not in self._whitelist_users:
+            self._whitelist_users.append(token_to_add)
+            self.save_data(self._whitelist_users, "whitelist.json", obfuscated=True)
+            print(f"[CoreAPI] Token added to whitelist.")
+
+            if token_to_add in self._waitlist_users:
+                self._waitlist_users.remove(token_to_add)
+                self.save_data(self._waitlist_users, "waitlist.json", obfuscated=True)
+                print(f"[CoreAPI] Token removed from waitlist.")
             
-            for ip in ips_to_remove:
-                del user_ips[ip]
-                print(f"[CoreAPI] Token logged out from IP: {ip}")
-
-            self.save_data(self._user_data, "user_data.json", obfuscated=True)
-            return jsonify({"status": "success", "message": "Logged out successfully."})
-        except (IndexError, TypeError):
-             return jsonify({"error": "Invalid or missing token for logout"}), 400
-
-
-    def share_token_with_ip(self, target_ip: str):
-        """Lấy token của người dùng hiện tại và gán nó cho một IP khác."""
-        auth_header = request.headers.get('Authorization')
-        token = auth_header.split(' ')[1] 
-        if "IPs" not in self._user_data: self._user_data["IPs"] = {}
-        self._user_data["IPs"][target_ip] = token
-        self.save_data(self._user_data, "user_data.json", obfuscated=True)
-        print(f"[CoreAPI] Shared current user's token with new IP: {target_ip}")
+            return True, f"Token đã được thêm vào whitelist."
+        return False, "Token đã tồn tại trong whitelist."
 
 
     # --- 3. Dịch vụ Dữ liệu Nhân vật (Character Data Services) ---
@@ -678,7 +692,11 @@ class CoreAPI:
     # Yuuka: data cleanup v1.0 - Logic dọn dẹp dữ liệu chết
     def _cleanup_dead_data(self):
         print("[CoreAPI Cleanup] Checking for dead user data...")
-        valid_tokens = set(self._user_data.get("users", []))
+        # Yuuka: auth rework v1.0 - User hợp lệ là user trong user_data HOẶC whitelist
+        valid_public_tokens = set(self._user_data.get("users", []))
+        valid_whitelist_tokens = set(self._whitelist_users)
+        valid_tokens = valid_public_tokens.union(valid_whitelist_tokens)
+
         if not valid_tokens:
             print("[CoreAPI Cleanup] No valid users found. Skipping cleanup.")
             return
@@ -770,11 +788,28 @@ class CoreAPI:
 
     def load_core_data(self):
         print("[CoreAPI] Loading core data (Users, Characters, Thumbnails, Tags)...")
-        self._user_data = self.read_data("user_data.json", default_value={}, obfuscated=True)
+        
+        # Yuuka: auth rework v1.1 - Tự động tạo file whitelist/waitlist nếu chưa có
+        whitelist_path = self.data_manager.get_path("whitelist.json")
+        if not os.path.exists(whitelist_path):
+            self.save_data([], "whitelist.json", obfuscated=True)
+            print("[CoreAPI] Created empty whitelist.json.")
+            
+        waitlist_path = self.data_manager.get_path("waitlist.json")
+        if not os.path.exists(waitlist_path):
+            self.save_data([], "waitlist.json", obfuscated=True)
+            print("[CoreAPI] Created empty waitlist.json.")
+
+        # Yuuka: auth rework v1.0 - Tải user_data, whitelist, và waitlist
+        self._user_data = self.read_data("user_data.json", default_value={"users":[]}, obfuscated=True)
+        self._whitelist_users = self.read_data("whitelist.json", default_value=[], obfuscated=True)
+        self._waitlist_users = self.read_data("waitlist.json", default_value=[], obfuscated=True)
+        
+        # Yuuka: auth rework v1.0 - Logic di chuyển dữ liệu cũ
         if "tokens" in self._user_data and "users" not in self._user_data:
             print("... ⚠️ [CoreAPI] Old user_data.json format detected. Migrating...")
-            old_tokens_dict = self._user_data["tokens"]
-            self._user_data = {"users": list(set(old_tokens_dict.values())), "IPs": old_tokens_dict}
+            old_tokens_dict = self._user_data.get("tokens", {})
+            self._user_data = {"users": list(set(old_tokens_dict.values()))}
             self.save_data(self._user_data, "user_data.json", obfuscated=True)
             print("... ✅ Migration complete. New user data format saved.")
         

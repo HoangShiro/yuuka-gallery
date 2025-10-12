@@ -43,20 +43,28 @@ class CharacterListPlugin:
                     return jsonify({"status": "success", "message": "Lists updated."})
                 return jsonify({"error": "Invalid data format"}), 400
         
-        # Yuuka: Route mới để xử lý lệnh /login
-        @self.blueprint.route('/share_token', methods=['POST'])
-        def share_token():
+        # Yuuka: auth rework v1.1 - Route để thêm token vào whitelist
+        @self.blueprint.route('/whitelist/add', methods=['POST'])
+        def add_to_whitelist():
             try:
+                # Chỉ user đã được xác thực (tức là đã trong whitelist) mới có quyền này
                 self.core_api.verify_token_and_get_user_hash()
-                data = request.json
-                target_ip = data.get('ip_address')
-                if not target_ip:
-                    return jsonify({"error": "Missing 'ip_address' in request body."}), 400
                 
-                self.core_api.share_token_with_ip(target_ip)
-                return jsonify({"status": "success", "message": f"Token shared with {target_ip}."})
+                data = request.json
+                token_to_add = data.get('token')
+                if not token_to_add:
+                    return jsonify({"error": "Missing 'token' in request body."}), 400
+                
+                # Logic xử lý được chuyển vào CoreAPI để tập trung quản lý
+                success, message = self.core_api.add_token_to_whitelist(token_to_add)
+                
+                if success:
+                    return jsonify({"status": "success", "message": message})
+                else:
+                    return jsonify({"status": "noop", "message": message})
+                    
             except Exception as e:
-                 return jsonify({"error": str(e)}), 401
+                return jsonify({"error": str(e)}), 401
 
 
         print("[Plugin:CharacterList] Backend initialized with API routes.")
