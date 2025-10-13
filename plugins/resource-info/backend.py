@@ -83,8 +83,6 @@ GPU_TDP_DB = {
 
 # Yuuka: cost calculation v1.0
 COST_1K_PER_HOUR = 2500  # vnđ
-AVE_IDLE_W = 75         # Công suất trung bình khi nghỉ
-AVE_GEN_W = 350         # Công suất trung bình khi tạo ảnh
 
 class ResourceInfoPlugin:
     def __init__(self, core_api):
@@ -129,7 +127,35 @@ class ResourceInfoPlugin:
             other_power = self.static_info.get("other_power", 30)
             total_power = cpu_power + gpu_power + other_power
 
-            # --- Yuuka: cost calculation v1.1 - Đọc uptime từ file lõi ---
+            # Yuuka: dynamic wattage v1.0
+            resource_data = self.core_api.read_data("resource_info.json", default_value={'min_wattage': 75, 'max_gen_wattage': 350})
+            min_wattage = resource_data.get('min_wattage')
+            max_gen_wattage = resource_data.get('max_gen_wattage')
+
+            is_generating = any(
+                task['is_running'] 
+                for user_state in self.core_api.generation_service.user_states.values() 
+                for task in user_state.get('tasks', {}).values()
+            )
+
+            data_changed = False
+            if is_generating:
+                if total_power > max_gen_wattage:
+                    max_gen_wattage = total_power
+                    data_changed = True
+            
+            if total_power < min_wattage:
+                min_wattage = total_power
+                data_changed = True
+
+            if data_changed:
+                resource_data['min_wattage'] = round(min_wattage)
+                resource_data['max_gen_wattage'] = round(max_gen_wattage)
+                self.core_api.save_data(resource_data, "resource_info.json")
+
+            ave_idle_w = min_wattage
+            ave_gen_w = max_gen_wattage
+
             now = datetime.datetime.now()
             start_of_month_ts = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp()
 
@@ -137,7 +163,6 @@ class ResourceInfoPlugin:
             stored_uptime_sec = server_info.get('month_server_uptime', 0)
             last_saved_ts = server_info.get('last_saved_timestamp', time.time())
             
-            # Tính toán uptime thời gian thực bằng cách cộng thêm delta từ lần lưu cuối
             realtime_month_uptime_sec = stored_uptime_sec + (time.time() - last_saved_ts)
             month_server_uptime_hours = realtime_month_uptime_sec / 3600
 
@@ -161,17 +186,18 @@ class ResourceInfoPlugin:
             month_gen_time_user_sec = sum(img['creationTime'] for img in user_images_this_month)
             ave_gen_time_user = (month_gen_time_user_sec / month_total_img_user) if month_total_img_user > 0 else 0
             
-            cost_per_hour_idle = COST_1K_PER_HOUR / (1000 / AVE_IDLE_W)
+            cost_per_hour_idle = COST_1K_PER_HOUR / (1000 / ave_idle_w) if ave_idle_w > 0 else 0
             month_cost_idle_server = cost_per_hour_idle * month_server_uptime_hours
             
             user_share_percent = (month_total_img_user / month_total_img_all) if month_total_img_all > 0 else 0
             month_cost_idle_user = month_cost_idle_server * user_share_percent
 
-            cost_per_second_gen = (COST_1K_PER_HOUR / (1000 / AVE_GEN_W)) / 3600
+            cost_per_second_gen = (COST_1K_PER_HOUR / (1000 / ave_gen_w)) / 3600 if ave_gen_w > 0 else 0
             cost_per_imgs_total_user = cost_per_second_gen * month_gen_time_user_sec
 
             month_cost_user_total = month_cost_idle_user + cost_per_imgs_total_user
-            cost_per_img_avg_user = (month_cost_user_total / month_total_img_user) if month_total_img_user > 0 else 0
+            # Yuuka: cost calculation fix v1.2 - Phí mỗi ảnh chỉ tính trên chi phí tạo ảnh
+            cost_per_img_avg_user = (cost_per_imgs_total_user / month_total_img_user) if month_total_img_user > 0 else 0
 
             return jsonify({
                 **self.static_info,
@@ -181,8 +207,7 @@ class ResourceInfoPlugin:
                 "gpu_power": round(gpu_power, 1),
                 "other_power": other_power,
                 "total_power": round(total_power, 1),
-                # --- Dữ liệu thống kê mới ---
-                "month_server_uptime": realtime_month_uptime_sec, # Yuuka: Gửi giá trị chính xác
+                "month_server_uptime": realtime_month_uptime_sec,
                 "month_gen_time": month_gen_time_user_sec,
                 "ave_gen_time": ave_gen_time_user,
                 "month_gen_count": month_total_img_user,
