@@ -1,4 +1,4 @@
-# --- NEW FILE: core/dependencies.py ---
+# --- MODIFIED FILE: core/dependencies.py ---
 import subprocess
 import os
 import json
@@ -67,19 +67,19 @@ def get_required_dependencies(plugins_dir='plugins'):
 def check_dependencies():
     """
     Kiểm tra xem tất cả các dependency cần thiết đã được cài đặt chưa.
-    Trả về True nếu cần cài đặt, False nếu đã đủ.
+    Trả về một danh sách các gói bị thiếu. Trả về list rỗng nếu đã đủ.
     """
     print("Yuuka: Đang kiểm tra các thư viện Python cần thiết...")
     
     required_deps_str = get_required_dependencies()
     if not required_deps_str:
         print("Yuuka: Không tìm thấy file requirements.txt hoặc định nghĩa dependency.")
-        return False
+        return []
 
     installed_packages = get_installed_packages()
     if not installed_packages:
         print("Yuuka: Không thể lấy danh sách thư viện đã cài. Bỏ qua kiểm tra.")
-        return False # Tránh vòng lặp lỗi nếu pip có vấn đề
+        return [] # Tránh vòng lặp lỗi nếu pip có vấn đề
 
     missing_packages = []
     
@@ -105,7 +105,52 @@ def check_dependencies():
         print("Yuuka: Phát hiện các thư viện Python bị thiếu hoặc sai phiên bản:")
         for pkg in missing_packages:
             print(f"       - {pkg}")
-        return True # Cần cài đặt
+    else:
+        print("Yuuka: Tất cả thư viện cần thiết đã được cài đặt.")
+        
+    return missing_packages
 
-    print("Yuuka: Tất cả thư viện cần thiết đã được cài đặt.")
-    return False # Đã đủ
+# Yuuka: auto-install v1.0
+def install_dependencies(packages_to_install):
+    """
+    Sử dụng pip để cài đặt một danh sách các gói.
+    """
+    if not packages_to_install:
+        return True
+
+    print(f"Yuuka: Bắt đầu quá trình cài đặt {len(packages_to_install)} thư viện...")
+    try:
+        command = [sys.executable, '-m', 'pip', 'install'] + packages_to_install
+        
+        # startupinfo để ẩn cửa sổ console trên Windows khi không cần thiết
+        startupinfo = None
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            # Dòng này giúp chạy pip trong một cửa sổ mới nếu cần debug
+            # subprocess.run(f'start cmd /k "{" ".join(command)}"', shell=True, check=True)
+
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True, # Chụp output để hiển thị nếu có lỗi
+            text=True,
+            encoding='utf-8',
+            startupinfo=startupinfo
+        )
+        print("Yuuka: Cài đặt thư viện thành công.")
+        return True
+    except subprocess.CalledProcessError as e:
+        print("--- LỖI KHI CÀI ĐẶT THƯ VIỆN ---")
+        print(e.stdout)
+        print(e.stderr)
+        print("---------------------------------")
+        print("Yuuka: Quá trình cài đặt tự động thất bại.")
+        print("       Vui lòng chạy file INSTALL.bat thủ công, sau đó khởi động lại ứng dụng.")
+        input("       Nhấn Enter để thoát...") # Dừng lại để người dùng đọc lỗi
+        sys.exit(1)
+    except Exception as e:
+        print(f"Yuuka: Lỗi không xác định khi chạy pip: {e}")
+        print("       Vui lòng chạy file INSTALL.bat thủ công.")
+        input("       Nhấn Enter để thoát...")
+        sys.exit(1)

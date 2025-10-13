@@ -1,0 +1,219 @@
+/* --- MODIFIED FILE: plugins/resource-info/static/resource-info.css ---*/
+/* Yuuka: resource-info v1.0 */
+#resource-info-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background-color: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-6);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+#resource-info-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Yuuka: widget UI v1.1 - Header chung */
+#resource-info-overlay .resource-header-actions {
+    position: absolute;
+    top: var(--spacing-5);
+    right: var(--spacing-5);
+    display: flex;
+    gap: var(--spacing-4);
+    align-items: center;
+}
+
+#resource-info-overlay .header-btn {
+    font-size: 1.8em;
+    cursor: pointer;
+    color: var(--color-secondary-text);
+    transition: transform 0.2s, color 0.2s;
+}
+
+#resource-info-overlay .header-btn:hover {
+    color: var(--color-primary-text);
+    transform: scale(1.1);
+}
+
+#resource-info-overlay .header-btn.close-btn:hover {
+    transform: scale(1.1) rotate(90deg);
+}
+
+#resource-info-overlay .header-btn.active {
+    color: var(--color-accent);
+}
+
+
+.resource-main-display {
+    text-align: center;
+    margin-bottom: 5vh;
+}
+
+.resource-main-display .value {
+    font-size: clamp(6rem, 20vw, 12rem);
+    font-weight: 200;
+    line-height: 1;
+}
+
+.resource-main-display .unit {
+    font-size: clamp(1.5rem, 5vw, 2.5rem);
+    font-weight: 500;
+    color: var(--color-secondary-text);
+    margin-left: var(--spacing-3);
+}
+
+.resource-sub-display {
+    display: flex;
+    gap: var(--spacing-6);
+    font-size: 1.2rem;
+    color: var(--color-secondary-text);
+    text-align: center;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.resource-sub-display .stat-group {
+    min-width: 150px;
+}
+
+.resource-sub-display .stat-value {
+    color: var(--color-primary-text);
+    font-weight: 500;
+    font-size: 1.5em;
+}
+
+.resource-chart-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 20vh;
+    opacity: 0.5;
+}
+
+.resource-chart-container svg {
+    width: 100%;
+    height: 100%;
+}
+
+.resource-chart-line {
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    transition: all 0.5s linear;
+}
+
+.resource-info-error {
+    font-size: 1.2rem;
+    color: var(--color-accent-hover);
+    max-width: 600px;
+    text-align: center;
+    line-height: 1.6;
+}
+
+/* Yuuka: widget UI v1.3 */
+#resource-info-widget {
+    position: fixed;
+    z-index: 2001;
+    display: none; /* JS controlled */
+    background: rgba(42, 39, 38, 0.75);
+    color: var(--color-primary-text);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--rounded-lg);
+    padding: var(--spacing-1) var(--spacing-3);
+    cursor: move;
+    user-select: none;
+    gap: var(--spacing-3);
+    align-items: center;
+    transition: opacity 0.3s ease;
+}
+
+#resource-info-widget.visible {
+    display: flex;
+}
+
+#resource-info-widget.is-dragging {
+    transition: none;
+    opacity: 0.85;
+}
+
+html:not(.dark-mode) #resource-info-widget {
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.widget-component-group {
+    display: flex;
+    align-items: baseline;
+    gap: var(--spacing-1);
+    position: relative;
+    padding-right: var(--spacing-3);
+}
+
+.widget-component-group:not(:last-of-type)::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 15%;
+    bottom: 15%;
+    width: 1px;
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+html:not(.dark-mode) .widget-component-group:not(:last-of-type)::after {
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+.widget-component-group:last-of-type {
+    padding-right: 0;
+}
+
+.widget-component-group .label {
+    font-size: 0.8em;
+    font-weight: 500;
+    color: var(--color-secondary-text);
+}
+
+.widget-component-group .value {
+    font-size: 1.1em;
+    font-weight: 500;
+    color: var(--color-primary-text);
+    font-variant-numeric: tabular-nums;
+    min-width: 2.5ch;
+    text-align: right;
+    display: inline-block;
+}
+
+.widget-component-group .unit {
+    font-size: 0.8em;
+    color: var(--color-secondary-text);
+    margin-left: -2px;
+}
+
+.widget-component-group:last-of-type .value {
+    margin-left: var(--spacing-1);
+}
+
+.widget-toggle-btn {
+    cursor: pointer;
+    color: var(--color-secondary-text);
+    transition: transform 0.2s, color 0.2s;
+    margin-left: var(--spacing-2);
+}
+
+.widget-toggle-btn:hover {
+    color: var(--color-primary-text);
+    transform: scale(1.1);
+}

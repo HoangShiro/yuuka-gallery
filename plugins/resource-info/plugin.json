@@ -1,0 +1,34 @@
+{
+    "id": "resource-info",
+    "name": "Resource Info",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Hiển thị thông tin tài nguyên và công suất tiêu thụ của hệ thống theo thời gian thực.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:ResourceInfoPlugin",
+        "frontend_component": "ResourceInfoComponent"
+    },
+    "assets": {
+        "js": ["resource-info.js"],
+        "css": ["resource-info.css"]
+    },
+    "dependencies": {
+        "python": [
+            "psutil",
+            "py-cpuinfo",
+            "gputil"
+        ]
+    },
+    "ui": {
+        "is_singleton": true,
+        "tab": {
+            "id": "resource-info-toggle",
+            "label": "Thông tin tài nguyên",
+            "icon": "bolt",
+            "is_service_launcher": true
+        },
+        "order": 40
+        
+    }
+}

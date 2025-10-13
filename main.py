@@ -6,7 +6,7 @@ import time
 import logging
 import update
 from werkzeug.serving import WSGIRequestHandler
-from core.dependencies import check_dependencies # Yuuka: dependency check v1.0
+from core.dependencies import check_dependencies, install_dependencies # Yuuka: auto-install v1.0
 
 class No200RequestHandler(WSGIRequestHandler):
     def log_request(self, code='-', size='-'):
@@ -29,7 +29,7 @@ UPDATE_STATUS = {
 
 def restart_application():
     """Khởi động lại ứng dụng bằng cách gọi RUN.bat."""
-    print("Yuuka: Cập nhật hoàn tất. Đang khởi động lại ứng dụng...")
+    print("Yuuka: Tác vụ hoàn tất. Đang khởi động lại ứng dụng...")
     time.sleep(2)
     run_bat_path = os.path.abspath("RUN.bat")
     if os.path.exists(run_bat_path):
@@ -39,24 +39,7 @@ def restart_application():
         subprocess.Popen([sys.executable] + sys.argv, shell=True)
     sys.exit(0)
 
-def run_install_and_exit():
-    """Chạy INSTALL.bat để cập nhật thư viện và thoát."""
-    install_bat_path = os.path.abspath("INSTALL.bat")
-    if os.path.exists(install_bat_path):
-        try:
-            print("Yuuka: Đang chạy INSTALL.bat để cập nhật các thư viện cần thiết...")
-            print("       Vui lòng đợi quá trình cài đặt hoàn tất và khởi động lại ứng dụng thủ công nhé senpai.")
-            time.sleep(3)
-            # Mở một cửa sổ cmd mới để chạy install, tránh bị block
-            subprocess.Popen(f'start cmd /k "{install_bat_path}"', shell=True)
-        except Exception as e:
-            print(f"Yuuka: Lỗi khi tự động chạy INSTALL.bat: {e}")
-            print("       Vui lòng chạy file INSTALL.bat thủ công.")
-    else:
-        print("Yuuka: Không tìm thấy file INSTALL.bat.")
-    
-    # Thoát ứng dụng để người dùng có thể thấy quá trình cài đặt
-    sys.exit(0)
+# Yuuka: auto-install v1.0 - Gỡ bỏ hàm run_install_and_exit()
 
 def main():
     """Hàm chính, kiểm tra cập nhật trước khi khởi chạy server Flask."""
@@ -75,29 +58,28 @@ def main():
         
         update.perform_update()
         
-        if dependencies_changed:
-            print("Yuuka: Phát hiện thay đổi trong các file thư viện (requirements.txt hoặc plugin.json).") # Yuuka: dependency check v1.0
-            run_install_and_exit()
-        else:
-            restart_application()
-        
-        # Luồng chương trình sẽ không bao giờ đến đây vì các hàm trên đều gọi sys.exit()
-        return
+        # Sau khi cập nhật, luôn khởi động lại để đảm bảo tất cả các file được tải lại
+        # Việc kiểm tra thư viện sẽ được thực hiện ở lần chạy tiếp theo.
+        restart_application()
+        return # Không bao giờ đến đây
 
-    # Bước 2: Dù không có cập nhật code, vẫn kiểm tra thư viện hiện tại
-    # để xử lý trường hợp người dùng thêm/xóa plugin thủ công.
-    if check_dependencies(): # Yuuka: dependency check v1.0
-        run_install_and_exit()
-        return # Thoát để chờ cài đặt
+    # Bước 2: Kiểm tra thư viện (quan trọng nhất)
+    # Sẽ kiểm tra sau khi pull code hoặc khi khởi động bình thường.
+    missing_deps = check_dependencies() # Yuuka: auto-install v1.0
+    if missing_deps:
+        install_dependencies(missing_deps)
+        # Sau khi cài đặt, cần khởi động lại để môi trường nhận thư viện mới
+        restart_application()
+        return # Không bao giờ đến đây
 
     # Bước 3: Nếu mọi thứ đều ổn, chạy ứng dụng
-    print("Yuuka: Phiên bản đã được cập nhật. Đang tải dữ liệu và khởi chạy server...")
+    print("Yuuka: Phiên bản và thư viện đã đầy đủ. Đang tải dữ liệu và khởi chạy server...")
     
     try:
-        from app import app, initialize_server # Yuuka: fix app call v1.0
+        from app import app, initialize_server # Yuuka: main.py compatibility v1.0
         
         # Tải dữ liệu và khởi tạo server
-        initialize_server() # Yuuka: fix app call v1.0
+        initialize_server() # Yuuka: main.py compatibility v1.0
         
         # Khởi chạy server Flask
         app.run(host='127.0.0.1', debug=False, port=5000, request_handler=No200RequestHandler)

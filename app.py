@@ -247,7 +247,7 @@ def initialize_server():
     plugin_manager.core_api.load_core_data()
     plugin_manager.load_plugins()
     
-    print("\n✅ Yuuka's Server V2.6 is ready!")
+    print("\n✅ Yuuka's Server V2.7 is ready!")
     print(f"   - Loaded {len(plugin_manager.get_active_plugins())} plugins.")
     print("   - Local access at: http://127.0.0.1:5000")
     print("   - To access from other devices on the same network, use this machine's IP address.")
