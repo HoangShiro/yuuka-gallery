@@ -351,11 +351,21 @@ class ResourceInfoComponent {
     }
 
     _updateWidgetPosition() {
+        // Yuuka: mobile bottom bar fix v1.0
+        if (window.innerWidth <= 768) {
+            this.widget.style.left = '';
+            this.widget.style.top = '';
+            return;
+        }
         this.widget.style.left = `${this.state.widgetPos.x}px`;
         this.widget.style.top = `${this.state.widgetPos.y}px`;
     }
 
     _onDragStart(e) {
+        // Yuuka: mobile bottom bar fix v1.0
+        if (window.innerWidth <= 768) {
+            return;
+        }
         if (e.target.classList.contains('widget-toggle-btn')) return;
         e.preventDefault();
 
