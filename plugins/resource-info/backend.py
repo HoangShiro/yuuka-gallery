@@ -1,6 +1,8 @@
 # --- MODIFIED FILE: plugins/resource-info/backend.py ---
 import os
 import sys
+import time
+import datetime
 from flask import Blueprint, jsonify
 
 # Yuuka: resource-info v1.0 - Import dependencies
@@ -79,15 +81,18 @@ GPU_TDP_DB = {
     "NVIDIA GeForce RTX 3050": 130,
 }
 
+# Yuuka: cost calculation v1.0
+COST_1K_PER_HOUR = 2500  # vnđ
+AVE_IDLE_W = 75         # Công suất trung bình khi nghỉ
+AVE_GEN_W = 350         # Công suất trung bình khi tạo ảnh
+
 class ResourceInfoPlugin:
     def __init__(self, core_api):
         self.core_api = core_api
         self.blueprint = Blueprint('resource_info', __name__)
         self.static_info = {}
-        # Yuuka: smart power v1.0 - Giá trị này sẽ được tính toán trong _fetch_static_info
 
         if psutil and cpuinfo:
-            # Khởi tạo psutil để lần gọi sau có giá trị chính xác
             psutil.cpu_percent(interval=None) 
             self._fetch_static_info()
         
@@ -96,10 +101,13 @@ class ResourceInfoPlugin:
             if not self.static_info or not psutil:
                 return jsonify({"error": "Plugin dependencies are not installed or failed to initialize."}), 500
             
+            try:
+                user_hash = self.core_api.verify_token_and_get_user_hash()
+            except Exception as e:
+                return jsonify({"error": str(e)}), 401
+
             # --- Dữ liệu động ---
-            # Yuuka: fast mode support v1.0 - Giảm interval để không block request
             cpu_usage = psutil.cpu_percent(interval=0.1)
-            
             gpu_usage = 0.0
             gpu_power = 0.0
             if self.static_info.get("gpu_tdp") != "N/A" and GPUTIL_AVAILABLE:
@@ -110,19 +118,60 @@ class ResourceInfoPlugin:
                         idle_power = self.static_info["gpu_tdp"] * 0.1
                         power_range = self.static_info["gpu_tdp"] - idle_power
                         gpu_power = idle_power + (power_range * gpu_usage / 100)
-                except Exception:
-                    # Bỏ qua lỗi nếu không đọc được GPU
-                    pass
+                except Exception: pass
             
             cpu_power = 0.0
             if isinstance(self.static_info.get("cpu_tdp"), int):
                 idle_power = self.static_info["cpu_tdp"] * 0.1
                 power_range = self.static_info["cpu_tdp"] - idle_power
                 cpu_power = idle_power + (power_range * cpu_usage / 100)
-
-            # Yuuka: smart power v1.0 - Lấy giá trị đã tính toán
+            
             other_power = self.static_info.get("other_power", 30)
             total_power = cpu_power + gpu_power + other_power
+
+            # --- Yuuka: cost calculation v1.1 - Đọc uptime từ file lõi ---
+            now = datetime.datetime.now()
+            start_of_month_ts = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+            server_info = self.core_api.read_data("server_info.json", obfuscated=False)
+            stored_uptime_sec = server_info.get('month_server_uptime', 0)
+            last_saved_ts = server_info.get('last_saved_timestamp', time.time())
+            
+            # Tính toán uptime thời gian thực bằng cách cộng thêm delta từ lần lưu cuối
+            realtime_month_uptime_sec = stored_uptime_sec + (time.time() - last_saved_ts)
+            month_server_uptime_hours = realtime_month_uptime_sec / 3600
+
+            all_images_data = self.core_api.read_data("img_data.json", obfuscated=True)
+            user_images_this_month = []
+            all_images_this_month = []
+
+            if all_images_data:
+                for u_hash, characters in all_images_data.items():
+                    if isinstance(characters, dict):
+                        for char_hash, images in characters.items():
+                            if isinstance(images, list):
+                                for img in images:
+                                    if img.get('createdAt', 0) >= start_of_month_ts and 'creationTime' in img:
+                                        all_images_this_month.append(img)
+                                        if u_hash == user_hash:
+                                            user_images_this_month.append(img)
+            
+            month_total_img_user = len(user_images_this_month)
+            month_total_img_all = len(all_images_this_month)
+            month_gen_time_user_sec = sum(img['creationTime'] for img in user_images_this_month)
+            ave_gen_time_user = (month_gen_time_user_sec / month_total_img_user) if month_total_img_user > 0 else 0
+            
+            cost_per_hour_idle = COST_1K_PER_HOUR / (1000 / AVE_IDLE_W)
+            month_cost_idle_server = cost_per_hour_idle * month_server_uptime_hours
+            
+            user_share_percent = (month_total_img_user / month_total_img_all) if month_total_img_all > 0 else 0
+            month_cost_idle_user = month_cost_idle_server * user_share_percent
+
+            cost_per_second_gen = (COST_1K_PER_HOUR / (1000 / AVE_GEN_W)) / 3600
+            cost_per_imgs_total_user = cost_per_second_gen * month_gen_time_user_sec
+
+            month_cost_user_total = month_cost_idle_user + cost_per_imgs_total_user
+            cost_per_img_avg_user = (month_cost_user_total / month_total_img_user) if month_total_img_user > 0 else 0
 
             return jsonify({
                 **self.static_info,
@@ -130,12 +179,18 @@ class ResourceInfoPlugin:
                 "cpu_power": round(cpu_power, 1),
                 "gpu_usage": round(gpu_usage, 1),
                 "gpu_power": round(gpu_power, 1),
-                "other_power": other_power, # Yuuka: smart power v1.0
-                "total_power": round(total_power, 1)
+                "other_power": other_power,
+                "total_power": round(total_power, 1),
+                # --- Dữ liệu thống kê mới ---
+                "month_server_uptime": realtime_month_uptime_sec, # Yuuka: Gửi giá trị chính xác
+                "month_gen_time": month_gen_time_user_sec,
+                "ave_gen_time": ave_gen_time_user,
+                "month_gen_count": month_total_img_user,
+                "month_cost_user": month_cost_user_total,
+                "cost_per_img": cost_per_img_avg_user
             })
 
     def _fetch_static_info(self):
-        # --- Dữ liệu tĩnh ---
         try:
             cpu_name = cpuinfo.get_cpu_info()['brand_raw']
             self.static_info["cpu_name"] = cpu_name
@@ -158,18 +213,15 @@ class ResourceInfoPlugin:
             except Exception:
                 self.static_info["gpu_name"] = "Lỗi đọc GPU"
         
-        # Yuuka: smart power v1.0 - Tính toán other_power
         try:
             total_ram_gb = round(psutil.virtual_memory().total / (1024**3))
             self.static_info["total_ram_gb"] = total_ram_gb
-            # Ước tính công suất RAM: 2.5W cho mỗi 8GB
             ram_power = (total_ram_gb / 8) * 2.5
-            # Công suất nền cho bo mạch chủ, ổ cứng, quạt...
             base_power = 30
             self.static_info["other_power"] = round(base_power + ram_power)
         except Exception:
             self.static_info["total_ram_gb"] = "N/A"
-            self.static_info["other_power"] = 30 # Fallback
+            self.static_info["other_power"] = 30
 
     def get_blueprint(self):
         return self.blueprint, '/api/plugin/resource-info'

@@ -217,3 +217,42 @@ html:not(.dark-mode) .widget-component-group:not(:last-of-type)::after {
     color: var(--color-primary-text);
     transform: scale(1.1);
 }
+
+/* Yuuka: cost calculation v1.0 */
+.resource-info-footer {
+    position: absolute;
+    bottom: var(--spacing-5);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: var(--spacing-6);
+    padding: var(--spacing-3) var(--spacing-5);
+    background: rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(5px);
+    border-radius: var(--rounded-lg);
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+html:not(.dark-mode) .resource-info-footer {
+     background: rgba(255, 255, 255, 0.1);
+}
+
+.info-item {
+    text-align: center;
+}
+
+.info-label {
+    display: block;
+    font-size: 0.85em;
+    color: var(--color-secondary-text);
+    margin-bottom: var(--spacing-1);
+}
+
+.info-value {
+    display: block;
+    font-size: 1.1em;
+    font-weight: 500;
+    color: var(--color-primary-text);
+    font-variant-numeric: tabular-nums;
+}

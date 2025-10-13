@@ -103,13 +103,39 @@ class ResourceInfoComponent {
                 <svg id="res-chart-svg" preserveAspectRatio="none" viewBox="0 0 ${this.maxHistoryPoints} 100"></svg>
             </div>
             <div class="resource-info-error" style="display: none;"></div>
+            <!-- Yuuka: cost calculation v1.0 -->
+            <div class="resource-info-footer">
+                <div class="info-item">
+                    <span class="info-label">Server Uptime (Tháng)</span>
+                    <span class="info-value" id="res-uptime-month">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">TG Tạo ảnh (Tháng)</span>
+                    <span class="info-value" id="res-gen-time-month">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">TG Trung bình / ảnh</span>
+                    <span class="info-value" id="res-gen-time-avg">-- s</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Ảnh đã tạo (Tháng)</span>
+                    <span class="info-value" id="res-gen-count-month">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Phí ước tính (Tháng)</span>
+                    <span class="info-value" id="res-cost-month">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Phí / ảnh</span>
+                    <span class="info-value" id="res-cost-per-img">--</span>
+                </div>
+            </div>
         `;
         document.body.appendChild(this.overlay);
         
         // 2. Tạo Widget UI
         this.widget = document.createElement('div');
         this.widget.id = 'resource-info-widget';
-        // Yuuka: widget UI v1.3 - Cập nhật cấu trúc HTML
         this.widget.innerHTML = `
             <div class="widget-component-group">
                 <span class="label">CPU</span>
@@ -146,6 +172,14 @@ class ResourceInfoComponent {
             gpuStatWidget: this.widget.querySelector('#res-gpu-stat-widget'),
             gpuWWidget: this.widget.querySelector('#res-gpu-w-widget'),
             totalWWidget: this.widget.querySelector('#res-total-w-widget'),
+            
+            // Yuuka: cost calculation v1.0 - Footer elements
+            uptimeMonth: this.overlay.querySelector('#res-uptime-month'),
+            genTimeMonth: this.overlay.querySelector('#res-gen-time-month'),
+            genTimeAvg: this.overlay.querySelector('#res-gen-time-avg'),
+            genCountMonth: this.overlay.querySelector('#res-gen-count-month'),
+            costMonth: this.overlay.querySelector('#res-cost-month'),
+            costPerImg: this.overlay.querySelector('#res-cost-per-img'),
         };
         
         // 3. Gán sự kiện
@@ -158,15 +192,11 @@ class ResourceInfoComponent {
              if (!this.dragInfo.moved) this._toggleUIMode();
         });
 
-        // Widget drag events
         this.widget.addEventListener('mousedown', this._onDragStart.bind(this));
     }
 
     _fetchData() {
-        // Yuuka: fast mode fix v1.0 - Thêm lock để tránh request chồng chéo
-        if (this.isFetching) {
-            return;
-        }
+        if (this.isFetching) return;
         this.isFetching = true;
 
         this.api['resource-info'].get('/stats')
@@ -174,20 +204,21 @@ class ResourceInfoComponent {
                 if(data.error) throw new Error(data.error);
                 this.ui.errorMsg.style.display = 'none';
                 
-                // Cập nhật cả 2 UI để dữ liệu luôn đồng bộ
+                // Cập nhật UI chính và widget
                 this.ui.totalWOverlay.textContent = Math.round(data.total_power);
                 this.ui.cpuStatOverlay.textContent = `${data.cpu_usage}%`;
                 this.ui.gpuStatOverlay.textContent = `${data.gpu_usage}%`;
                 this.ui.otherWOverlay.textContent = `${data.other_power} W`;
                 this.ui.ramTotalOverlay.textContent = `${data.total_ram_gb} GB`;
-
                 this.ui.cpuStatWidget.textContent = data.cpu_usage;
                 this.ui.cpuWWidget.textContent = Math.round(data.cpu_power);
                 this.ui.gpuStatWidget.textContent = data.gpu_usage;
                 this.ui.gpuWWidget.textContent = Math.round(data.gpu_power);
                 this.ui.totalWWidget.textContent = Math.round(data.total_power);
 
-                // Chỉ render chart nếu ở chế độ overlay
+                // Yuuka: cost calculation v1.0 - Cập nhật footer
+                this._updateFooterInfo(data);
+
                 if (this.state.uiMode === 'overlay') {
                     this.wattageHistory.push(data.total_power);
                     if (this.wattageHistory.length > this.maxHistoryPoints) {
@@ -205,9 +236,36 @@ class ResourceInfoComponent {
                 showError(userMessage);
             })
             .finally(() => {
-                // Yuuka: fast mode fix v1.0 - Luôn mở khóa sau khi request hoàn tất
                 this.isFetching = false;
             });
+    }
+
+    // Yuuka: cost calculation v1.0
+    _formatSeconds(seconds) {
+        if (isNaN(seconds) || seconds < 0) return "--";
+        const d = Math.floor(seconds / (3600*24));
+        const h = Math.floor(seconds % (3600*24) / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        
+        if (d > 0) return `${d}d ${h.toString().padStart(2,'0')}h`;
+        return [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
+    }
+    
+    // Yuuka: cost calculation v1.0
+    _formatCurrency(amount) {
+        if (isNaN(amount)) return "--";
+        return new Intl.NumberFormat('vi-VN').format(Math.round(amount)) + ' đ';
+    }
+    
+    // Yuuka: cost calculation v1.0
+    _updateFooterInfo(data) {
+        this.ui.uptimeMonth.textContent = this._formatSeconds(data.month_server_uptime);
+        this.ui.genTimeMonth.textContent = this._formatSeconds(data.month_gen_time);
+        this.ui.genTimeAvg.textContent = `${data.ave_gen_time.toFixed(2)} s`;
+        this.ui.genCountMonth.textContent = data.month_gen_count.toLocaleString('vi-VN');
+        this.ui.costMonth.textContent = this._formatCurrency(data.month_cost_user);
+        this.ui.costPerImg.textContent = this._formatCurrency(data.cost_per_img);
     }
 
     _renderChart() {
@@ -236,7 +294,7 @@ class ResourceInfoComponent {
         if (this.interval) clearInterval(this.interval);
         if (!this.state.isOpen) return;
 
-        const refreshRate = this.state.isFastMode ? 500 : 1000; // Yuuka: resource-info update interval v1.1
+        const refreshRate = this.state.isFastMode ? 500 : 1000;
         this.interval = setInterval(() => this._fetchData(), refreshRate);
     }
 
@@ -249,27 +307,27 @@ class ResourceInfoComponent {
 
     _toggleUIMode() {
         this.state.uiMode = this.state.uiMode === 'overlay' ? 'widget' : 'overlay';
-        this.show(); // Gọi lại show để áp dụng UI mới
+        this.show();
         this._saveState();
     }
 
     show() {
         this.state.isOpen = true;
-        this._saveState(); // Yuuka: persistent state v1.1
+        this._saveState();
         
         this.overlay.classList.remove('visible');
         this.widget.classList.remove('visible');
 
         if (this.state.uiMode === 'overlay') {
             this.overlay.classList.add('visible');
-            this.wattageHistory = []; // Reset chart khi mở lại
+            this.wattageHistory = [];
         } else {
             this.widget.classList.add('visible');
             this._updateWidgetPosition();
         }
 
         this.ui.fastModeBtn.classList.toggle('active', this.state.isFastMode);
-        this._fetchData(); // Lấy dữ liệu ngay lập tức
+        this._fetchData();
         this._updateInterval();
     }
     
@@ -292,7 +350,6 @@ class ResourceInfoComponent {
         }
     }
 
-    // --- Widget Drag Logic ---
     _updateWidgetPosition() {
         this.widget.style.left = `${this.state.widgetPos.x}px`;
         this.widget.style.top = `${this.state.widgetPos.y}px`;
@@ -326,7 +383,7 @@ class ResourceInfoComponent {
         if (!this.dragInfo.moved) {
             const dx = Math.abs(e.clientX - this.dragInfo.startX);
             const dy = Math.abs(e.clientY - this.dragInfo.startY);
-            if (dx > 5 || dy > 5) { // Threshold
+            if (dx > 5 || dy > 5) {
                 this.dragInfo.moved = true;
             }
         }
@@ -334,7 +391,6 @@ class ResourceInfoComponent {
         let newX = e.clientX - this.dragInfo.offsetX;
         let newY = e.clientY - this.dragInfo.offsetY;
         
-        // Clamp to screen bounds
         const rect = this.widget.getBoundingClientRect();
         newX = Math.max(0, Math.min(newX, window.innerWidth - rect.width));
         newY = Math.max(0, Math.min(newY, window.innerHeight - rect.height));
@@ -354,7 +410,6 @@ class ResourceInfoComponent {
             this._saveState();
         }
 
-        // Reset moved flag after a short delay to prevent clicks right after drag
         setTimeout(() => { this.dragInfo.moved = false; }, 50);
     }
 }

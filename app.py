@@ -3,6 +3,7 @@ import os
 import signal
 import threading
 import time # Yuuka: Thêm time để tạo version cho cache
+import datetime # Yuuka: uptime tracking v1.0
 from flask import Flask, render_template, jsonify, send_from_directory, abort, Response, request
 
 from core.plugin_manager import PluginManager
@@ -16,6 +17,55 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 # --- Core Services Initialization ---
 data_manager = DataManager('data_cache')
 plugin_manager = PluginManager('plugins', app, data_manager)
+
+# === Yuuka: Uptime Tracking v1.0 ===
+server_start_time = time.time()
+uptime_thread_stop_event = threading.Event()
+
+def _save_current_uptime(is_final_save=False):
+    """Hàm nội bộ để đọc, tính toán và lưu thời gian hoạt động của server."""
+    try:
+        now = datetime.datetime.now()
+        current_month = now.month
+        
+        saved_data = data_manager.read_json('server_info.json', default_value={
+            'total_uptime': 0,
+            'month_server_uptime': 0,
+            'last_saved_timestamp': server_start_time,
+            'last_saved_month': current_month
+        })
+
+        # Reset uptime tháng nếu đã sang tháng mới
+        if current_month != saved_data.get('last_saved_month'):
+            print(f"[Uptime] New month detected. Resetting monthly uptime.")
+            saved_data['month_server_uptime'] = 0
+        
+        # Tính toán thời gian trôi qua kể từ lần lưu cuối
+        time_since_last_save = time.time() - saved_data.get('last_saved_timestamp', server_start_time)
+
+        # Cập nhật dữ liệu
+        saved_data['total_uptime'] += time_since_last_save
+        saved_data['month_server_uptime'] += time_since_last_save
+        saved_data['last_saved_timestamp'] = time.time()
+        saved_data['last_saved_month'] = current_month
+        
+        data_manager.save_json(saved_data, 'server_info.json')
+        if not is_final_save:
+            print(f"[Uptime] Server uptime saved successfully. Monthly uptime: {saved_data['month_server_uptime']:.2f}s")
+        else:
+            print(f"[Uptime] Final server uptime saved.")
+
+    except Exception as e:
+        print(f"💥 [Uptime] Error saving server uptime: {e}")
+
+
+def _uptime_tracking_thread():
+    """Luồng nền chạy để lưu uptime mỗi giờ."""
+    print("[Uptime] Uptime tracking thread started.")
+    while not uptime_thread_stop_event.wait(3600): # Chờ 1 giờ hoặc cho đến khi có tín hiệu dừng
+        _save_current_uptime()
+    print("[Uptime] Uptime tracking thread stopped.")
+
 
 # === Core API Routes ===
 
@@ -235,6 +285,9 @@ def server_shutdown():
     try:
         plugin_manager.core_api.verify_token_and_get_user_hash()
         print("[Server] Lệnh tắt server đã được nhận từ client.")
+        # Yuuka: uptime tracking v1.0 - Lưu lần cuối trước khi tắt
+        uptime_thread_stop_event.set()
+        _save_current_uptime(is_final_save=True)
         threading.Timer(0.5, _shutdown_server).start()
         return jsonify({"status": "success", "message": "Server is shutting down."})
     except Exception as e:
@@ -247,7 +300,11 @@ def initialize_server():
     plugin_manager.core_api.load_core_data()
     plugin_manager.load_plugins()
     
-    print("\n✅ Yuuka's Server V2.7 is ready!")
+    # Yuuka: uptime tracking v1.0 - Khởi động luồng theo dõi
+    uptime_thread = threading.Thread(target=_uptime_tracking_thread, daemon=True)
+    uptime_thread.start()
+
+    print("\n✅ Yuuka's Server V2.6 is ready!")
     print(f"   - Loaded {len(plugin_manager.get_active_plugins())} plugins.")
     print("   - Local access at: http://127.0.0.1:5000")
     print("   - To access from other devices on the same network, use this machine's IP address.")
