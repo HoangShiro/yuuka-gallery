@@ -13,6 +13,9 @@
         "js": ["character_list.js"],
         "css": ["character_list.css"]
     },
+    "dependencies": {
+        "python": []
+    },
     "ui": {
         "tab": {
             "id": "browse",

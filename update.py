@@ -1,4 +1,4 @@
-# --- NEW FILE: update.py ---
+# --- MODIFIED FILE: update.py ---
 import subprocess
 import os
 
@@ -37,7 +37,7 @@ def _run_git_command(command):
 def check_for_updates():
     """
     Kiểm tra xem có bản cập nhật mới trên remote repository hay không.
-    Đồng thời kiểm tra xem file requirements.txt có bị thay đổi không.
+    Đồng thời kiểm tra xem các file định nghĩa thư viện (requirements.txt, plugin.json) có thay đổi không.
     """
     print("Yuuka: Đang kiểm tra cập nhật từ server Git...")
     
@@ -64,13 +64,15 @@ def check_for_updates():
     # Bước 4: Nếu khác nhau, kiểm tra những file đã thay đổi
     changed_files_str, error = _run_git_command(['git', 'diff', '--name-only', f'{local_hash}..{remote_hash}'])
     if error:
-        # Nếu có lỗi ở đây, vẫn báo có update nhưng không check được requirements
-        return UPDATE_STATUS['AHEAD'], "Có phiên bản mới (không thể kiểm tra file thay đổi).", False
+        # Nếu có lỗi ở đây, vẫn báo có update nhưng không check được file, nên coi như dependency đã thay đổi cho an toàn
+        return UPDATE_STATUS['AHEAD'], "Có phiên bản mới (không thể kiểm tra file thay đổi).", True
 
-    requirements_changed = 'requirements.txt' in changed_files_str.split('\n')
+    changed_files = changed_files_str.split('\n')
+    # Yuuka: dependency check v1.0 - Kiểm tra cả requirements.txt và tất cả các file plugin.json
+    dependencies_changed = 'requirements.txt' in changed_files or any(f.endswith('plugin.json') for f in changed_files)
     
     message = "Có phiên bản mới."
-    return UPDATE_STATUS['AHEAD'], message, requirements_changed
+    return UPDATE_STATUS['AHEAD'], message, dependencies_changed
 
 
 def perform_update():

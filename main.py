@@ -6,6 +6,7 @@ import time
 import logging
 import update
 from werkzeug.serving import WSGIRequestHandler
+from core.dependencies import check_dependencies # Yuuka: dependency check v1.0
 
 class No200RequestHandler(WSGIRequestHandler):
     def log_request(self, code='-', size='-'):
@@ -61,8 +62,8 @@ def main():
     """Hàm chính, kiểm tra cập nhật trước khi khởi chạy server Flask."""
     print(f"[{time.strftime('%H:%M:%S')}] Yuuka: Gallery Server đang khởi động...")
     
-    # Bước 1: Kiểm tra cập nhật
-    status, message, requirements_changed = update.check_for_updates()
+    # Bước 1: Kiểm tra cập nhật code từ Git
+    status, message, dependencies_changed = update.check_for_updates()
 
     if status == UPDATE_STATUS['ERROR']:
         print(f"Yuuka: Lỗi khi kiểm tra cập nhật: {message}")
@@ -74,8 +75,8 @@ def main():
         
         update.perform_update()
         
-        if requirements_changed:
-            print("Yuuka: Phát hiện thay đổi trong file requirements.txt.")
+        if dependencies_changed:
+            print("Yuuka: Phát hiện thay đổi trong các file thư viện (requirements.txt hoặc plugin.json).") # Yuuka: dependency check v1.0
             run_install_and_exit()
         else:
             restart_application()
@@ -83,7 +84,13 @@ def main():
         # Luồng chương trình sẽ không bao giờ đến đây vì các hàm trên đều gọi sys.exit()
         return
 
-    # Bước 2: Nếu không có cập nhật hoặc có lỗi, chạy ứng dụng
+    # Bước 2: Dù không có cập nhật code, vẫn kiểm tra thư viện hiện tại
+    # để xử lý trường hợp người dùng thêm/xóa plugin thủ công.
+    if check_dependencies(): # Yuuka: dependency check v1.0
+        run_install_and_exit()
+        return # Thoát để chờ cài đặt
+
+    # Bước 3: Nếu mọi thứ đều ổn, chạy ứng dụng
     print("Yuuka: Phiên bản đã được cập nhật. Đang tải dữ liệu và khởi chạy server...")
     
     try:

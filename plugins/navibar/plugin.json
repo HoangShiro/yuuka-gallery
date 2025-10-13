@@ -13,6 +13,9 @@
         "js": ["navibar.js"],
         "css": ["navibar.css"]
     },
+    "dependencies": {
+        "python": []
+    },
     "ui": {
         "is_singleton": true
     }

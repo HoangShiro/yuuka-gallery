@@ -17,6 +17,9 @@
             "simple_viewer.css"
         ]
     },
+    "dependencies": {
+        "python": []
+    },
     "ui": {
         "needs_generation_poller": true
     }

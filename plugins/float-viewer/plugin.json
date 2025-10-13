@@ -13,6 +13,9 @@
         "js": ["float_viewer.js"],
         "css": ["float_viewer.css"]
     },
+    "dependencies": {
+        "python": []
+    },
     "ui": {
         "is_singleton": true,
         "needs_generation_poller": true,

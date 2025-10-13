@@ -13,6 +13,9 @@
         "js": ["album.js"],
         "css": ["album.css"]
     },
+    "dependencies": {
+        "python": []
+    },
     "ui": {
         "tab": {
             "id": "album",
