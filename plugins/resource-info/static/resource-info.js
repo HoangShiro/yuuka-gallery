@@ -236,7 +236,7 @@ class ResourceInfoComponent {
         if (this.interval) clearInterval(this.interval);
         if (!this.state.isOpen) return;
 
-        const refreshRate = this.state.isFastMode ? 100 : 1500;
+        const refreshRate = this.state.isFastMode ? 500 : 1000; // Yuuka: resource-info update interval v1.1
         this.interval = setInterval(() => this._fetchData(), refreshRate);
     }
 
