@@ -256,3 +256,29 @@ html:not(.dark-mode) .resource-info-footer {
     color: var(--color-primary-text);
     font-variant-numeric: tabular-nums;
 }
+
+/* Yuuka: mobile responsiveness v1.0 */
+@media (max-width: 768px) {
+    .resource-info-footer {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-4);
+        padding: var(--spacing-3);
+        width: 90vw;
+        bottom: var(--spacing-3);
+    }
+    
+    .info-item {
+        font-size: 0.9em;
+    }
+    
+    #resource-info-widget {
+        padding: var(--spacing-1) var(--spacing-2);
+        gap: var(--spacing-2);
+        font-size: 0.85rem;
+    }
+    
+    .widget-component-group {
+        padding-right: var(--spacing-2);
+    }
+}
