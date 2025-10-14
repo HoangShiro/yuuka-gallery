@@ -42,9 +42,10 @@ html.dark-mode .navibar-container {
 }
 
 #navibar-main-bar {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    width: 350px;
+    /* Yuuka: co giãn logic v1.0 */
+    display: flex;
+    gap: var(--spacing-2);
+    width: auto;
     max-width: 90vw;
     background: rgba(255, 255, 255, 0.6); 
     backdrop-filter: blur(10px); 
@@ -73,14 +74,15 @@ html.dark-mode #navibar-main-bar {
     color: var(--color-primary-text); 
     transition: all 0.2s ease;
     padding: 0; /* Yuuka: ghost row v2.4 */
+    flex-shrink: 0; /* Yuuka: co giãn logic v1.0 */
 }
-.nav-btn:not(.is-placeholder):hover { 
+.nav-btn:not(.is-placeholder):not(.is-tool-placeholder):hover { 
     background: rgba(0, 0, 0, 0.05); 
 }
-.nav-btn:not(.is-placeholder):active { 
+.nav-btn:not(.is-placeholder):not(.is-tool-placeholder):active { 
     transform: scale(0.9); 
 }
-html.dark-mode .nav-btn:not(.is-placeholder):hover { 
+html.dark-mode .nav-btn:not(.is-placeholder):not(.is-tool-placeholder):hover { 
     background: rgba(255, 255, 255, 0.1); 
 }
 
@@ -96,6 +98,16 @@ html.dark-mode .nav-btn:not(.is-placeholder):hover {
 .nav-btn.is-placeholder {
     cursor: default;
     background: transparent;
+}
+
+/* Yuuka: main-bar rework v2.0 - Style cho slot công cụ trống */
+.nav-btn.is-tool-placeholder {
+    cursor: default;
+    color: var(--color-border);
+    opacity: 0.8;
+}
+html.dark-mode .nav-btn.is-tool-placeholder {
+    color: var(--color-border);
 }
 
 
@@ -132,6 +144,27 @@ html.dark-mode #navibar-categories .category-row {
     transform: scale(1.1);
 }
 
+/* Yuuka: insert placeholder v2.0 - Placeholder button */
+.nav-drop-placeholder {
+    cursor: default;
+    color: var(--color-secondary-text);
+    background: transparent !important;
+    border: 2px dashed var(--color-border);
+    transform: scale(0.9);
+    transition: opacity 0.2s, transform 0.2s, visibility 0s;
+}
+.nav-drop-placeholder .material-symbols-outlined {
+    opacity: 0.5;
+}
+
+.nav-drop-placeholder.is-inactive {
+    visibility: hidden;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: visibility 0s 0.2s, opacity 0.2s, transform 0.2s;
+}
+
+
 /* Yuuka: empty placeholder v1.0 */
 .category-row.is-empty-placeholder {
     min-height: 52px; /* Chiều cao của một nút */
@@ -159,7 +192,7 @@ html.dark-mode #navibar-categories .category-row {
         border-left: none;
         border-right: none;
         border-bottom: none;
-        /* Giữ lại border-top để phân tách với nội dung */
+        justify-content: space-around; /* Phân bố đều trên mobile */
     }
     
     .navibar-container {

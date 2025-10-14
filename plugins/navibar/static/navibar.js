@@ -17,26 +17,50 @@ class NavibarComponent {
 
         this._allMainButtons = new Map();
         this._allToolButtons = new Map();
-        
-        this._categoryGrid = []; 
+        this._allSpecialButtons = new Map();
+
+        this._categoryGrid = [];
+        this._mainBarLayout = [];
         this._pinnedButtons = { home: null, quick_slot: null };
         this._activePluginId = null;
         this._isContainerOpen = false;
         this._isSearchActive = false;
-        this._isGhostRowActive = false; // Yuuka: ghost row fix v2.8 - Cờ trạng thái mới
+        this._isGhostRowActive = false;
         
-        // Yuuka: bugfix v2.9 - Thêm logic click-outside
+        this._dropPlaceholder = document.createElement('button');
+        this._dropPlaceholder.className = 'nav-btn nav-drop-placeholder';
+        this._dropPlaceholder.innerHTML = `<span class="material-symbols-outlined">fiber_manual_record</span>`;
+        this._dropPlaceholder.disabled = true;
+
+        // Yuuka: anti-crash state v3.0
+        this._currentPlaceholderIndex = null;
+
         this._boundHandleClickOutside = this._handleClickOutside.bind(this);
         document.addEventListener('mousedown', this._boundHandleClickOutside);
         
+        this._allSpecialButtons.set('navibar-menu', { id: 'navibar-menu', title: 'Menu', icon: 'menu', type: 'special', onClick: () => this._toggleContainer() });
+        this._allSpecialButtons.set('tool-slot-1', { id: 'tool-slot-1', title: 'Tool Slot 1', icon: 'fiber_manual_record', type: 'tool_slot' });
+        this._allSpecialButtons.set('tool-slot-2', { id: 'tool-slot-2', title: 'Tool Slot 2', icon: 'fiber_manual_record', type: 'tool_slot' });
+
         this._loadState();
-        this._registerButtonsFromManifests(allPlugins); // Yuuka: navibar auto-init v1.0
-        this._autoPinInitialButtons(allPlugins); // Yuuka: auto-pin v1.0
+        this._registerButtonsFromManifests(allPlugins);
+        
+        if (this._mainBarLayout.length === 0) {
+            console.log("[Navibar Migration] Creating new main bar layout from old pinned buttons.");
+            this._autoPinInitialButtons(allPlugins);
+            this._mainBarLayout = ['navibar-menu', this._pinnedButtons.quick_slot, this._pinnedButtons.home, 'tool-slot-1', 'tool-slot-2'].filter(Boolean);
+        }
+        
         this._integrityCheck(); 
         this._render();
         
         this._container.addEventListener('dragover', (e) => this._handleContainerDragOver(e));
         this._container.addEventListener('dragleave', (e) => this._handleContainerDragLeave(e));
+
+        this._mainBar.addEventListener('dragover', (e) => this._handleMainBarDragOver(e));
+        this._mainBar.addEventListener('dragleave', (e) => this._handleMainBarDragLeave(e));
+        this._mainBar.addEventListener('drop', (e) => this._handleMainBarDrop(e));
+
 
         if (!window.Yuuka.services.navibar) {
             window.Yuuka.services.navibar = this;
@@ -44,7 +68,6 @@ class NavibarComponent {
         }
     }
     
-    // Yuuka: bugfix v2.9 - Thêm hàm destroy để dọn dẹp
     destroy() {
         document.removeEventListener('mousedown', this._boundHandleClickOutside);
         console.log("[Plugin:Navibar] Service destroyed and event listeners removed.");
@@ -70,10 +93,9 @@ class NavibarComponent {
     }
     
     showSearchBar(searchElement) {
-        // Yuuka: bugfix v2.9 - Tái cấu trúc logic trạng thái
         if (searchElement) {
             this._isSearchActive = true;
-            this._isContainerOpen = false; // Đảm bảo container danh mục bị tắt
+            this._isContainerOpen = false; 
             this._searchBarContainer.innerHTML = '';
             this._searchBarContainer.appendChild(searchElement);
         } else {
@@ -84,7 +106,6 @@ class NavibarComponent {
     
     // --- STATE & INTEGRITY ---
 
-    // Yuuka: navibar auto-init v1.0 - Hàm mới để tự động đăng ký nút
     _registerButtonsFromManifests(allPlugins) {
         if (!allPlugins) return;
         allPlugins.forEach(plugin => {
@@ -92,7 +113,6 @@ class NavibarComponent {
                 const buttonId = `${plugin.id}-main`;
                 if (this._allMainButtons.has(buttonId)) return;
 
-                // Yuuka: service launcher v1.0 - Xác định hành động khi click
                 let clickHandler;
                 if (plugin.ui.tab.is_service_launcher) {
                     clickHandler = () => {
@@ -108,7 +128,6 @@ class NavibarComponent {
                     clickHandler = () => Yuuka.ui.switchTab(plugin.ui.tab.id);
                 }
 
-                // Yuuka: integrity check fix v3.0 - Thêm trực tiếp vào map, không gọi hàm public
                 const buttonConfig = {
                     id: buttonId,
                     type: 'main',
@@ -125,7 +144,6 @@ class NavibarComponent {
         });
     }
 
-    // Yuuka: auto-pin v1.0 - Logic tự động ghim nút ưu tiên
     _autoPinInitialButtons(allPlugins) {
         if (!allPlugins) return;
         
@@ -134,25 +152,21 @@ class NavibarComponent {
             .sort((a, b) => (a.ui.order ?? 99) - (b.ui.order ?? 99));
 
         if (this._pinnedButtons.home === null && sortedPlugins.length > 0) {
-            const homePluginId = `${sortedPlugins[0].id}-main`;
-            this._pinnedButtons.home = homePluginId;
-            console.log(`[Navibar Auto-Pin] Set Home to: ${homePluginId}`);
+            this._pinnedButtons.home = `${sortedPlugins[0].id}-main`;
         }
 
         if (this._pinnedButtons.quick_slot === null && sortedPlugins.length > 1) {
             const quickSlotPluginId = `${sortedPlugins[1].id}-main`;
-            // Đảm bảo không ghim cùng một nút vào cả hai slot
             if (quickSlotPluginId !== this._pinnedButtons.home) {
                 this._pinnedButtons.quick_slot = quickSlotPluginId;
-                console.log(`[Navibar Auto-Pin] Set Quick Slot to: ${quickSlotPluginId}`);
             }
         }
     }
 
 
     _saveState() {
-        localStorage.setItem('yuuka-navibar-pins', JSON.stringify(this._pinnedButtons));
         localStorage.setItem('yuuka-navibar-grid', JSON.stringify(this._categoryGrid));
+        localStorage.setItem('yuuka-navibar-mainbar', JSON.stringify(this._mainBarLayout));
     }
 
     _loadState() {
@@ -161,78 +175,88 @@ class NavibarComponent {
         
         const savedGrid = localStorage.getItem('yuuka-navibar-grid');
         if (savedGrid) this._categoryGrid = JSON.parse(savedGrid);
+
+        const savedMainBar = localStorage.getItem('yuuka-navibar-mainbar');
+        if (savedMainBar) this._mainBarLayout = JSON.parse(savedMainBar);
     }
     
     _integrityCheck() {
-        const registeredIds = new Set(this._allMainButtons.keys());
+        const registeredMainIds = new Set(this._allMainButtons.keys());
+        const allSpecialIds = new Set(this._allSpecialButtons.keys());
         const displayedIds = new Set();
-        const seenOnce = new Set();
         let changesMade = false;
 
-        const checkAndAdd = (id) => {
-            if (!id) return null;
-            if (!registeredIds.has(id) || seenOnce.has(id)) {
+        const newMainBarLayout = [];
+        this._mainBarLayout.forEach(id => {
+            if ((registeredMainIds.has(id) || allSpecialIds.has(id)) && !displayedIds.has(id)) {
+                newMainBarLayout.push(id);
+                displayedIds.add(id);
+            } else {
                 changesMade = true;
-                return null; 
             }
-            seenOnce.add(id);
-            displayedIds.add(id);
-            return id;
-        };
-        
-        this._pinnedButtons.home = checkAndAdd(this._pinnedButtons.home);
-        this._pinnedButtons.quick_slot = checkAndAdd(this._pinnedButtons.quick_slot);
-        
-        for (let r = 0; r < this._categoryGrid.length; r++) {
-            for (let c = 0; c < 5; c++) {
-                this._categoryGrid[r][c] = checkAndAdd(this._categoryGrid[r][c]);
-            }
-        }
+        });
+        this._mainBarLayout = newMainBarLayout;
 
-        registeredIds.forEach(id => {
+        allSpecialIds.forEach(id => {
             if (!displayedIds.has(id)) {
+                this._mainBarLayout.push(id);
+                displayedIds.add(id);
+                changesMade = true;
+            }
+        });
+
+        const newCategoryGrid = [];
+        this._categoryGrid.forEach(row => {
+            const newRow = row.map(id => {
+                if (id && registeredMainIds.has(id) && !displayedIds.has(id)) {
+                    displayedIds.add(id);
+                    return id;
+                }
+                if (id) changesMade = true;
+                return null;
+            });
+            if (newRow.some(id => id !== null)) {
+                newCategoryGrid.push(newRow);
+            }
+        });
+        this._categoryGrid = newCategoryGrid;
+
+        registeredMainIds.forEach(id => {
+            if (!displayedIds.has(id)) {
+                changesMade = true;
                 let placed = false;
                 for (let r = 0; r < this._categoryGrid.length; r++) {
                     for (let c = 0; c < 5; c++) {
-                        if (this._categoryGrid[r][c] === null) {
-                            this._categoryGrid[r][c] = id;
-                            placed = true;
-                            break;
+                        if (this._categoryGrid[r] && this._categoryGrid[r][c] === null) {
+                            this._categoryGrid[r][c] = id; placed = true; break;
                         }
                     }
                     if (placed) break;
                 }
                 if (!placed) {
-                    const newRow = Array(5).fill(null);
-                    newRow[0] = id;
-                    this._categoryGrid.push(newRow);
+                    const newRow = Array(5).fill(null); newRow[0] = id; this._categoryGrid.push(newRow);
                 }
-                changesMade = true;
-                 console.warn(`[Navibar Integrity] Rescued lost button: ${id}`);
             }
         });
         
-        if(changesMade) {
+        if (changesMade) {
             console.log("[Navibar Integrity] State was corrected.");
-            this._cleanupEmptyRows();
-            // Yuuka: auto-save fix v2.0 - Không tự động lưu sau khi kiểm tra
         }
     }
     
-    _removeIdFromAllLocations(buttonId) {
-        if (!buttonId) return;
-        if (this._pinnedButtons.home === buttonId) this._pinnedButtons.home = null;
-        if (this._pinnedButtons.quick_slot === buttonId) this._pinnedButtons.quick_slot = null;
+    _removeFromGrid(buttonId) {
         for (let r = 0; r < this._categoryGrid.length; r++) {
             for (let c = 0; c < 5; c++) {
-                if (this._categoryGrid[r][c] === buttonId) this._categoryGrid[r][c] = null;
+                if (this._categoryGrid[r][c] === buttonId) {
+                    this._categoryGrid[r][c] = null;
+                    return;
+                }
             }
         }
     }
     
     // --- EVENT HANDLERS ---
 
-    // Yuuka: bugfix v2.9 - Thêm hàm xử lý click-outside
     _handleClickOutside(event) {
         if ((this._isContainerOpen || this._isSearchActive) && !this.element.contains(event.target)) {
             this._isContainerOpen = false;
@@ -241,20 +265,16 @@ class NavibarComponent {
         }
     }
 
-    // Yuuka: bugfix v2.9 - Tái cấu trúc logic trạng thái
     _toggleContainer() {
         if (this._isContainerOpen) {
-            // Nếu đang mở, chỉ cần đóng lại
             this._isContainerOpen = false;
         } else {
-            // Nếu đang đóng hoặc đang tìm kiếm, chuyển sang trạng thái mở danh mục
             this._isContainerOpen = true;
             this._isSearchActive = false;
         }
         this._updateViewState();
     }
     
-    // Yuuka: ghost row fix v2.8 - Khôi phục logic UI cũ
     _handleContainerDragOver(e) {
         if (!this._isContainerOpen || this._isGhostRowActive) return;
         const rect = this._container.getBoundingClientRect();
@@ -264,66 +284,164 @@ class NavibarComponent {
             this._render();
         }
     }
-    _handleContainerDragLeave(e) {
-        // Dọn dẹp sẽ được xử lý trong `_handleDragEnd` để đảm bảo tính ổn định
-    }
+    _handleContainerDragLeave(e) { }
 
     _handleDragStart(e, dragInfo) {
+        this._currentPlaceholderIndex = null;
         e.dataTransfer.setData('application/json', JSON.stringify(dragInfo));
         e.target.classList.add('is-dragging');
     }
 
     _handleDragEnd(e) {
+        this._currentPlaceholderIndex = null;
+        this._removePlaceholder();
         e.target.classList.remove('is-dragging');
-        // Yuuka: ghost row fix v2.8 - Logic dọn dẹp an toàn
+
         if (this._isGhostRowActive) {
             this._isGhostRowActive = false;
-            // Chỉ xóa hàng ma nếu nó còn trống
             if (this._categoryGrid[0] && this._categoryGrid[0].every(cell => cell === null)) {
                  this._categoryGrid.shift();
             }
         }
+        // Re-render to ensure clean state
         this._render();
     }
     
     _handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drop-target-hover'); }
     _handleDragLeave(e) { e.currentTarget.classList.remove('drop-target-hover'); }
 
+    _removePlaceholder() {
+        if (this._dropPlaceholder.parentElement) {
+            this._dropPlaceholder.remove();
+        }
+    }
+
+    _handleMainBarDragOver(e) {
+        e.preventDefault();
+        
+        let newPlaceholderIndex = null;
+        const children = [...this._mainBar.querySelectorAll('.main-bar-slot:not(.is-dragging)')];
+        let isInSwapZone = false;
+
+        for (const child of children) {
+            const rect = child.getBoundingClientRect();
+            if (e.clientX >= rect.left + rect.width * 0.25 && e.clientX <= rect.right - rect.width * 0.25) {
+                isInSwapZone = true;
+                break;
+            }
+        }
+
+        if (!isInSwapZone) {
+            newPlaceholderIndex = children.length;
+            for (let i = 0; i < children.length; i++) {
+                const child = children[i];
+                const rect = child.getBoundingClientRect();
+                if (e.clientX < rect.left + rect.width / 2) {
+                    newPlaceholderIndex = i;
+                    break;
+                }
+            }
+        }
+
+        // --- NEW LOGIC: HIDE/SHOW INSTEAD OF ADD/REMOVE ---
+        // Ensure placeholder is in the DOM during drag, but start it off as inactive.
+        if (!this._dropPlaceholder.parentElement) {
+            this._mainBar.appendChild(this._dropPlaceholder);
+            this._dropPlaceholder.classList.add('is-inactive');
+        }
+
+        if (newPlaceholderIndex !== this._currentPlaceholderIndex) {
+            this._currentPlaceholderIndex = newPlaceholderIndex;
+            
+            if (newPlaceholderIndex !== null) {
+                const nextElement = children[newPlaceholderIndex] || null;
+                this._mainBar.insertBefore(this._dropPlaceholder, nextElement);
+                this._dropPlaceholder.classList.remove('is-inactive');
+            } else {
+                // Instead of removing, we just hide it. It still occupies space.
+                this._dropPlaceholder.classList.add('is-inactive');
+            }
+        }
+    }
+    
+    _handleMainBarDragLeave(e) {
+        if (!e.relatedTarget || !this._mainBar.contains(e.relatedTarget)) {
+            this._currentPlaceholderIndex = null;
+            this._removePlaceholder(); // Actually remove it when leaving the bar
+        }
+    }
+
+    _handleMainBarDrop(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        if (this._currentPlaceholderIndex !== null) {
+            const newIndex = this._currentPlaceholderIndex;
+            
+            const dragInfo = JSON.parse(e.dataTransfer.getData('application/json'));
+            const draggedButtonId = dragInfo.id;
+            
+            // Remove from old position
+            if (dragInfo.type === 'main_bar') {
+                this._mainBarLayout.splice(dragInfo.index, 1);
+            } else if (dragInfo.type === 'grid') {
+                this._removeFromGrid(draggedButtonId);
+            }
+            
+            // Insert at new position
+            this._mainBarLayout.splice(newIndex, 0, draggedButtonId);
+            this._finishDragOperation();
+        }
+    }
+
+
     _handleDrop(e, dropTarget) {
         e.preventDefault();
+        e.stopPropagation();
         e.currentTarget.classList.remove('drop-target-hover');
 
         const dragInfo = JSON.parse(e.dataTransfer.getData('application/json'));
         const draggedButtonId = dragInfo.id;
         
-        // Yuuka: ghost row fix v2.8 - HIỆU CHỈNH TỌA ĐỘ
-        if (this._isGhostRowActive && dragInfo.type === 'grid') {
-            dragInfo.row += 1;
+        if (dropTarget.type === 'grid' && !this._allMainButtons.has(draggedButtonId)) {
+            return;
         }
 
-        if (dragInfo.type === dropTarget.type && dragInfo.row === dropTarget.row && dragInfo.col === dropTarget.col && dragInfo.slot === dropTarget.slot) return;
+        if (this._isGhostRowActive && dragInfo.type === 'grid') dragInfo.row += 1;
         
-        let existingButtonId = null; 
-        if(dropTarget.type === 'grid') existingButtonId = this._categoryGrid[dropTarget.row][dropTarget.col];
-        else if (dropTarget.type === 'main_bar') existingButtonId = this._pinnedButtons[dropTarget.slot];
-
-        this._removeIdFromAllLocations(draggedButtonId);
-        this._removeIdFromAllLocations(existingButtonId);
+        const targetId = dropTarget.type === 'grid'
+            ? this._categoryGrid[dropTarget.row][dropTarget.col]
+            : this._mainBarLayout[dropTarget.index];
         
-        if(dropTarget.type === 'grid') this._categoryGrid[dropTarget.row][dropTarget.col] = draggedButtonId;
-        else if (dropTarget.type === 'main_bar') this._pinnedButtons[dropTarget.slot] = draggedButtonId;
-        
-        // Dùng tọa độ đã được hiệu chỉnh (nếu có) để đặt lại button cũ
-        if(dragInfo.type === 'grid') this._categoryGrid[dragInfo.row][dragInfo.col] = existingButtonId;
-        else if (dragInfo.type === 'main_bar') this._pinnedButtons[dragInfo.slot] = existingButtonId;
+        if (dragInfo.type === 'main_bar' && dropTarget.type === 'main_bar') {
+            [this._mainBarLayout[dragInfo.index], this._mainBarLayout[dropTarget.index]] = 
+            [this._mainBarLayout[dropTarget.index], this._mainBarLayout[dragInfo.index]];
+        }
+        else if (dragInfo.type === 'grid' && dropTarget.type === 'grid') {
+            [this._categoryGrid[dragInfo.row][dragInfo.col], this._categoryGrid[dropTarget.row][dropTarget.col]] =
+            [this._categoryGrid[dropTarget.row][dropTarget.col], this._categoryGrid[dragInfo.row][dragInfo.col]];
+        }
+        else if (dragInfo.type === 'grid' && dropTarget.type === 'main_bar') {
+            if (this._allMainButtons.has(targetId)) {
+                this._mainBarLayout[dropTarget.index] = draggedButtonId;
+                this._categoryGrid[dragInfo.row][dragInfo.col] = targetId;
+            } else { return; }
+        }
+        else if (dragInfo.type === 'main_bar' && dropTarget.type === 'grid') {
+            this._categoryGrid[dropTarget.row][dropTarget.col] = draggedButtonId;
+            this._mainBarLayout[dragInfo.index] = targetId;
+        }
 
         this._finishDragOperation();
     }
     
     _finishDragOperation() {
-        this._integrityCheck();
+        this._currentPlaceholderIndex = null;
+        this._removePlaceholder();
+
         this._cleanupEmptyRows();
-        this._saveState(); // Yuuka: auto-save v1.0
+        this._integrityCheck();
+        this._saveState();
         this._render();
     }
 
@@ -333,7 +451,6 @@ class NavibarComponent {
 
     // --- RENDERING LOGIC ---
 
-    // Yuuka: bugfix v2.9 - Hàm mới để quản lý tập trung việc hiển thị
     _updateViewState() {
         const shouldBeOpen = this._isContainerOpen || this._isSearchActive;
         this._container.classList.toggle('is-open', shouldBeOpen);
@@ -341,7 +458,6 @@ class NavibarComponent {
         this._searchBarContainer.style.display = this._isSearchActive ? 'block' : 'none';
         this._categoriesContainer.style.display = this._isContainerOpen ? 'block' : 'none';
         
-        // Cập nhật trạng thái 'active' của nút menu
         const menuBtn = this._mainBar.querySelector('[data-id="navibar-menu"]');
         if (menuBtn) {
             menuBtn.classList.toggle('active', shouldBeOpen);
@@ -360,12 +476,9 @@ class NavibarComponent {
         }
         if (config.onClick) btn.onclick = () => config.onClick();
         
-        // Yuuka: navibar auto-init v1.0 - Cập nhật logic active
-        // Nút chính giờ sẽ được tự động kích hoạt bởi navibar
         if (this._activePluginId === config.pluginId && config.type === 'main') {
             btn.classList.add('active');
         }
-        // Nút công cụ vẫn dùng logic is_active của riêng nó
         if (config.isActive && config.isActive()) btn.classList.add('active');
 
 
@@ -390,49 +503,54 @@ class NavibarComponent {
 
     _renderMainBar() {
         this._mainBar.innerHTML = '';
-        
-        // Yuuka: bugfix v2.9 - Trạng thái 'active' của nút menu giờ do _updateViewState quản lý
-        const menuBtn = this._createButton({ id: 'navibar-menu', title: 'Menu', icon: 'menu', onClick: () => this._toggleContainer() });
-        this._mainBar.appendChild(menuBtn);
+        const activeTools = [...this._allToolButtons.values()]
+            .filter(b => b.pluginId === this._activePluginId)
+            .sort((a,b) => (a.order || 99) - (b.order || 99));
 
-        const quickSlotId = this._pinnedButtons.quick_slot;
-        const quickSlotConfig = quickSlotId ? this._allMainButtons.get(quickSlotId) : null;
-        const quickSlotBtn = this._createButton(
-            quickSlotConfig || {id:'placeholder-qs', classList:['is-placeholder']},
-            quickSlotConfig ? { isDraggable: true, id: quickSlotId, type: 'main_bar', slot: 'quick_slot' } : {},
-            { isDropTarget: true, type: 'main_bar', slot: 'quick_slot' }
-        );
-        quickSlotBtn.classList.add('main-bar-slot');
-        this._mainBar.appendChild(quickSlotBtn);
-        
-        const homeId = this._pinnedButtons.home;
-        const homeConfig = homeId ? this._allMainButtons.get(homeId) : null;
-        const homeBtn = this._createButton(
-            homeConfig || {id:'placeholder-h', classList:['is-placeholder']},
-            homeConfig ? { isDraggable: true, id: homeId, type: 'main_bar', slot: 'home' } : {},
-            { isDropTarget: true, type: 'main_bar', slot: 'home' }
-        );
-        homeBtn.classList.add('main-bar-slot');
-        this._mainBar.appendChild(homeBtn);
-        
-        const activeTools = [...this._allToolButtons.values()].filter(b => b.pluginId === this._activePluginId).sort((a,b) => (a.order || 99) - (b.order || 99));
-        this._mainBar.appendChild(activeTools[0] ? this._createButton(activeTools[0]) : this._createButton({id:'placeholder-t1', classList:['is-placeholder']}));
-        this._mainBar.appendChild(activeTools[1] ? this._createButton(activeTools[1]) : this._createButton({id:'placeholder-t2', classList:['is-placeholder']}));
+        this._mainBarLayout.forEach((buttonId, index) => {
+            let config = null;
+            let isToolPlaceholder = false;
 
-        // Yuuka: bugfix v2.9 - Gọi hàm cập nhật view sau khi render lại DOM
+            if (this._allMainButtons.has(buttonId)) {
+                config = this._allMainButtons.get(buttonId);
+            } else if (this._allSpecialButtons.has(buttonId)) {
+                const specialBtnConfig = this._allSpecialButtons.get(buttonId);
+                config = { ...specialBtnConfig };
+                
+                if (config.type === 'tool_slot') {
+                    const toolIndex = (config.id === 'tool-slot-1') ? 0 : 1;
+                    if (activeTools[toolIndex]) {
+                        config = activeTools[toolIndex];
+                    } else {
+                        isToolPlaceholder = true;
+                    }
+                }
+            }
+
+            if (!config) return;
+
+            const btn = this._createButton(
+                { ...config, classList: isToolPlaceholder ? ['is-tool-placeholder'] : [] },
+                { isDraggable: true, id: buttonId, type: 'main_bar', index: index },
+                { isDropTarget: true, type: 'main_bar', index: index }
+            );
+            btn.classList.add('main-bar-slot');
+            this._mainBar.appendChild(btn);
+        });
+        
         this._updateViewState();
     }
     
     _renderCategories() {
         this._categoriesContainer.innerHTML = '';
-        const pinnedIds = new Set(Object.values(this._pinnedButtons));
+        const mainBarIds = new Set(this._mainBarLayout);
         
         this._categoryGrid.forEach((row, rowIndex) => {
             const rowEl = document.createElement('div');
             rowEl.className = 'category-row';
             row.forEach((buttonId, colIndex) => {
                 const dropInfo = { isDropTarget: true, type: 'grid', row: rowIndex, col: colIndex };
-                if (buttonId && this._allMainButtons.has(buttonId) && !pinnedIds.has(buttonId)) {
+                if (buttonId && this._allMainButtons.has(buttonId) && !mainBarIds.has(buttonId)) {
                     const btnConfig = this._allMainButtons.get(buttonId);
                     const dragInfo = { isDraggable: true, id: buttonId, type: 'grid', row: rowIndex, col: colIndex };
                     rowEl.appendChild(this._createButton(btnConfig, dragInfo, dropInfo));
@@ -444,11 +562,9 @@ class NavibarComponent {
             this._categoriesContainer.appendChild(rowEl);
         });
 
-        // Yuuka: empty placeholder v1.0
         if (this._categoryGrid.length === 0) {
             const rowEl = document.createElement('div');
             rowEl.className = 'category-row is-empty-placeholder';
-            // Thêm một ô trống để giữ chiều cao
             rowEl.appendChild(this._createButton({id:'placeholder-empty', classList:['is-placeholder']}, {}, { isDropTarget: true, type: 'grid', row: 0, col: 0 }));
             this._categoriesContainer.appendChild(rowEl);
         }
