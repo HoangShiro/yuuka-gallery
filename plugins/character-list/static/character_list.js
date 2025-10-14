@@ -23,8 +23,7 @@ class CharacterListComponent {
             currentSearchQuery: '', debounceTimeout: null, syncTimeout: null,
             currentModalCharacter: null, 
             animateNextLoad: false,
-            currentAnimationClass: null, 
-            isInitialLoad: true, // Yuuka: Initial load animation v1.0
+            currentAnimationClass: null,
         };
         this.observer = new IntersectionObserver(this.handleObserver.bind(this), { rootMargin: '400px' });
         
@@ -73,14 +72,25 @@ class CharacterListComponent {
         this.state.allCharacters = charResponse.characters;
         this.state.favourites = listsResponse.favourites || [];
         this.state.blacklist = listsResponse.blacklist || [];
-        this._shuffleSessionOrder();
+        
         this.attachEventListeners();
         this._updateNav();
 
-        // Yuuka: Initial load animation v1.0
-        if (this.state.isInitialLoad) {
+        // Yuuka: double reload fix v2.0 - Plugin tự quản lý state phiên
+        window.Yuuka.pluginState = window.Yuuka.pluginState || {};
+        if (!window.Yuuka.pluginState.characterList) {
+            console.log("[CharacterList] First time initialization for this session. Shuffling characters.");
+            // Lưu lại sessionBrowseOrder vào state của plugin
+            this._shuffleSessionOrder();
             this.state.animateNextLoad = true;
             this.state.currentAnimationClass = 'card-anim-rise';
+            window.Yuuka.pluginState.characterList = { 
+                initialized: true,
+                sessionBrowseOrder: this.state.sessionBrowseOrder
+            };
+        } else {
+            // Lấy lại thứ tự đã xáo trộn từ state phiên
+            this.state.sessionBrowseOrder = window.Yuuka.pluginState.characterList.sessionBrowseOrder;
         }
 
         await this.resetAndLoad();
@@ -143,8 +153,6 @@ class CharacterListComponent {
             isActive: () => ['favourites', 'blacklist'].includes(this.state.displayMode),
             onClick: () => {
                 this.state.displayMode = (this.state.displayMode === 'favourites') ? 'blacklist' : 'favourites';
-                this.state.animateNextLoad = true;
-                this.state.currentAnimationClass = 'card-anim-rise';
                 this.resetAndLoad();
                 this._updateNav();
             }
@@ -414,12 +422,35 @@ class CharacterListComponent {
     }
     handleObserver(entries) { if (entries[0]?.isIntersecting&&!this.state.isLoading&&this.state.hasMore)this.loadCharacters();}
     createCharacterCard(char) { const c=document.createElement('div');c.className='character-card';c.dataset.hash=char.hash;c.dataset.name=char.name;const isAlbumPluginActive=this.activePlugins.some(p=>p.id==='album');const a=isAlbumPluginActive?`<button class="card-album-btn" title="Mở trong Album"><span class="material-symbols-outlined">photo_album</span></button>`:'';c.innerHTML=`<div class="image-container">${a}<img src="/image/${char.hash}" alt="${char.name}" loading="lazy"></div><div class="name">${char.name}</div>`;if(this.state.animateNextLoad&&this.state.currentAnimationClass){c.classList.add(this.state.currentAnimationClass);c.style.animationDelay=`${Math.random()*0.5}s`;}this.gallery.appendChild(c);}
-    async loadCharacters() { if(this.state.isLoading||!this.state.hasMore)return;this.state.isLoading=true;this.loader.classList.add('visible');this.resultFooter.style.display='none';let s=[];switch(this.state.displayMode){case'favourites':s=this.state.allCharacters.filter(c=>this.state.favourites.includes(c.hash));break;case'blacklist':s=this.state.allCharacters.filter(c=>this.state.blacklist.includes(c.hash));break;default:s=this.state.sessionBrowseOrder;}if(this.state.currentSearchQuery){s=s.filter(c=>c.name.toLowerCase().includes(this.state.currentSearchQuery));}const B=50;const i=(this.state.currentPage-1)*B;const r=s.slice(i,i+B);if(r.length===0){this.state.hasMore=false;}else{r.forEach(c=>this.createCharacterCard(c));this.state.currentPage++;this.state.hasMore=this.gallery.children.length<s.length;}this.state.isLoading=false;this.loader.classList.remove('visible');if(!this.state.hasMore){const t=this.gallery.getElementsByClassName('character-card').length;if(t>0){this.resultFooter.textContent=`Đã hiển thị ${t} kết quả.`;this.resultFooter.style.display='block';this.loader.style.display='none';}else{this.loader.textContent="Không tìm thấy.";this.loader.style.display='block';this.resultFooter.style.display='none';}}this.state.animateNextLoad=false;this.state.currentAnimationClass=null;if(this.state.isInitialLoad)this.state.isInitialLoad=false;}
+    async loadCharacters() { if(this.state.isLoading||!this.state.hasMore)return;this.state.isLoading=true;this.loader.classList.add('visible');this.resultFooter.style.display='none';let s=[];switch(this.state.displayMode){case'favourites':s=this.state.allCharacters.filter(c=>this.state.favourites.includes(c.hash));break;case'blacklist':s=this.state.allCharacters.filter(c=>this.state.blacklist.includes(c.hash));break;default:s=this.state.sessionBrowseOrder;}if(this.state.currentSearchQuery){s=s.filter(c=>c.name.toLowerCase().includes(this.state.currentSearchQuery));}const B=50;const i=(this.state.currentPage-1)*B;const r=s.slice(i,i+B);if(r.length===0){this.state.hasMore=false;}else{r.forEach(c=>this.createCharacterCard(c));this.state.currentPage++;this.state.hasMore=this.gallery.children.length<s.length;}this.state.isLoading=false;this.loader.classList.remove('visible');if(!this.state.hasMore){const t=this.gallery.getElementsByClassName('character-card').length;if(t>0){this.resultFooter.textContent=`Đã hiển thị ${t} kết quả.`;this.resultFooter.style.display='block';this.loader.style.display='none';}else{this.loader.textContent="Không tìm thấy.";this.loader.style.display='block';this.resultFooter.style.display='none';}}this.state.animateNextLoad=false;this.state.currentAnimationClass=null;}
     async resetAndLoad() { this.observer.disconnect();this.gallery.innerHTML='';this.state.currentPage=1;this.state.hasMore=true;this.state.isLoading=false;this.loader.textContent='Đang tải...';this.loader.style.display='block';this.resultFooter.style.display='none';await this.loadCharacters();if(this.state.hasMore)this.observer.observe(this.loader);}
     openModal(card) { this.state.currentModalCharacter={hash:card.dataset.hash,name:card.dataset.name};this.modalImage.src=card.querySelector('img').src;this.modalCaption.textContent=this.state.currentModalCharacter.name;this.updateModalActions();this.modal.style.display='flex';}
     closeModal() { this.modal.style.display='none';this.state.currentModalCharacter=null;}
     toggleFavourite() { const{hash,name}=this.state.currentModalCharacter;const i=this.state.favourites.indexOf(hash);if(i>-1){this.state.favourites.splice(i,1);showError(`${name} đã được xóa khỏi Yêu thích.`);}else{this.state.favourites.push(hash);showError(`${name} đã được thêm vào Yêu thích.`);}this._saveUserLists();this.updateModalActions();if(this.state.displayMode==='favourites'&&i>-1){this.gallery.querySelector(`.character-card[data-hash="${hash}"]`)?.remove();this.closeModal();}}
-    toggleBlacklist() { const{hash,name}=this.state.currentModalCharacter;const i=this.state.blacklist.indexOf(hash);if(i>-1){this.state.blacklist.splice(i,1);showError(`${name} đã được xóa khỏi Danh sách đen.`);}else{this.state.blacklist.push(hash);showError(`${name} đã được thêm vào Danh sách đen.`);const f=this.state.favourites.indexOf(hash);if(f>-1)this.state.favourites.splice(f,1);}this._saveUserLists();this.updateModalActions();this.gallery.querySelector(`.character-card[data-hash="${hash}"]`)?.remove();this.closeModal();}
+    
+    toggleBlacklist() {
+        const { hash, name } = this.state.currentModalCharacter;
+        const i = this.state.blacklist.indexOf(hash);
+        if (i > -1) {
+            this.state.blacklist.splice(i, 1);
+            showError(`${name} đã được xóa khỏi Danh sách đen.`);
+        } else {
+            this.state.blacklist.push(hash);
+            showError(`${name} đã được thêm vào Danh sách đen.`);
+            const f = this.state.favourites.indexOf(hash);
+            if (f > -1) this.state.favourites.splice(f, 1);
+        }
+        // Yuuka: Blacklist Bug Fix v2.1 - Tái tạo lại danh sách duyệt và cập nhật state phiên
+        this._shuffleSessionOrder();
+        if (window.Yuuka.pluginState.characterList) {
+            window.Yuuka.pluginState.characterList.sessionBrowseOrder = this.state.sessionBrowseOrder;
+        }
+        this._saveUserLists();
+        this.updateModalActions();
+        this.gallery.querySelector(`.character-card[data-hash="${hash}"]`)?.remove();
+        this.closeModal();
+    }
+
     updateModalActions() { 
         if (!this.state.currentModalCharacter) return;
         const { hash } = this.state.currentModalCharacter;

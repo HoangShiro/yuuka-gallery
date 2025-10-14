@@ -5,8 +5,9 @@ window.Yuuka = {
     components: {}, // Nơi các plugin sẽ khai báo component của chúng
     services: {}, // YUUKA: Nơi chứa các instance của plugin dạng công cụ (singleton)
     initialPluginState: {}, // Kênh giao tiếp để truyền dữ liệu khi chuyển tab
+    pluginState: {}, // Yuuka: Không gian state cho các plugin
     
-    // YUUKA: EVENT BUS - NÂNG CẤP VỚI PHƯƠNG THỨC `off`
+    // YUUKA: EVENT BUS - NÂNG CẤP VỚI PHƯƠ-NG THỨC `off`
     events: {
         _listeners: {},
         on(eventName, callback) {
@@ -297,6 +298,9 @@ async function switchTab(tabName) {
     // Yuuka: reload on active tab click v1.0 - Gỡ bỏ điều kiện return sớm để cho phép tải lại.
     state.activeTab = tabName;
 
+    // Yuuka: scroll restoration fix v1.0 - Cuộn lên đầu trang
+    window.scrollTo(0, 0);
+
     if (state.currentPluginInstance && typeof state.currentPluginInstance.destroy === 'function') {
         state.currentPluginInstance.destroy();
         state.currentPluginInstance = null;
@@ -480,6 +484,12 @@ async function initializeAppUI() {
 // Yuuka: auth rework v1.0 - Viết lại hoàn toàn luồng khởi động
 async function startApplication() {
     console.log("[Core] Yuuka is waking up...");
+
+    // Yuuka: scroll restoration fix v1.0 - Tắt tính năng của trình duyệt
+    if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'manual';
+    }
+
     const token = localStorage.getItem('yuuka-auth-token');
     
     const logoutMessage = sessionStorage.getItem('yuuka-logout-message');
