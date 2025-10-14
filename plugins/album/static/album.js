@@ -24,7 +24,7 @@ class AlbumComponent {
     async init() {
         console.log("[Plugin:Album] Initializing...");
         this.container.classList.add('plugin-album');
-        await this.checkComfyUIStatus();
+        this.checkComfyUIStatus();
 
         this.container.innerHTML = `<div class="plugin-album__content-area"></div>`;
         this.contentArea = this.container.querySelector('.plugin-album__content-area');
@@ -60,8 +60,10 @@ class AlbumComponent {
         Yuuka.events.off('generation:update', this.handleGenerationUpdate);
         Yuuka.events.off('image:deleted', this.handleImageDeleted); // Yuuka: event bus v1.0
         
-        // Yuuka: navibar state fix v1.0 - Gỡ bỏ việc gọi setActivePlugin(null).
-        // Component mới được init sẽ chịu trách nhiệm set active plugin.
+        const navibar = window.Yuuka.services.navibar;
+        if (navibar) {
+            navibar.setActivePlugin(null);
+        }
 
         this.contentArea.innerHTML = '';
         this.container.classList.remove('plugin-album');

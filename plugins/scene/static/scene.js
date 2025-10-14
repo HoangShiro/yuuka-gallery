@@ -60,6 +60,7 @@ class SceneComponent {
             Yuuka.events.on('generation:update', this.handleGenerationUpdate);
 
             this.render();
+            this._updateNav(); // Yuuka: Thêm để báo cho navibar biết tab đang active
             const sceneStatus = await this.api.scene.get('/status');
             if(sceneStatus.is_running) {
                 this.state.generation.isSceneRunning = true;
@@ -73,6 +74,10 @@ class SceneComponent {
     destroy() {
         console.log("[Plugin:Scene] Destroying...");
         // Yuuka: independent float viewer v1.0 - Gỡ bỏ việc tự động đóng float-viewer
+        const navibar = window.Yuuka.services.navibar;
+        if (navibar) {
+            navibar.setActivePlugin(null);
+        }
         this.detachEventListeners();
         Yuuka.events.off('generation:update', this.handleGenerationUpdate);
         clearInterval(this.state.generation.sceneRunInterval);
@@ -92,6 +97,13 @@ class SceneComponent {
         this._updateGeneratingFX();
     }
     
+    // Yuuka: Hàm mới để cập nhật navibar
+    _updateNav() {
+        const navibar = window.Yuuka.services.navibar;
+        if (!navibar) return;
+        navibar.setActivePlugin('scene');
+    }
+
     _createHeader(item, type, index) {
         const header = this._createUIElement('div', { className: `${type}-header` });
 

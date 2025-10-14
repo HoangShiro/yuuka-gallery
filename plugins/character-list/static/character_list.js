@@ -88,10 +88,12 @@ class CharacterListComponent {
 
     destroy() {
         console.log("[Plugin:CharacterList] Destroying...");
-        // Yuuka: navibar integration v2.0 - Hide search bar on exit
         const navibar = window.Yuuka.services.navibar;
-        if (navibar && navibar._isSearchActive) {
-            navibar.showSearchBar(null);
+        if (navibar) {
+            if (navibar._isSearchActive) {
+                navibar.showSearchBar(null);
+            }
+            navibar.setActivePlugin(null);
         }
         // Yuuka: Grid zoom v2.0 - clean up zoom state
         if (this.zoomState.active) {
