@@ -1,4 +1,3 @@
-// --- MODIFIED FILE: plugins/navibar/static/navibar.js ---
 class NavibarComponent {
     constructor(container, api, allPlugins) { // Yuuka: navibar auto-init v1.0
         this.api = api;
@@ -26,6 +25,10 @@ class NavibarComponent {
         this._isSearchActive = false;
         this._isGhostRowActive = false; // Yuuka: ghost row fix v2.8 - Cờ trạng thái mới
         
+        // Yuuka: bugfix v2.9 - Thêm logic click-outside
+        this._boundHandleClickOutside = this._handleClickOutside.bind(this);
+        document.addEventListener('mousedown', this._boundHandleClickOutside);
+        
         this._loadState();
         this._registerButtonsFromManifests(allPlugins); // Yuuka: navibar auto-init v1.0
         this._autoPinInitialButtons(allPlugins); // Yuuka: auto-pin v1.0
@@ -39,6 +42,12 @@ class NavibarComponent {
             window.Yuuka.services.navibar = this;
             console.log("[Plugin:Navibar] Service registered.");
         }
+    }
+    
+    // Yuuka: bugfix v2.9 - Thêm hàm destroy để dọn dẹp
+    destroy() {
+        document.removeEventListener('mousedown', this._boundHandleClickOutside);
+        console.log("[Plugin:Navibar] Service destroyed and event listeners removed.");
     }
 
     // --- PUBLIC API ---
@@ -61,21 +70,16 @@ class NavibarComponent {
     }
     
     showSearchBar(searchElement) {
+        // Yuuka: bugfix v2.9 - Tái cấu trúc logic trạng thái
         if (searchElement) {
             this._isSearchActive = true;
-            this._isContainerOpen = false;
+            this._isContainerOpen = false; // Đảm bảo container danh mục bị tắt
             this._searchBarContainer.innerHTML = '';
             this._searchBarContainer.appendChild(searchElement);
-            this._searchBarContainer.style.display = 'block';
-            this._categoriesContainer.style.display = 'none';
-            this._container.classList.add('is-open');
         } else {
             this._isSearchActive = false;
-            this._searchBarContainer.style.display = 'none';
-            this._categoriesContainer.style.display = 'block';
-            this._container.classList.remove('is-open');
         }
-        this._render();
+        this._updateViewState();
     }
     
     // --- STATE & INTEGRITY ---
@@ -225,20 +229,29 @@ class NavibarComponent {
             }
         }
     }
-
+    
     // --- EVENT HANDLERS ---
-    _toggleContainer() {
-        if (this._isSearchActive) {
+
+    // Yuuka: bugfix v2.9 - Thêm hàm xử lý click-outside
+    _handleClickOutside(event) {
+        if ((this._isContainerOpen || this._isSearchActive) && !this.element.contains(event.target)) {
+            this._isContainerOpen = false;
             this._isSearchActive = false;
-            this._isContainerOpen = true; 
-            this._searchBarContainer.style.display = 'none';
-            this._categoriesContainer.style.display = 'block';
-            this._container.classList.add('is-open');
-        } else {
-            this._isContainerOpen = !this._isContainerOpen;
-            this._container.classList.toggle('is-open', this._isContainerOpen);
+            this._updateViewState();
         }
-        this._render();
+    }
+
+    // Yuuka: bugfix v2.9 - Tái cấu trúc logic trạng thái
+    _toggleContainer() {
+        if (this._isContainerOpen) {
+            // Nếu đang mở, chỉ cần đóng lại
+            this._isContainerOpen = false;
+        } else {
+            // Nếu đang đóng hoặc đang tìm kiếm, chuyển sang trạng thái mở danh mục
+            this._isContainerOpen = true;
+            this._isSearchActive = false;
+        }
+        this._updateViewState();
     }
     
     // Yuuka: ghost row fix v2.8 - Khôi phục logic UI cũ
@@ -319,6 +332,22 @@ class NavibarComponent {
     }
 
     // --- RENDERING LOGIC ---
+
+    // Yuuka: bugfix v2.9 - Hàm mới để quản lý tập trung việc hiển thị
+    _updateViewState() {
+        const shouldBeOpen = this._isContainerOpen || this._isSearchActive;
+        this._container.classList.toggle('is-open', shouldBeOpen);
+        
+        this._searchBarContainer.style.display = this._isSearchActive ? 'block' : 'none';
+        this._categoriesContainer.style.display = this._isContainerOpen ? 'block' : 'none';
+        
+        // Cập nhật trạng thái 'active' của nút menu
+        const menuBtn = this._mainBar.querySelector('[data-id="navibar-menu"]');
+        if (menuBtn) {
+            menuBtn.classList.toggle('active', shouldBeOpen);
+        }
+    }
+
     _createButton(config, dragInfo = {}, dropInfo = {}) {
         const btn = document.createElement('button');
         btn.className = 'nav-btn';
@@ -362,8 +391,8 @@ class NavibarComponent {
     _renderMainBar() {
         this._mainBar.innerHTML = '';
         
+        // Yuuka: bugfix v2.9 - Trạng thái 'active' của nút menu giờ do _updateViewState quản lý
         const menuBtn = this._createButton({ id: 'navibar-menu', title: 'Menu', icon: 'menu', onClick: () => this._toggleContainer() });
-        if (this._isContainerOpen) menuBtn.classList.add('active');
         this._mainBar.appendChild(menuBtn);
 
         const quickSlotId = this._pinnedButtons.quick_slot;
@@ -389,6 +418,9 @@ class NavibarComponent {
         const activeTools = [...this._allToolButtons.values()].filter(b => b.pluginId === this._activePluginId).sort((a,b) => (a.order || 99) - (b.order || 99));
         this._mainBar.appendChild(activeTools[0] ? this._createButton(activeTools[0]) : this._createButton({id:'placeholder-t1', classList:['is-placeholder']}));
         this._mainBar.appendChild(activeTools[1] ? this._createButton(activeTools[1]) : this._createButton({id:'placeholder-t2', classList:['is-placeholder']}));
+
+        // Yuuka: bugfix v2.9 - Gọi hàm cập nhật view sau khi render lại DOM
+        this._updateViewState();
     }
     
     _renderCategories() {
