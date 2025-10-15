@@ -142,6 +142,8 @@ class CharacterListComponent {
         // Yuuka: navibar auto-init v1.0 - Gỡ bỏ việc đăng ký nút chính 'cl-browse'
         // Navibar sẽ tự động đăng ký nút này từ manifest.
 
+        this._registerBrowseMainButton(navibar);
+
         // Register the tool button for Favourites/Blacklist
         navibar.registerButton({
             id: 'cl-lists',
@@ -180,6 +182,86 @@ class CharacterListComponent {
 
         // Tell navibar this plugin is active so it shows the tool buttons
         navibar.setActivePlugin('character-list');
+    }
+
+    _registerBrowseMainButton(navibar) {
+        const isMainActive = () => navibar._activePluginId === 'character-list';
+        const computeIcon = () => 'grid_view';
+        const computeTitle = () => {
+            if (!this._isBrowseTabActive()) return 'Browse';
+            if (this.state.displayMode !== 'browse') return 'Quay lại duyệt';
+            return 'Làm mới danh sách';
+        };
+
+        navibar.registerButton({
+            id: 'character-list-main',
+            type: 'main',
+            pluginId: 'character-list',
+            icon: 'grid_view',
+            title: 'Browse',
+            isActive: isMainActive,
+            mode: 'toggle',
+            toggleStates: [
+                {
+                    icon: () => computeIcon(),
+                    title: () => computeTitle(),
+                    isActive: isMainActive,
+                    onClick: (ctx) => this._handleBrowseMainButtonToggle(ctx)
+                }
+            ]
+        });
+    }
+
+    _isBrowseTabActive() {
+        const browseBtn = document.querySelector('.tab-btn[data-tab="browse"]');
+        return !!(browseBtn && browseBtn.classList.contains('active'));
+    }
+
+    _handleBrowseMainButtonToggle() {
+        const navibar = window.Yuuka.services.navibar;
+
+        if (!this._isBrowseTabActive()) {
+            Yuuka.ui.switchTab('browse');
+            return;
+        }
+
+        if (this.state.displayMode !== 'browse') {
+            this.state.displayMode = 'browse';
+            this.state.currentSearchQuery = '';
+            if (this.searchBox) {
+                this.searchBox.value = '';
+            }
+            if (navibar && navibar._isSearchActive) {
+                navibar.showSearchBar(null);
+            }
+            this._updateNav();
+            this.resetAndLoad();
+            return;
+        }
+
+        this.state.displayMode = 'browse';
+        this._shuffleSessionOrder();
+        if (window.Yuuka.pluginState.characterList) {
+            window.Yuuka.pluginState.characterList.sessionBrowseOrder = this.state.sessionBrowseOrder;
+        } else {
+            window.Yuuka.pluginState.characterList = {
+                initialized: true,
+                sessionBrowseOrder: this.state.sessionBrowseOrder
+            };
+        }
+
+        this.state.currentSearchQuery = '';
+        if (this.searchBox && this.searchBox.value) {
+            this.searchBox.value = '';
+        }
+        if (navibar && navibar._isSearchActive) {
+            navibar.showSearchBar(null);
+        }
+
+        this.state.animateNextLoad = true;
+        this.state.currentAnimationClass = 'card-anim-rise';
+        this._updateNav();
+        this.resetAndLoad();
     }
 
     _shuffleSessionOrder() { let b = this.state.allCharacters.filter(c => !this.state.blacklist.includes(c.hash)); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[b[i], b[j]] = [b[j], b[i]]; } this.state.sessionBrowseOrder = b; }

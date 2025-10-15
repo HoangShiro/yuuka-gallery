@@ -115,10 +115,10 @@ html.dark-mode #result-footer { background: rgba(42, 39, 38, 0.6); border: 1px s
     width: 100%;
     padding: 16px 50px 16px 24px;
     font-size: var(--font-size-base);
-    border-radius: var(--rounded-full);
+    border-radius: var(--rounded-lg);
     border: none; /* Remove border for a cleaner look */
     outline: none; /* Remove default focus outline */
-    background-color: var(--color-card-bg);
+    background-color: rgba(0, 0, 0, 0);
     color: var(--color-primary-text);
     box-shadow: 0 8px 25px -8px var(--color-shadow); /* A softer, more modern shadow */
     transition: box-shadow 0.25s ease;
@@ -126,11 +126,11 @@ html.dark-mode #result-footer { background: rgba(42, 39, 38, 0.6); border: 1px s
 
 #search-box:focus {
     /* Add a focus ring using a colored shadow */
-    box-shadow: 0 8px 25px -8px var(--color-shadow), 0 0 0 3px #ff8a754f;
+    box-shadow: 0 8px 25px -8px var(--color-shadow), 0 0 0 1px #ff8a754f;
 }
 
 html.dark-mode #search-box:focus {
-     box-shadow: 0 8px 25px -8px var(--color-shadow), 0 0 0 3px #ff9c8d4f;
+     box-shadow: 0 8px 25px -8px var(--color-shadow), 0 0 0 1px #ff9c8d4f;
 }
 
 html.dark-mode #search-box::placeholder {
@@ -247,3 +247,15 @@ html.dark-mode .confirm-modal-dialog .btn-cancel {
 .tag-autocomplete-list { display: none; position: absolute; list-style-type: none; margin: 0; padding: 0; border: 1px solid var(--color-border); border-top: none; background-color: var(--color-card-bg); width: 100%; box-sizing: border-box; max-height: 150px; overflow-y: auto; z-index: 2600; }
 .tag-autocomplete-item { padding: var(--spacing-2) var(--spacing-3); cursor: pointer; }
 .tag-autocomplete-item:hover, .tag-autocomplete-item.active { background-color: var(--color-border); }
+@media (max-width: 640px) {
+    #search-box {
+        height: 44px;
+        padding: 0 46px 0 var(--spacing-3);
+        line-height: 44px;
+    }
+
+    .search-submit-btn {
+        width: 38px;
+        height: 38px;
+    }
+}

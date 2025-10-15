@@ -2,68 +2,163 @@
 #main-nav { 
     position: fixed; 
     bottom: var(--spacing-3); 
-    left: 0;
-    width: 100vw; /* Yuuka: centering fix v1.0 - Use full viewport width */
+    left: 50%;
+    transform: translateX(-50%);
+    margin-left: calc((100vw - 100%) / 2);
+    width: auto;
+    max-width: 90vw;
     z-index: 1600;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: var(--spacing-2);
-    pointer-events: none; /* Yuuka: centering fix v1.0 - Allow clicks to pass through the container */
 }
 
-.navibar-container {
-    width: 350px;
-    max-width: 90vw;
-    background: rgba(255, 255, 255, 0.7); 
-    backdrop-filter: blur(12px); 
-    -webkit-backdrop-filter: blur(12px); 
-    border-radius: var(--rounded-lg);
-    border: 1px solid rgba(255, 255, 255, 0.2); 
-    box-shadow: 0 4px 12px var(--color-shadow); 
-    padding: var(--spacing-3);
-    
-    transform: translateY(10px) scale(0.95);
-    opacity: 0;
-    pointer-events: none;
-    transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), 
-                opacity 0.3s ease;
-    pointer-events: auto; /* Yuuka: centering fix v1.0 - Re-enable pointer events for this element */
-}
-html.dark-mode .navibar-container {
-    background: rgba(42, 39, 38, 0.7); 
-    border: 1px solid rgba(255, 255, 255, 0.1); 
-}
-
-.navibar-container.is-open {
-    transform: translateY(0) scale(1);
-    opacity: 1;
-    pointer-events: auto;
-}
-
-#navibar-main-bar {
-    /* Yuuka: co giãn logic v1.0 */
+#navibar-search-bar {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    max-width: 380px;
+    padding: 0;
+    box-sizing: border-box;
+    margin: 0 auto;
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(16px);
+    pointer-events: none;
+    transition: max-height 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), opacity 0.24s ease, transform 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), padding 0.28s ease;
+}
+
+#navibar-search-bar .navibar-search-wrapper {
+    display: flex;
+    align-items: center;
     gap: var(--spacing-2);
-    width: auto;
-    max-width: 90vw;
+    width: 100%;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.24s ease, transform 0.32s cubic-bezier(0.21, 0.8, 0.35, 1);
+}
+
+#navibar-tray.is-search-active #navibar-search-bar .navibar-search-wrapper {
+    width: 100%;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+#navibar-search-bar .navibar-search-form {
+    flex: 1;
+    width: 100%;
+}
+
+#navibar-search-bar .navibar-search-return {
+    width: 52px;
+    height: 52px;
+    flex-shrink: 0;
+}
+
+#navibar-search-bar .navibar-search-return .material-symbols-outlined {
+    font-size: 28px;
+}
+
+#navibar-tray {
+    display: flex;
+    flex-direction: column;
     background: rgba(255, 255, 255, 0.6); 
     backdrop-filter: blur(10px); 
     -webkit-backdrop-filter: blur(10px); 
-    padding: var(--spacing-2); 
-    border-radius: var(--rounded-full); 
     border: 1px solid rgba(255, 255, 255, 0.2); 
     box-shadow: 0 4px 12px var(--color-shadow);
-    pointer-events: auto; /* Yuuka: centering fix v1.0 - Re-enable pointer events for this element */
+    pointer-events: auto;
+    border-radius: var(--rounded-lg);
+    transition: border-radius 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
-html.dark-mode #navibar-main-bar {
+
+#navibar-main-view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    overflow: hidden;
+    max-height: 560px;
+    opacity: 1;
+    transform: translateY(0);
+    transition: max-height 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), opacity 0.24s ease, transform 0.32s cubic-bezier(0.21, 0.8, 0.35, 1);
+}
+
+#navibar-main-view.is-hidden {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-16px);
+    pointer-events: none;
+}
+
+#navibar-tray.is-subgrid-open {
+    border-radius: var(--rounded-lg);
+}
+
+#navibar-tray.is-search-active #navibar-search-bar {
+    padding: var(--spacing-2);
+    max-height: 220px;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+html.dark-mode #navibar-tray {
     background: rgba(42, 39, 38, 0.6); 
     border: 1px solid rgba(255, 255, 255, 0.1); 
 }
 
-.nav-btn, .main-bar-slot { /* Yuuka: ghost row v2.4 - Áp dụng style chung cho cả slot */
+#navibar-main-bar {
+    display: flex;
+    gap: var(--spacing-2);
+    width: auto;
+    padding: var(--spacing-2);
+}
+#navibar-main-bar .nav-btn, #navibar-main-bar .main-bar-slot {
     width: 52px; 
     height: 52px; 
+}
+
+
+/* --- Styling cho Sub-grid --- */
+#navibar-sub-grid {
+    display: flex;
+    gap: var(--spacing-2);
+    width: auto;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 350px;
+    
+    /* YUUKA: Animation logic v1.0 */
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    padding: 0 var(--spacing-1);
+    transition: max-height 0.3s ease-out, opacity 0.3s ease-out, padding 0.3s ease-out;
+}
+
+/* YUUKA: Trạng thái mở của sub-grid */
+#navibar-tray.is-subgrid-open #navibar-sub-grid {
+    max-height: 300px; /* Một giá trị đủ lớn */
+    opacity: 1;
+    padding: var(--spacing-1) var(--spacing-1) var(--spacing-2);
+}
+
+
+#navibar-sub-grid .nav-btn, #navibar-sub-grid .main-bar-slot {
+    width: 36px;
+    height: 36px;
+}
+#navibar-sub-grid .nav-btn .material-symbols-outlined {
+    font-size: 20px;
+}
+
+
+/* --- Styling chung cho các nút --- */
+.nav-btn, .main-bar-slot {
     border-radius: var(--rounded-full); 
     border: none; 
     background: transparent; 
@@ -73,144 +168,139 @@ html.dark-mode #navibar-main-bar {
     justify-content: center; 
     color: var(--color-primary-text); 
     transition: all 0.2s ease;
-    padding: 0; /* Yuuka: ghost row v2.4 */
-    flex-shrink: 0; /* Yuuka: co giãn logic v1.0 */
+    padding: 0;
+    flex-shrink: 0;
 }
-.nav-btn:not(.is-placeholder):not(.is-tool-placeholder):hover { 
+
+.nav-btn.navibar-btn-enter {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+}
+
+.nav-btn.navibar-btn-enter.navibar-btn-enter-active {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transition: transform 0.28s cubic-bezier(0.21, 0.8, 0.35, 1), opacity 0.24s ease;
+}
+
+.nav-btn:not(.is-tool-placeholder):hover { 
     background: rgba(0, 0, 0, 0.05); 
 }
-.nav-btn:not(.is-placeholder):not(.is-tool-placeholder):active { 
+.nav-btn:not(.is-tool-placeholder):active { 
     transform: scale(0.9); 
 }
-html.dark-mode .nav-btn:not(.is-placeholder):not(.is-tool-placeholder):hover { 
+html.dark-mode .nav-btn:not(.is-tool-placeholder):hover { 
     background: rgba(255, 255, 255, 0.1); 
 }
 
-.nav-btn.active:not(.is-placeholder) { 
+.nav-btn.active { 
     background-color: var(--color-accent); 
     color: white; 
 }
-.nav-btn.active:not(.is-placeholder) .material-symbols-outlined { 
+.nav-btn.active .material-symbols-outlined { 
     font-variation-settings: 'FILL' 1; 
 }
 
-/* Yuuka: placeholder style v2.4 - Bỏ nền */
-.nav-btn.is-placeholder {
-    cursor: default;
-    background: transparent;
-}
-
-/* Yuuka: main-bar rework v2.0 - Style cho slot công cụ trống */
 .nav-btn.is-tool-placeholder {
     cursor: default;
-    color: var(--color-border);
-    opacity: 0.8;
+    background-color: rgba(255, 255, 255, 0) !important;
+    opacity: 0.5;
 }
 html.dark-mode .nav-btn.is-tool-placeholder {
-    color: var(--color-border);
+    background-color: rgba(255, 255, 255, 0) !important;
+}
+
+.nav-btn.is-not-draggable {
+    cursor: pointer;
 }
 
 
-/* Yuuka: category separator v2.3 */
-#navibar-categories .category-row {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: var(--spacing-2);
-    padding-bottom: var(--spacing-2);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    margin-bottom: var(--spacing-2);
-}
-#navibar-categories .category-row:last-child {
-    margin-bottom: 0;
-    padding-bottom: 0;
-    border-bottom: none;
-}
-html.dark-mode #navibar-categories .category-row {
-    border-bottom-color: rgba(255, 255, 255, 0.08);
+/* --- Drag and Drop styles --- */
+#main-nav .navibar-dragging {
+    opacity: 0 !important;
 }
 
-
-/* Yuuka: Drag and Drop styles v2.0 - Thêm hiệu ứng cho category */
-.nav-btn.is-dragging {
+#main-nav .navibar-dragging-ghost {
     opacity: 0.5;
-    transform: scale(0.9);
-}
-
-/* Yuuka: ghost row v2.4 - Áp dụng cho cả button và slot trống */
-.main-bar-slot.drop-target-hover,
-.nav-btn.drop-target-hover { 
     background-color: var(--color-accent) !important;
-    opacity: 0.3;
-    transform: scale(1.1);
-}
-
-/* Yuuka: insert placeholder v2.0 - Placeholder button */
-.nav-drop-placeholder {
-    cursor: default;
-    color: var(--color-secondary-text);
-    background: transparent !important;
-    border: 2px dashed var(--color-border);
     transform: scale(0.9);
-    transition: opacity 0.2s, transform 0.2s, visibility 0s;
-}
-.nav-drop-placeholder .material-symbols-outlined {
-    opacity: 0.5;
 }
 
-.nav-drop-placeholder.is-inactive {
-    visibility: hidden;
-    opacity: 0;
-    transform: scale(0.8);
-    transition: visibility 0s 0.2s, opacity 0.2s, transform 0.2s;
+@media (prefers-reduced-motion: reduce) {
+    #navibar-search-bar,
+    #navibar-search-bar .navibar-search-wrapper,
+    #navibar-main-view,
+    #navibar-sub-grid {
+        transition: none !important;
+        transform: none !important;
+    }
+
+    .nav-btn.navibar-btn-enter,
+    .nav-btn.navibar-btn-enter.navibar-btn-enter-active {
+        transition: none !important;
+        opacity: 1 !important;
+        transform: none !important;
+    }
 }
 
-
-/* Yuuka: empty placeholder v1.0 */
-.category-row.is-empty-placeholder {
-    min-height: 52px; /* Chiều cao của một nút */
-    border-bottom: none;
-    padding-bottom: 0;
-    margin-bottom: 0;
-    grid-template-columns: 1fr; /* Chỉ cần một cột để giữ chỗ */
-}
-.category-row.is-empty-placeholder .nav-btn {
-    visibility: hidden; /* Ẩn placeholder nhưng vẫn chiếm không gian */
-}
-
-/* Yuuka: Mobile responsiveness v1.0 */
+/* --- Mobile responsiveness --- */
 @media (max-width: 640px) {
     #main-nav {
         bottom: 0;
+        left: 0;
+        transform: none;
+        margin-left: 0;
+        width: 100%;
+        max-width: 100%;
         gap: 0;
     }
-
-    #navibar-main-bar {
-        max-width: 100%;
-        width: 100%;
-        border-radius: 0;
-        padding: var(--spacing-1); /* 4px */
-        border-left: none;
-        border-right: none;
-        border-bottom: none;
-        justify-content: space-around; /* Phân bố đều trên mobile */
-    }
     
-    .navibar-container {
+    #navibar-search-bar {
         max-width: 100%;
-        width: 100%;
-        border-radius: 0;
-        border-left: none;
-        border-right: none;
-        padding: var(--spacing-2);
     }
 
-    .nav-btn, .main-bar-slot {
+    #navibar-tray.is-search-active #navibar-search-bar {
+        padding: var(--spacing-1);
+        max-height: 240px;
+        min-height: calc(44px + var(--spacing-1) * 2);
+    }
+
+    #navibar-tray.is-search-active #navibar-search-bar .navibar-search-wrapper {
+        gap: var(--spacing-1);
+    }
+
+    #navibar-tray.is-search-active #navibar-search-bar .navibar-search-form {
+        height: 44px;
+    }
+
+    #navibar-tray.is-search-active #navibar-search-bar .navibar-search-return {
         width: 44px;
         height: 44px;
     }
 
-    /* Đảm bảo grid trong container mở rộng cũng co giãn */
-    #navibar-categories .category-row {
-        gap: var(--spacing-1);
+    #navibar-tray.is-search-active #navibar-search-bar .navibar-search-return .material-symbols-outlined {
+        font-size: 24px;
+    }
+    
+    #navibar-tray {
+        width: 100%;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+    }
+    
+    #navibar-main-bar {
+        justify-content: space-around;
+        padding: var(--spacing-1);
+    }
+    
+    #navibar-sub-grid {
+        max-width: 100%;
+    }
+    
+    #navibar-main-bar .nav-btn, #navibar-main-bar .main-bar-slot {
+        width: 44px;
+        height: 44px;
     }
 }

@@ -1,66 +1,87 @@
 class NavibarComponent {
-    constructor(container, api, allPlugins) { // Yuuka: navibar auto-init v1.0
+    constructor(container, api, allPlugins) {
         this.api = api;
         this.element = document.getElementById('main-nav');
+        // Yuuka: navibar refactor v4.1 - ThÃªm tray container
         this.element.innerHTML = `
-            <div class="navibar-container">
-                <div id="navibar-search-bar" style="display: none;"></div>
-                <div id="navibar-categories"></div>
+            <div id="navibar-tray">
+                <div id="navibar-main-view">
+                    <div id="navibar-sub-grid"></div>
+                    <div id="navibar-main-bar"></div>
+                </div>
+                <div id="navibar-search-bar"></div>
             </div>
-            <div id="navibar-main-bar"></div>
         `;
 
+        this._tray = this.element.querySelector('#navibar-tray');
+        this._mainView = this.element.querySelector('#navibar-main-view');
         this._mainBar = this.element.querySelector('#navibar-main-bar');
-        this._container = this.element.querySelector('.navibar-container');
+        this._subGrid = this.element.querySelector('#navibar-sub-grid');
         this._searchBarContainer = this.element.querySelector('#navibar-search-bar');
-        this._categoriesContainer = this.element.querySelector('#navibar-categories');
 
         this._allMainButtons = new Map();
         this._allToolButtons = new Map();
         this._allSpecialButtons = new Map();
+        this._toggleStates = new Map();
 
-        this._categoryGrid = [];
         this._mainBarLayout = [];
-        this._pinnedButtons = { home: null, quick_slot: null };
+        this._subGridLayout = []; 
         this._activePluginId = null;
-        this._isContainerOpen = false;
         this._isSearchActive = false;
-        this._isGhostRowActive = false;
+        this._isSubGridOpen = false;
+        this._isDragActive = false;
+        this._searchBarCleanup = null;
+        this._searchBarTeardownTimer = null;
+        this._prefersReducedMotion = false;
+        this._hasRenderedOnce = false;
+        this._boundHandleMotionPreferenceChange = this._handleMotionPreferenceChange.bind(this);
+        this._motionMediaQuery = null;
+        if (window.matchMedia) {
+            const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+            this._prefersReducedMotion = mediaQuery.matches;
+            if (mediaQuery.addEventListener) {
+                mediaQuery.addEventListener('change', this._boundHandleMotionPreferenceChange);
+            } else if (mediaQuery.addListener) {
+                mediaQuery.addListener(this._boundHandleMotionPreferenceChange);
+            }
+            this._motionMediaQuery = mediaQuery;
+        }
         
-        this._dropPlaceholder = document.createElement('button');
-        this._dropPlaceholder.className = 'nav-btn nav-drop-placeholder';
-        this._dropPlaceholder.innerHTML = `<span class="material-symbols-outlined">fiber_manual_record</span>`;
-        this._dropPlaceholder.disabled = true;
-
-        // Yuuka: anti-crash state v3.0
-        this._currentPlaceholderIndex = null;
-
         this._boundHandleClickOutside = this._handleClickOutside.bind(this);
         document.addEventListener('mousedown', this._boundHandleClickOutside);
         
-        this._allSpecialButtons.set('navibar-menu', { id: 'navibar-menu', title: 'Menu', icon: 'menu', type: 'special', onClick: () => this._toggleContainer() });
+        this._allSpecialButtons.set('navibar-menu', { id: 'navibar-menu', title: 'Menu', icon: 'menu', type: 'special', onClick: () => this._toggleSubGrid() });
         this._allSpecialButtons.set('tool-slot-1', { id: 'tool-slot-1', title: 'Tool Slot 1', icon: 'fiber_manual_record', type: 'tool_slot' });
         this._allSpecialButtons.set('tool-slot-2', { id: 'tool-slot-2', title: 'Tool Slot 2', icon: 'fiber_manual_record', type: 'tool_slot' });
 
-        this._loadState();
         this._registerButtonsFromManifests(allPlugins);
+        this._loadState();
         
-        if (this._mainBarLayout.length === 0) {
-            console.log("[Navibar Migration] Creating new main bar layout from old pinned buttons.");
-            this._autoPinInitialButtons(allPlugins);
-            this._mainBarLayout = ['navibar-menu', this._pinnedButtons.quick_slot, this._pinnedButtons.home, 'tool-slot-1', 'tool-slot-2'].filter(Boolean);
+        if (this._mainBarLayout.length === 0 && this._subGridLayout.length === 0) {
+            console.log("[Navibar] No saved layout found. Creating default layout.");
+            const mainButtons = [...this._allMainButtons.values()];
+            const sortedMainButtonIds = mainButtons
+                .map(btn => ({ id: btn.id, pluginId: btn.pluginId }))
+                .sort((a, b) => {
+                    const pluginA = allPlugins.find(p => p.id === a.pluginId);
+                    const pluginB = allPlugins.find(p => p.id === b.pluginId);
+                    const orderA = pluginA?.ui?.order ?? 99;
+                    const orderB = pluginB?.ui?.order ?? 99;
+                    return orderA - orderB;
+                })
+                .map(item => item.id);
+
+            this._mainBarLayout = [
+                ...sortedMainButtonIds,
+                'tool-slot-1', 
+                'tool-slot-2',
+                'navibar-menu'
+            ];
         }
         
         this._integrityCheck(); 
         this._render();
-        
-        this._container.addEventListener('dragover', (e) => this._handleContainerDragOver(e));
-        this._container.addEventListener('dragleave', (e) => this._handleContainerDragLeave(e));
-
-        this._mainBar.addEventListener('dragover', (e) => this._handleMainBarDragOver(e));
-        this._mainBar.addEventListener('dragleave', (e) => this._handleMainBarDragLeave(e));
-        this._mainBar.addEventListener('drop', (e) => this._handleMainBarDrop(e));
-
+        this._initDragAndDrop();
 
         if (!window.Yuuka.services.navibar) {
             window.Yuuka.services.navibar = this;
@@ -70,6 +91,21 @@ class NavibarComponent {
     
     destroy() {
         document.removeEventListener('mousedown', this._boundHandleClickOutside);
+        if (this._motionMediaQuery) {
+            if (this._motionMediaQuery.removeEventListener) {
+                this._motionMediaQuery.removeEventListener('change', this._boundHandleMotionPreferenceChange);
+            } else if (this._motionMediaQuery.removeListener) {
+                this._motionMediaQuery.removeListener(this._boundHandleMotionPreferenceChange);
+            }
+            this._motionMediaQuery = null;
+        }
+        if (this._searchBarCleanup) {
+            this._searchBarCleanup();
+        }
+        if (this._searchBarTeardownTimer) {
+            clearTimeout(this._searchBarTeardownTimer);
+            this._searchBarTeardownTimer = null;
+        }
         console.log("[Plugin:Navibar] Service destroyed and event listeners removed.");
     }
 
@@ -78,13 +114,195 @@ class NavibarComponent {
         if (!config || !config.id || !config.type || !config.pluginId) return;
 
         if (config.type === 'main') {
-            this._allMainButtons.set(config.id, config);
+            const normalized = this._normalizeMainButtonConfig(config);
+            this._allMainButtons.set(normalized.id, normalized);
         } else if (config.type === 'tools') {
             this._allToolButtons.set(config.id, config);
         }
         
         this._integrityCheck();
         this._render();
+        this._initDragAndDrop();
+    }
+
+    _normalizeMainButtonConfig(config) {
+        const normalized = { ...config };
+
+        if (normalized.mode !== 'toggle') {
+            normalized.mode = 'default';
+            this._toggleStates.delete(normalized.id);
+            return normalized;
+        }
+
+        const states = Array.isArray(normalized.toggleStates)
+            ? normalized.toggleStates
+                .filter(state => state && typeof state === 'object')
+                .map(state => ({ ...state }))
+            : [];
+
+        if (states.length === 0) {
+            console.warn(`[Navibar] Toggle button '${normalized.id}' missing 'toggleStates'. Falling back to default mode.`);
+            normalized.mode = 'default';
+            delete normalized.toggleStates;
+            this._toggleStates.delete(normalized.id);
+            return normalized;
+        }
+
+        normalized.toggleStates = states;
+        const existing = this._toggleStates.get(normalized.id);
+        const declaredInitial = Number.isInteger(normalized.initialToggleIndex) ? normalized.initialToggleIndex : 0;
+        const safeInitial = ((declaredInitial % states.length) + states.length) % states.length;
+        const indexToUse = existing ? existing.index % states.length : safeInitial;
+
+        this._toggleStates.set(normalized.id, {
+            index: indexToUse,
+            previousIndex: existing?.previousIndex ?? null,
+            cycle: existing?.cycle ?? 0
+        });
+
+        return normalized;
+    }
+
+    _handleMainButtonClick(config, element, event) {
+        if (config.mode === 'toggle' && this._toggleStates.has(config.id)) {
+            this._handleToggleClick(config, element, event);
+            return;
+        }
+
+        if (typeof config.onClick === 'function') {
+            config.onClick(event);
+        }
+    }
+
+    _handleToggleClick(config, element, event) {
+        const toggleInfo = this._getCurrentToggleState(config);
+        const record = this._toggleStates.get(config.id);
+
+        if (!toggleInfo || !record) {
+            if (typeof config.onClick === 'function') {
+                config.onClick(event);
+            }
+            return;
+        }
+
+        const { state, index } = toggleInfo;
+        const handler = typeof state.onClick === 'function'
+            ? state.onClick
+            : (typeof config.onClick === 'function' ? config.onClick : null);
+        const context = this._buildToggleContext(config, index, record.previousIndex, element, event, record.cycle ?? 0, state);
+
+        if (handler) {
+            try {
+                handler(context);
+            } catch (err) {
+                console.error(`[Navibar] Error executing toggle handler for '${config.id}'.`, err);
+            }
+        }
+
+        if (typeof config.onToggle === 'function') {
+            try {
+                config.onToggle(context);
+            } catch (err) {
+                console.error(`[Navibar] Error in 'onToggle' callback for '${config.id}'.`, err);
+            }
+        }
+
+        this._advanceToggleState(config, element, event, index, state);
+        this._render();
+    }
+
+    _advanceToggleState(config, element, event, previousIndex, previousState) {
+        const record = this._toggleStates.get(config.id);
+        const states = Array.isArray(config.toggleStates) ? config.toggleStates : [];
+        if (!record || states.length === 0) return;
+
+        const shouldLoop = config.toggleLoop !== false;
+        let nextIndex = record.index + 1;
+        let cycle = record.cycle ?? 0;
+
+        if (nextIndex >= states.length) {
+            if (shouldLoop) {
+                nextIndex = 0;
+                cycle += 1;
+            } else {
+                nextIndex = states.length - 1;
+            }
+        }
+
+        const updatedRecord = {
+            index: nextIndex,
+            previousIndex: previousIndex,
+            cycle
+        };
+
+        this._toggleStates.set(config.id, updatedRecord);
+
+        if (typeof config.onToggleStateChange === 'function') {
+            const nextState = states[updatedRecord.index] || null;
+            const context = this._buildToggleContext(config, updatedRecord.index, previousIndex, element, event, cycle, nextState);
+            context.previousState = previousState || null;
+
+            try {
+                config.onToggleStateChange(context);
+            } catch (err) {
+                console.error(`[Navibar] Error in 'onToggleStateChange' for '${config.id}'.`, err);
+            }
+        }
+    }
+
+    _getCurrentToggleState(config) {
+        if (config.mode !== 'toggle') return null;
+        const states = Array.isArray(config.toggleStates) ? config.toggleStates : null;
+        if (!states || states.length === 0) return null;
+
+        const record = this._toggleStates.get(config.id);
+        const rawIndex = record ? record.index : 0;
+        const normalisedIndex = ((rawIndex % states.length) + states.length) % states.length;
+
+        return {
+            index: normalisedIndex,
+            state: states[normalisedIndex]
+        };
+    }
+
+    _resolveButtonPresentation(config) {
+        if (config.mode === 'toggle') {
+            const toggleInfo = this._getCurrentToggleState(config);
+            if (toggleInfo) {
+                const record = this._toggleStates.get(config.id);
+                const state = toggleInfo.state || {};
+                const context = this._buildToggleContext(config, toggleInfo.index, record?.previousIndex ?? null, null, null, record?.cycle ?? 0, state);
+                const icon = typeof state.icon === 'function' ? state.icon(context) : state.icon;
+                const title = typeof state.title === 'function' ? state.title(context) : state.title;
+                const isActiveValue = typeof state.isActive === 'function' ? state.isActive(context) : state.isActive;
+
+                return {
+                    icon: icon ?? config.icon,
+                    title: title ?? config.title,
+                    isActive: Boolean(isActiveValue)
+                };
+            }
+        }
+
+        return {
+            icon: config.icon,
+            title: config.title,
+            isActive: false
+        };
+    }
+
+    _buildToggleContext(config, stateIndex, previousIndex, element, event, cycle = null, state = null) {
+        return {
+            buttonId: config.id,
+            pluginId: config.pluginId,
+            stateIndex,
+            previousIndex,
+            element,
+            event,
+            cycle,
+            state,
+            navibar: this
+        };
     }
 
     setActivePlugin(pluginId) {
@@ -93,17 +311,94 @@ class NavibarComponent {
     }
     
     showSearchBar(searchElement) {
+        if (!searchElement && this._searchBarCleanup) {
+            this._isSearchActive = false;
+            this._updateViewState();
+            return;
+        }
         if (searchElement) {
+            if (this._searchBarCleanup) {
+                this._searchBarCleanup();
+            }
+            if (this._searchBarTeardownTimer) {
+                clearTimeout(this._searchBarTeardownTimer);
+                this._searchBarTeardownTimer = null;
+            }
+
             this._isSearchActive = true;
-            this._isContainerOpen = false; 
+            this._isSubGridOpen = false;
             this._searchBarContainer.innerHTML = '';
-            this._searchBarContainer.appendChild(searchElement);
+
+            if (searchElement.id === 'search-form') {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'navibar-search-wrapper';
+
+                searchElement.classList.add('navibar-search-form');
+                wrapper.appendChild(searchElement);
+
+                const returnBtn = document.createElement('button');
+                returnBtn.type = 'button';
+                returnBtn.className = 'nav-btn navibar-search-return';
+                returnBtn.title = 'Trở về';
+                returnBtn.innerHTML = '<span class="material-symbols-outlined">chevron_forward</span>';
+                returnBtn.addEventListener('click', () => this.showSearchBar(null));
+                wrapper.appendChild(returnBtn);
+
+                this._searchBarContainer.appendChild(wrapper);
+            } else {
+                this._searchBarContainer.appendChild(searchElement);
+            }
         } else {
             this._isSearchActive = false;
+
+            const formInTray = this._searchBarContainer.querySelector('#search-form');
+            const wrapper = formInTray ? formInTray.closest('.navibar-search-wrapper') : this._searchBarContainer.querySelector('.navibar-search-wrapper');
+            const floatingContainer = document.getElementById('floating-search-bar');
+
+            if (wrapper && formInTray && floatingContainer) {
+                const doCleanup = () => {
+                    if (this._searchBarCleanup !== doCleanup) return;
+                    this._searchBarCleanup = null;
+                    this._searchBarContainer.removeEventListener('transitionend', handleTransitionEnd);
+                    if (this._searchBarTeardownTimer) {
+                        clearTimeout(this._searchBarTeardownTimer);
+                        this._searchBarTeardownTimer = null;
+                    }
+                    if (formInTray.parentElement === wrapper) {
+                        formInTray.classList.remove('navibar-search-form');
+                        floatingContainer.appendChild(formInTray);
+                    }
+                    if (wrapper.parentElement === this._searchBarContainer) {
+                        this._searchBarContainer.innerHTML = '';
+                    }
+                };
+
+                const handleTransitionEnd = (evt) => {
+                    if (evt.target !== this._searchBarContainer || evt.propertyName !== 'max-height') return;
+                    doCleanup();
+                };
+
+                this._searchBarCleanup = doCleanup;
+                this._searchBarContainer.addEventListener('transitionend', handleTransitionEnd);
+                this._searchBarTeardownTimer = setTimeout(() => doCleanup(), 380);
+            } else {
+                if (formInTray && floatingContainer) {
+                    formInTray.classList.remove('navibar-search-form');
+                    floatingContainer.appendChild(formInTray);
+                }
+                if (this._searchBarCleanup) {
+                    this._searchBarCleanup = null;
+                }
+                if (this._searchBarTeardownTimer) {
+                    clearTimeout(this._searchBarTeardownTimer);
+                    this._searchBarTeardownTimer = null;
+                }
+                this._searchBarContainer.innerHTML = '';
+            }
         }
         this._updateViewState();
     }
-    
+
     // --- STATE & INTEGRITY ---
 
     _registerButtonsFromManifests(allPlugins) {
@@ -121,7 +416,7 @@ class NavibarComponent {
                             service.start();
                         } else {
                             console.error(`[Navibar] Service launcher '${plugin.id}' or its 'start' method not found.`);
-                            showError(`Không thể khởi động dịch vụ: ${plugin.name}`);
+                            showError(`KhÃ´ng thá»ƒ khá»Ÿi Ä‘á»™ng dá»‹ch vá»¥: ${plugin.name}`);
                         }
                     };
                 } else {
@@ -144,370 +439,294 @@ class NavibarComponent {
         });
     }
 
-    _autoPinInitialButtons(allPlugins) {
-        if (!allPlugins) return;
-        
-        const sortedPlugins = allPlugins
-            .filter(p => p.ui && p.ui.tab && this._allMainButtons.has(`${p.id}-main`))
-            .sort((a, b) => (a.ui.order ?? 99) - (b.ui.order ?? 99));
-
-        if (this._pinnedButtons.home === null && sortedPlugins.length > 0) {
-            this._pinnedButtons.home = `${sortedPlugins[0].id}-main`;
-        }
-
-        if (this._pinnedButtons.quick_slot === null && sortedPlugins.length > 1) {
-            const quickSlotPluginId = `${sortedPlugins[1].id}-main`;
-            if (quickSlotPluginId !== this._pinnedButtons.home) {
-                this._pinnedButtons.quick_slot = quickSlotPluginId;
-            }
-        }
-    }
-
-
     _saveState() {
-        localStorage.setItem('yuuka-navibar-grid', JSON.stringify(this._categoryGrid));
         localStorage.setItem('yuuka-navibar-mainbar', JSON.stringify(this._mainBarLayout));
+        localStorage.setItem('yuuka-navibar-subgrid', JSON.stringify(this._subGridLayout));
     }
 
     _loadState() {
-        const savedPins = localStorage.getItem('yuuka-navibar-pins');
-        if (savedPins) this._pinnedButtons = JSON.parse(savedPins);
-        
-        const savedGrid = localStorage.getItem('yuuka-navibar-grid');
-        if (savedGrid) this._categoryGrid = JSON.parse(savedGrid);
-
         const savedMainBar = localStorage.getItem('yuuka-navibar-mainbar');
-        if (savedMainBar) this._mainBarLayout = JSON.parse(savedMainBar);
+        const savedSubGrid = localStorage.getItem('yuuka-navibar-subgrid');
+        if (savedMainBar) {
+            try { this._mainBarLayout = JSON.parse(savedMainBar); } 
+            catch (e) { this._mainBarLayout = []; }
+        }
+        if (savedSubGrid) {
+            try { this._subGridLayout = JSON.parse(savedSubGrid); }
+            catch (e) { this._subGridLayout = []; }
+        }
     }
     
     _integrityCheck() {
-        const registeredMainIds = new Set(this._allMainButtons.keys());
-        const allSpecialIds = new Set(this._allSpecialButtons.keys());
-        const displayedIds = new Set();
+        const allKnownIds = new Set([
+            ...this._allMainButtons.keys(),
+            ...this._allSpecialButtons.keys()
+        ]);
         let changesMade = false;
+        const currentLayoutIds = new Set([...this._mainBarLayout, ...this._subGridLayout]);
 
-        const newMainBarLayout = [];
-        this._mainBarLayout.forEach(id => {
-            if ((registeredMainIds.has(id) || allSpecialIds.has(id)) && !displayedIds.has(id)) {
-                newMainBarLayout.push(id);
-                displayedIds.add(id);
-            } else {
+        this._mainBarLayout = this._mainBarLayout.filter(id => allKnownIds.has(id));
+        this._subGridLayout = this._subGridLayout.filter(id => allKnownIds.has(id));
+
+        allKnownIds.forEach(id => {
+            if (!currentLayoutIds.has(id)) {
+                this._subGridLayout.push(id); 
                 changesMade = true;
-            }
-        });
-        this._mainBarLayout = newMainBarLayout;
-
-        allSpecialIds.forEach(id => {
-            if (!displayedIds.has(id)) {
-                this._mainBarLayout.push(id);
-                displayedIds.add(id);
-                changesMade = true;
-            }
-        });
-
-        const newCategoryGrid = [];
-        this._categoryGrid.forEach(row => {
-            const newRow = row.map(id => {
-                if (id && registeredMainIds.has(id) && !displayedIds.has(id)) {
-                    displayedIds.add(id);
-                    return id;
-                }
-                if (id) changesMade = true;
-                return null;
-            });
-            if (newRow.some(id => id !== null)) {
-                newCategoryGrid.push(newRow);
-            }
-        });
-        this._categoryGrid = newCategoryGrid;
-
-        registeredMainIds.forEach(id => {
-            if (!displayedIds.has(id)) {
-                changesMade = true;
-                let placed = false;
-                for (let r = 0; r < this._categoryGrid.length; r++) {
-                    for (let c = 0; c < 5; c++) {
-                        if (this._categoryGrid[r] && this._categoryGrid[r][c] === null) {
-                            this._categoryGrid[r][c] = id; placed = true; break;
-                        }
-                    }
-                    if (placed) break;
-                }
-                if (!placed) {
-                    const newRow = Array(5).fill(null); newRow[0] = id; this._categoryGrid.push(newRow);
-                }
             }
         });
         
         if (changesMade) {
             console.log("[Navibar Integrity] State was corrected.");
-        }
-    }
-    
-    _removeFromGrid(buttonId) {
-        for (let r = 0; r < this._categoryGrid.length; r++) {
-            for (let c = 0; c < 5; c++) {
-                if (this._categoryGrid[r][c] === buttonId) {
-                    this._categoryGrid[r][c] = null;
-                    return;
-                }
-            }
+            this._saveState();
         }
     }
     
     // --- EVENT HANDLERS ---
 
     _handleClickOutside(event) {
-        if ((this._isContainerOpen || this._isSearchActive) && !this.element.contains(event.target)) {
-            this._isContainerOpen = false;
-            this._isSearchActive = false;
-            this._updateViewState();
+        if (!this.element.contains(event.target)) {
+            const wasSubGridOpen = this._isSubGridOpen;
+            if (this._isSearchActive) {
+                this.showSearchBar(null);
+            }
+            if (wasSubGridOpen) {
+                this._isSubGridOpen = false;
+                this._updateViewState();
+            }
         }
     }
 
-    _toggleContainer() {
-        if (this._isContainerOpen) {
-            this._isContainerOpen = false;
-        } else {
-            this._isContainerOpen = true;
-            this._isSearchActive = false;
-        }
+    _handleMotionPreferenceChange(event) {
+        this._prefersReducedMotion = !!event.matches;
+    }
+
+    _toggleSubGrid() {
+        this._isSubGridOpen = !this._isSubGridOpen;
+        if(this._isSubGridOpen) this._isSearchActive = false;
         this._updateViewState();
     }
     
-    _handleContainerDragOver(e) {
-        if (!this._isContainerOpen || this._isGhostRowActive) return;
-        const rect = this._container.getBoundingClientRect();
-        if (e.clientY < rect.top + 30) {
-            this._categoryGrid.unshift(Array(5).fill(null));
-            this._isGhostRowActive = true;
-            this._render();
-        }
-    }
-    _handleContainerDragLeave(e) { }
-
-    _handleDragStart(e, dragInfo) {
-        this._currentPlaceholderIndex = null;
-        e.dataTransfer.setData('application/json', JSON.stringify(dragInfo));
-        e.target.classList.add('is-dragging');
+    _finishDragOperation() {
+        this._isDragActive = false;
+        this._saveState();
+        this._updateViewState();
+        console.log("[Navibar] Drag operation finished and state saved.");
     }
 
-    _handleDragEnd(e) {
-        this._currentPlaceholderIndex = null;
-        this._removePlaceholder();
-        e.target.classList.remove('is-dragging');
+    // --- DRAG & DROP ---
+    _initDragAndDrop() {
+        const baseOptions = {
+            animation: 150,
+            ghostClass: 'navibar-dragging-ghost',
+            dragClass: 'navibar-dragging',
+            filter: '.is-not-draggable',
+            emptyInsertThreshold: 32,
+            onStart: this._handleSortableStart.bind(this),
+            onEnd: this._handleSortableEnd.bind(this)
+        };
 
-        if (this._isGhostRowActive) {
-            this._isGhostRowActive = false;
-            if (this._categoryGrid[0] && this._categoryGrid[0].every(cell => cell === null)) {
-                 this._categoryGrid.shift();
-            }
-        }
-        // Re-render to ensure clean state
-        this._render();
-    }
-    
-    _handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drop-target-hover'); }
-    _handleDragLeave(e) { e.currentTarget.classList.remove('drop-target-hover'); }
+        if (this._mainBarSortable) this._mainBarSortable.destroy();
+        this._mainBarSortable = Sortable.create(this._mainBar, {
+            ...baseOptions,
+            group: { name: 'navibar-buttons', pull: true, put: true }
+        });
 
-    _removePlaceholder() {
-        if (this._dropPlaceholder.parentElement) {
-            this._dropPlaceholder.remove();
-        }
-    }
-
-    _handleMainBarDragOver(e) {
-        e.preventDefault();
-        
-        let newPlaceholderIndex = null;
-        const children = [...this._mainBar.querySelectorAll('.main-bar-slot:not(.is-dragging)')];
-        let isInSwapZone = false;
-
-        for (const child of children) {
-            const rect = child.getBoundingClientRect();
-            if (e.clientX >= rect.left + rect.width * 0.25 && e.clientX <= rect.right - rect.width * 0.25) {
-                isInSwapZone = true;
-                break;
-            }
-        }
-
-        if (!isInSwapZone) {
-            newPlaceholderIndex = children.length;
-            for (let i = 0; i < children.length; i++) {
-                const child = children[i];
-                const rect = child.getBoundingClientRect();
-                if (e.clientX < rect.left + rect.width / 2) {
-                    newPlaceholderIndex = i;
-                    break;
+        if (this._subGridSortable) this._subGridSortable.destroy();
+        this._subGridSortable = Sortable.create(this._subGrid, {
+            ...baseOptions,
+            group: {
+                name: 'navibar-buttons',
+                pull: true,
+                put: (to, from, dragEl) => {
+                    return !(dragEl && dragEl.dataset && dragEl.dataset.id === 'navibar-menu');
                 }
             }
-        }
-
-        // --- NEW LOGIC: HIDE/SHOW INSTEAD OF ADD/REMOVE ---
-        // Ensure placeholder is in the DOM during drag, but start it off as inactive.
-        if (!this._dropPlaceholder.parentElement) {
-            this._mainBar.appendChild(this._dropPlaceholder);
-            this._dropPlaceholder.classList.add('is-inactive');
-        }
-
-        if (newPlaceholderIndex !== this._currentPlaceholderIndex) {
-            this._currentPlaceholderIndex = newPlaceholderIndex;
-            
-            if (newPlaceholderIndex !== null) {
-                const nextElement = children[newPlaceholderIndex] || null;
-                this._mainBar.insertBefore(this._dropPlaceholder, nextElement);
-                this._dropPlaceholder.classList.remove('is-inactive');
-            } else {
-                // Instead of removing, we just hide it. It still occupies space.
-                this._dropPlaceholder.classList.add('is-inactive');
-            }
-        }
-    }
-    
-    _handleMainBarDragLeave(e) {
-        if (!e.relatedTarget || !this._mainBar.contains(e.relatedTarget)) {
-            this._currentPlaceholderIndex = null;
-            this._removePlaceholder(); // Actually remove it when leaving the bar
-        }
+        });
     }
 
-    _handleMainBarDrop(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        if (this._currentPlaceholderIndex !== null) {
-            const newIndex = this._currentPlaceholderIndex;
-            
-            const dragInfo = JSON.parse(e.dataTransfer.getData('application/json'));
-            const draggedButtonId = dragInfo.id;
-            
-            // Remove from old position
-            if (dragInfo.type === 'main_bar') {
-                this._mainBarLayout.splice(dragInfo.index, 1);
-            } else if (dragInfo.type === 'grid') {
-                this._removeFromGrid(draggedButtonId);
+    _handleSortableStart() {
+        this._isDragActive = true;
+        this._updateViewState();
+    }
+
+    _handleSortableEnd(evt) {
+        const trayGapDropMeta = this._detectTrayGapDrop(evt);
+        if (trayGapDropMeta) {
+            const draggedId = evt?.item?.dataset?.id;
+            if (draggedId) {
+                this._applyTrayGapDrop(draggedId, trayGapDropMeta);
             }
-            
-            // Insert at new position
-            this._mainBarLayout.splice(newIndex, 0, draggedButtonId);
             this._finishDragOperation();
-        }
-    }
-
-
-    _handleDrop(e, dropTarget) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.currentTarget.classList.remove('drop-target-hover');
-
-        const dragInfo = JSON.parse(e.dataTransfer.getData('application/json'));
-        const draggedButtonId = dragInfo.id;
-        
-        if (dropTarget.type === 'grid' && !this._allMainButtons.has(draggedButtonId)) {
             return;
         }
 
-        if (this._isGhostRowActive && dragInfo.type === 'grid') dragInfo.row += 1;
+        const newMainBarLayout = [];
+        this._mainBar.querySelectorAll('.nav-btn, .main-bar-slot').forEach(btn => {
+            if (btn.dataset.id) newMainBarLayout.push(btn.dataset.id);
+        });
+        this._mainBarLayout = newMainBarLayout;
         
-        const targetId = dropTarget.type === 'grid'
-            ? this._categoryGrid[dropTarget.row][dropTarget.col]
-            : this._mainBarLayout[dropTarget.index];
-        
-        if (dragInfo.type === 'main_bar' && dropTarget.type === 'main_bar') {
-            [this._mainBarLayout[dragInfo.index], this._mainBarLayout[dropTarget.index]] = 
-            [this._mainBarLayout[dropTarget.index], this._mainBarLayout[dragInfo.index]];
-        }
-        else if (dragInfo.type === 'grid' && dropTarget.type === 'grid') {
-            [this._categoryGrid[dragInfo.row][dragInfo.col], this._categoryGrid[dropTarget.row][dropTarget.col]] =
-            [this._categoryGrid[dropTarget.row][dropTarget.col], this._categoryGrid[dragInfo.row][dragInfo.col]];
-        }
-        else if (dragInfo.type === 'grid' && dropTarget.type === 'main_bar') {
-            if (this._allMainButtons.has(targetId)) {
-                this._mainBarLayout[dropTarget.index] = draggedButtonId;
-                this._categoryGrid[dragInfo.row][dragInfo.col] = targetId;
-            } else { return; }
-        }
-        else if (dragInfo.type === 'main_bar' && dropTarget.type === 'grid') {
-            this._categoryGrid[dropTarget.row][dropTarget.col] = draggedButtonId;
-            this._mainBarLayout[dragInfo.index] = targetId;
+        const newSubGridLayout = [];
+        this._subGrid.querySelectorAll('.nav-btn, .main-bar-slot').forEach(btn => {
+            if (btn.dataset.id) newSubGridLayout.push(btn.dataset.id);
+        });
+        this._subGridLayout = newSubGridLayout;
+
+        // Safety: keep 'navibar-menu' in the main bar only
+        const menuIdxInSub = this._subGridLayout.indexOf('navibar-menu');
+        if (menuIdxInSub !== -1) {
+            this._subGridLayout.splice(menuIdxInSub, 1);
+            if (!this._mainBarLayout.includes('navibar-menu')) {
+                this._mainBarLayout.push('navibar-menu');
+            }
         }
 
         this._finishDragOperation();
     }
-    
-    _finishDragOperation() {
-        this._currentPlaceholderIndex = null;
-        this._removePlaceholder();
 
-        this._cleanupEmptyRows();
-        this._integrityCheck();
-        this._saveState();
+    _detectTrayGapDrop(evt) {
+        const originalEvt = evt?.originalEvent;
+        if (!originalEvt || typeof originalEvt.clientX !== 'number' || typeof originalEvt.clientY !== 'number') {
+            return null;
+        }
+
+        const point = { x: originalEvt.clientX, y: originalEvt.clientY };
+        const trayRect = this._tray?.getBoundingClientRect();
+        const mainRect = this._mainBar?.getBoundingClientRect();
+        const subRect = this._subGrid?.getBoundingClientRect();
+
+        if (!trayRect || !mainRect) return null;
+        if (!this._isPointInsideRect(point, trayRect)) return null;
+
+        const isInMain = this._isPointInsideRect(point, mainRect);
+        const isSubVisible = !!(this._isSubGridOpen && subRect && subRect.height > 0);
+        const isInSub = isSubVisible && subRect ? this._isPointInsideRect(point, subRect) : false;
+
+        if (isInMain || isInSub) {
+            return null;
+        }
+
+        const target = this._resolveGapDropTarget(point, mainRect, subRect, isSubVisible);
+        const container = target === 'main' ? this._mainBar : this._subGrid;
+        const index = this._calculateDropIndex(container, point.x);
+
+        return { target, index };
+    }
+
+    _resolveGapDropTarget(point, mainRect, subRect, isSubVisible) {
+        if (!isSubVisible || !subRect) {
+            return 'main';
+        }
+        const distanceToMain = this._distanceToRect(point, mainRect);
+        const distanceToSub = this._distanceToRect(point, subRect);
+        return distanceToMain <= distanceToSub ? 'main' : 'sub';
+    }
+
+    _calculateDropIndex(container, clientX) {
+        if (!container) return 0;
+        const items = Array.from(container.querySelectorAll('.nav-btn, .main-bar-slot'));
+        if (items.length === 0) return 0;
+
+        for (let i = 0; i < items.length; i++) {
+            const rect = items[i].getBoundingClientRect();
+            const threshold = rect.left + rect.width / 2;
+            if (clientX <= threshold) {
+                return i;
+            }
+        }
+        return items.length;
+    }
+
+    _applyTrayGapDrop(buttonId, meta) {
+        if (!meta) return;
+
+        const safeMeta = { ...meta };
+        if (safeMeta.target === 'sub' && buttonId === 'navibar-menu') {
+            safeMeta.target = 'main';
+        }
+
+        this._mainBarLayout = this._mainBarLayout.filter(id => id !== buttonId);
+        this._subGridLayout = this._subGridLayout.filter(id => id !== buttonId);
+
+        const targetLayout = safeMeta.target === 'sub' ? this._subGridLayout : this._mainBarLayout;
+        const insertIndex = Math.min(Math.max(safeMeta.index ?? targetLayout.length, 0), targetLayout.length);
+        targetLayout.splice(insertIndex, 0, buttonId);
+
         this._render();
     }
 
-    _cleanupEmptyRows() {
-        this._categoryGrid = this._categoryGrid.filter(row => row.some(cell => cell !== null));
+    _distanceToRect(point, rect) {
+        if (!rect) return Number.POSITIVE_INFINITY;
+        const dx = point.x < rect.left ? rect.left - point.x : point.x > rect.right ? point.x - rect.right : 0;
+        const dy = point.y < rect.top ? rect.top - point.y : point.y > rect.bottom ? point.y - rect.bottom : 0;
+        return Math.hypot(dx, dy);
     }
+
+    _isPointInsideRect(point, rect) {
+        if (!rect) return false;
+        return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+    }
+
 
     // --- RENDERING LOGIC ---
 
     _updateViewState() {
-        const shouldBeOpen = this._isContainerOpen || this._isSearchActive;
-        this._container.classList.toggle('is-open', shouldBeOpen);
+        const isSubGridVisible = this._isSubGridOpen || this._isDragActive;
         
-        this._searchBarContainer.style.display = this._isSearchActive ? 'block' : 'none';
-        this._categoriesContainer.style.display = this._isContainerOpen ? 'block' : 'none';
+        this._tray.classList.toggle('is-subgrid-open', isSubGridVisible);
+        this._tray.classList.toggle('is-search-active', this._isSearchActive);
+        if (this._mainView) {
+            this._mainView.classList.toggle('is-hidden', this._isSearchActive);
+        }
         
-        const menuBtn = this._mainBar.querySelector('[data-id="navibar-menu"]');
+        const menuBtn = this.element.querySelector('[data-id="navibar-menu"]');
         if (menuBtn) {
-            menuBtn.classList.toggle('active', shouldBeOpen);
+            menuBtn.classList.toggle('active', this._isSubGridOpen);
         }
     }
 
-    _createButton(config, dragInfo = {}, dropInfo = {}) {
+    _createButton(config) {
         const btn = document.createElement('button');
         btn.className = 'nav-btn';
         if(config.classList) btn.classList.add(...config.classList);
         btn.dataset.id = config.id;
-        btn.title = config.title || '';
+
+        const presentation = this._resolveButtonPresentation(config);
+        btn.title = presentation.title || config.title || '';
         
-        if (!btn.classList.contains('is-placeholder')) {
-            btn.innerHTML = `<span class="material-symbols-outlined">${config.icon || 'star'}</span>`;
-        }
-        if (config.onClick) btn.onclick = () => config.onClick();
+        // Allow 'navibar-menu' to be draggable within the main bar
+        
+        btn.innerHTML = `<span class="material-symbols-outlined">${presentation.icon || config.icon || 'star'}</span>`;
+        btn.addEventListener('click', (event) => this._handleMainButtonClick(config, btn, event));
         
         if (this._activePluginId === config.pluginId && config.type === 'main') {
             btn.classList.add('active');
         }
-        if (config.isActive && config.isActive()) btn.classList.add('active');
-
-
-        if (dragInfo.isDraggable) {
-            btn.draggable = true;
-            btn.ondragstart = (e) => this._handleDragStart(e, dragInfo);
-            btn.ondragend = (e) => this._handleDragEnd(e);
-        }
-        if (dropInfo.isDropTarget) {
-            btn.ondragover = this._handleDragOver;
-            btn.ondragleave = this._handleDragLeave;
-            btn.ondrop = (e) => this._handleDrop(e, dropInfo);
-        }
+        if (presentation.isActive || (config.isActive && config.isActive())) btn.classList.add('active');
+        if (config.mode === 'toggle') btn.dataset.toggleMode = 'true';
 
         return btn;
     }
 
     _render() {
-        this._renderMainBar();
-        this._renderCategories();
-    }
-
-    _renderMainBar() {
         this._mainBar.innerHTML = '';
+        this._subGrid.innerHTML = '';
+
+        // Ensure 'navibar-menu' never persists in sub-grid from saved state
+        const _menuIdxPersist = this._subGridLayout.indexOf('navibar-menu');
+        if (_menuIdxPersist !== -1) {
+            this._subGridLayout.splice(_menuIdxPersist, 1);
+            if (!this._mainBarLayout.includes('navibar-menu')) {
+                this._mainBarLayout.push('navibar-menu');
+            }
+            this._saveState();
+        }
+
         const activeTools = [...this._allToolButtons.values()]
             .filter(b => b.pluginId === this._activePluginId)
             .sort((a,b) => (a.order || 99) - (b.order || 99));
 
-        this._mainBarLayout.forEach((buttonId, index) => {
+        const renderButtonInLayout = (buttonId, container) => {
             let config = null;
             let isToolPlaceholder = false;
 
@@ -520,7 +739,8 @@ class NavibarComponent {
                 if (config.type === 'tool_slot') {
                     const toolIndex = (config.id === 'tool-slot-1') ? 0 : 1;
                     if (activeTools[toolIndex]) {
-                        config = activeTools[toolIndex];
+                        const activeToolConf = activeTools[toolIndex];
+                        config = { ...activeToolConf, id: config.id };
                     } else {
                         isToolPlaceholder = true;
                     }
@@ -529,46 +749,39 @@ class NavibarComponent {
 
             if (!config) return;
 
-            const btn = this._createButton(
-                { ...config, classList: isToolPlaceholder ? ['is-tool-placeholder'] : [] },
-                { isDraggable: true, id: buttonId, type: 'main_bar', index: index },
-                { isDropTarget: true, type: 'main_bar', index: index }
-            );
+            const btn = this._createButton({ ...config, classList: isToolPlaceholder ? ['is-tool-placeholder'] : [] });
             btn.classList.add('main-bar-slot');
-            this._mainBar.appendChild(btn);
-        });
-        
-        this._updateViewState();
-    }
-    
-    _renderCategories() {
-        this._categoriesContainer.innerHTML = '';
-        const mainBarIds = new Set(this._mainBarLayout);
-        
-        this._categoryGrid.forEach((row, rowIndex) => {
-            const rowEl = document.createElement('div');
-            rowEl.className = 'category-row';
-            row.forEach((buttonId, colIndex) => {
-                const dropInfo = { isDropTarget: true, type: 'grid', row: rowIndex, col: colIndex };
-                if (buttonId && this._allMainButtons.has(buttonId) && !mainBarIds.has(buttonId)) {
-                    const btnConfig = this._allMainButtons.get(buttonId);
-                    const dragInfo = { isDraggable: true, id: buttonId, type: 'grid', row: rowIndex, col: colIndex };
-                    rowEl.appendChild(this._createButton(btnConfig, dragInfo, dropInfo));
-                } else {
-                     const placeholder = this._createButton({id:`placeholder-c-${rowIndex}-${colIndex}`, classList:['is-placeholder']}, {}, dropInfo);
-                     rowEl.appendChild(placeholder);
-                }
-            });
-            this._categoriesContainer.appendChild(rowEl);
-        });
+            const shouldAnimateMount = !this._prefersReducedMotion && !this._hasRenderedOnce;
+            if (shouldAnimateMount) {
+                btn.classList.add('navibar-btn-enter');
+            }
+            container.appendChild(btn);
 
-        if (this._categoryGrid.length === 0) {
-            const rowEl = document.createElement('div');
-            rowEl.className = 'category-row is-empty-placeholder';
-            rowEl.appendChild(this._createButton({id:'placeholder-empty', classList:['is-placeholder']}, {}, { isDropTarget: true, type: 'grid', row: 0, col: 0 }));
-            this._categoriesContainer.appendChild(rowEl);
-        }
+            if (shouldAnimateMount) {
+                requestAnimationFrame(() => {
+                    if (!btn.isConnected) return;
+                    btn.classList.add('navibar-btn-enter-active');
+                });
+
+                const handleMountEnd = (evt) => {
+                    if (evt.propertyName !== 'transform') return;
+                    btn.classList.remove('navibar-btn-enter');
+                    btn.classList.remove('navibar-btn-enter-active');
+                    btn.removeEventListener('transitionend', handleMountEnd);
+                };
+
+                btn.addEventListener('transitionend', handleMountEnd);
+            }
+        };
+
+        this._mainBarLayout.forEach(id => renderButtonInLayout(id, this._mainBar));
+        this._subGridLayout.forEach(id => renderButtonInLayout(id, this._subGrid));
+        
+        this._hasRenderedOnce = true;
+        this._updateViewState();
     }
 }
 
 window.Yuuka.components['NavibarComponent'] = NavibarComponent;
+
+
