@@ -1,0 +1,324 @@
+/* --- MODIFIED FILE: plugins/slot-machine/static/css/ui.css --- */
+/* Yuuka: Slot Machine UI Styles (Desktop) v2.1 */
+
+:root {
+    --slot-card-width: 150px;
+    --slot-card-height: 200px;
+    --slot-frame-width: 520px;
+}
+
+/* 1. Backdrop & Layout chính */
+.slot-machine-backdrop {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75);
+    animation: fadeIn 0.3s ease; backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px); z-index: 2800;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; overflow: hidden; isolation: isolate;
+}
+
+.slot-machine-backdrop::before {
+    content: ''; position: absolute; inset: 0; z-index: -1;
+    background: linear-gradient(270deg, rgba(0,0,0,0.6), rgba(88,12,77,0.6), rgba(27,31,105,0.6), rgba(8,73,79,0.6), rgba(46,90,46,0.6), rgba(83,90,46,0.6), rgba(90,46,46,0.6), rgba(0,0,0,0.6));
+    background-size: 1200% 1200%;
+    animation: rainbow-background-scroll 30s ease infinite;
+    opacity: 0; transition: opacity 1.5s ease;
+}
+
+.slot-machine-backdrop.is-jackpot::before {
+    opacity: 0.6;
+}
+
+/* 2. Container & Frame */
+.slot-machine-reels-container {
+    width: 100vw; position: relative; display: flex;
+    flex-direction: column; gap: var(--spacing-4);
+}
+
+.slot-machine-frame {
+    position: absolute; left: 50%; top: -20px;
+    transform: translateX(-50%); width: var(--slot-frame-width);
+    height: calc(var(--slot-card-height) * 3 + var(--spacing-4) * 2 + 40px); 
+    border-radius: var(--rounded-lg); background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 25px rgba(255, 255, 255, 0.1);
+    pointer-events: none; z-index: 10;
+    transition: box-shadow 0.3s ease-out;
+}
+
+/* 3. Các hàng quay */
+.slot-row { display: flex; will-change: transform; }
+.slot-row:nth-child(even) { transform: translateX(100vw); }
+
+/* 4. Card */
+.slot-row .character-card {
+    background-color: var(--color-card-bg); border-radius: var(--rounded-md);
+    box-shadow: 0 4px 6px -1px var(--color-shadow); overflow: hidden;
+    text-align: center; display: flex; flex-direction: column;
+    width: var(--slot-card-width); height: var(--slot-card-height);
+    flex-shrink: 0; margin: 0 var(--spacing-2); cursor: pointer;
+    position: relative; transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    filter: brightness(1);
+}
+/* YUUKA: win effect v2.0 - Thêm overlay */
+.slot-row .character-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-color: transparent;
+    border-radius: var(--rounded-md);
+    pointer-events: none;
+    transition: background-color 0.2s;
+}
+.slot-row .character-card.is-winning-card-normal-win.is-highlighted::after {
+    animation: card-overlay-blink-normal 1.2s ease-in-out infinite;
+}
+.slot-row .character-card.is-winning-card-nearmiss.is-highlighted::after {
+    animation: card-overlay-blink-nearmiss 0.8s ease-in-out infinite;
+}
+.slot-row .character-card.is-winning-card-jackpot.is-highlighted::after {
+    animation: card-overlay-blink-jackpot 2s linear infinite;
+}
+
+.slot-row .character-card img {
+    width: 100%; height: 150px; object-fit: cover;
+    background-color: var(--color-border);
+}
+.slot-row .character-card .name {
+    padding: var(--spacing-3) var(--spacing-2); font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium); flex-grow: 1; display: flex;
+    align-items: center; justify-content: center; height: 50px;
+}
+.slot-row .character-card.is-picked {
+    transform: scale(1.05);
+    box-shadow: 0 0 15px 5px var(--color-accent), 0 6px 10px -1px var(--color-shadow);
+    z-index: 5;
+}
+.slot-machine-reels-container.has-picked-card .slot-row .character-card:not(.is-picked) {
+    transform: scale(0.95); filter: brightness(0.6);
+}
+
+/* 4.1 Special Card Badge */
+.slot-row .character-card .card-special-layer {
+    position: absolute; top: 8px; right: 8px; left: auto; transform: none;
+    display: flex; align-items: center; justify-content: flex-end;
+    max-width: 70%; pointer-events: none; z-index: 3;
+}
+.slot-card-badge {
+    --badge-bg: rgba(14, 18, 28, 0.72); --badge-border: rgba(255, 255, 255, 0.18);
+    --badge-color: #f8fbff; display: inline-flex; align-items: center;
+    gap: 6px; padding: 4px 10px; border-radius: 12px;
+    background: var(--badge-bg); color: var(--badge-color);
+    font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; border: 1px solid var(--badge-border);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.slot-card-badge .material-symbols-outlined { font-size: 1.05rem; }
+.slot-card-badge__label { font-size: 0.85rem; }
+.slot-card-badge--multiplier { --badge-bg: rgba(59, 109, 62, 0.616); --badge-border: rgba(120, 156, 121, 0.719); --badge-color: #d8fdd9; }
+.slot-card-badge--respin { --badge-bg: rgba(50, 92, 126, 0.678); --badge-border: rgba(108, 151, 187, 0.76); --badge-color: #e3f2fd; }
+.slot-card-badge--reverse-spin { --badge-bg: rgba(38, 70, 83, 0.68); --badge-border: rgba(88, 129, 140, 0.72); --badge-color: #d6f4ff; }
+.slot-card-badge--penalty { --badge-bg: rgba(124, 40, 39, 0.733); --badge-border: rgba(187, 100, 92, 0.692); --badge-color: #ffe5e3; }
+.slot-card-badge--free-spin { --badge-bg: rgba(104, 58, 112, 0.712); --badge-border: rgba(176, 126, 185, 0.705); --badge-color: #f3e5f5; }
+.slot-card-badge--bonus-points { --badge-bg: rgba(126, 110, 50, 0.7); --badge-border: rgba(187, 169, 92, 0.7); --badge-color: #fff5e3; }
+.slot-card-badge--swap { --badge-bg: rgba(54, 97, 128, 0.68); --badge-border: rgba(104, 155, 196, 0.72); --badge-color: #e2f3ff; }
+
+/* 4.2 Yuuka: Special Card Glow & Stroke Effects */
+.slot-row .character-card.has-special-card {
+    --special-glow-color: #f8fbff; /* Fallback color */
+    box-shadow: 
+        inset 0 0 0 3px hsla(from var(--special-glow-color) h s l / 0.7),
+        0 0 12px 2px hsla(from var(--special-glow-color) h s l / 0.5),
+        0 4px 6px -1px var(--color-shadow);
+}
+.slot-row .character-card.special-card-multiplier_x2,
+.slot-row .character-card.special-card-multiplier_x3,
+.slot-row .character-card.special-card-multiplier_x5,
+.slot-row .character-card.special-card-multiplier_x10 {
+    --special-glow-color: #d8fdd9;
+}
+.slot-row .character-card.special-card-respin {
+    --special-glow-color: #e3f2fd;
+}
+.slot-row .character-card.special-card-reverse_spin {
+    --special-glow-color: #d6f4ff;
+}
+.slot-row .character-card.special-card-penalty_neg_10,
+.slot-row .character-card.special-card-penalty_neg_50,
+.slot-row .character-card.special-card-penalty_neg_100 {
+    --special-glow-color: #ffe5e3;
+}
+.slot-row .character-card.special-card-free_plus_1,
+.slot-row .character-card.special-card-free_plus_2,
+.slot-row .character-card.special-card-free_plus_5 {
+    --special-glow-color: #f3e5f5;
+}
+.slot-row .character-card.special-card-bonus_plus_10,
+.slot-row .character-card.special-card-bonus_plus_50,
+.slot-row .character-card.special-card-bonus_plus_100 {
+    --special-glow-color: #fff5e3;
+}
+.slot-row .character-card.has-special-card.is-picked {
+     box-shadow: 
+        inset 0 0 0 3px hsla(from var(--special-glow-color) h s l / 0.9),
+        0 0 16px 6px hsla(from var(--special-glow-color) h s l / 0.7),
+        0 0 15px 5px var(--color-accent);
+}
+
+/* 5. Controls */
+.slot-controls {
+    position: absolute; bottom: var(--spacing-6); left: 50%;
+    transform: translateX(-50%); z-index: 20; display: flex;
+    justify-content: center; align-items: center;
+}
+.slot-cost-indicator {
+    position: absolute; right: 100%; margin-right: var(--spacing-4); top: 50%;
+    transform: translateY(-50%); display: flex; align-items: center;
+    gap: var(--spacing-2); color: white; font-size: 1.2em;
+    font-weight: var(--font-weight-medium); text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+    padding: var(--spacing-2) var(--spacing-3); border-radius: var(--rounded-md);
+    background-color: rgba(0,0,0,0); transition: color 0.2s, text-shadow 0.2s;
+    width: 110px; justify-content: center; white-space: nowrap;
+}
+.slot-cost-indicator .material-symbols-outlined { font-size: 1.3em; }
+.slot-cost-indicator > div { display: none; align-items: center; gap: var(--spacing-2); }
+.slot-cost-indicator > div.is-visible { display: flex; }
+.slot-controls.has-picked-card .slot-cost-indicator { color: #ffd700; text-shadow: 0 0 8px rgba(255, 215, 100, 0.7); }
+.slot-spin-btn {
+    width: 70px; height: 70px; border-radius: var(--rounded-full);
+    border: 2px solid rgba(255, 255, 255, 0.3); background: transparent;
+    color: white; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; transition: all 0.2s ease;
+    transform: scale(0); opacity: 0;
+    animation: slot-button-appear 0.5s 1s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.slot-spin-btn .material-symbols-outlined {
+    font-size: 2.5em; font-variation-settings: 'FILL' 0; transition: font-variation-settings 0.2s;
+}
+.slot-spin-btn:not(:disabled):hover { background-color: var(--color-accent); border-color: var(--color-accent); transform: scale(1.1); }
+.slot-spin-btn:not(:disabled):hover .material-symbols-outlined { font-variation-settings: 'FILL' 1; }
+.slot-spin-btn:active { transform: scale(1) !important; }
+.slot-spin-btn:disabled { color: var(--color-secondary-text); cursor: not-allowed; border-color: var(--color-border); }
+.slot-close-btn {
+    position: absolute; top: var(--spacing-3); right: var(--spacing-3);
+    background: transparent; border: none; color: var(--color-secondary-text);
+    cursor: pointer; padding: var(--spacing-2); z-index: 30;
+}
+
+/* 6. Jackpot Rain Effect */
+.slot-jackpot-rain-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 12;
+}
+.slot-machine-backdrop.is-mobile .slot-jackpot-rain-layer {
+    width: 100vw;
+    height: 100vh;
+}
+.jackpot-rain-card {
+    position: absolute; top: -250px; will-change: transform, opacity;
+    pointer-events: none; width: var(--slot-card-width); height: var(--slot-card-height);
+}
+.jackpot-rain-card .name { height: 50px; flex-grow: 0; }
+
+/* 7. Stats & Score Popups */
+.slot-stats {
+    position: absolute; top: var(--spacing-3); right: calc(var(--spacing-3) + 48px);
+    z-index: 20; display: flex; align-items: center; gap: var(--spacing-4);
+    color: white; background: rgba(0, 0, 0, 0); padding: var(--spacing-2) var(--spacing-4);
+    border-radius: var(--rounded-md); font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-medium); text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+}
+.stat-item { display: flex; align-items: center; gap: var(--spacing-2); position: relative; }
+.stat-item .material-symbols-outlined { font-size: 1.2em; opacity: 0.8; }
+.stat-item .stat-value { min-width: 120px; text-align: left; font-family: monospace; }
+.stat-delta {
+    position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%);
+    font-size: 1.1em; font-weight: 700; opacity: 0; pointer-events: none; white-space: nowrap;
+}
+.stat-delta.is-positive { color: #a5d6a7; }
+.stat-delta.is-negative { color: #ef9a9a; }
+.slot-score-popup-container {
+    position: absolute; top: calc(50% - var(--slot-card-height) * 1.5 - var(--spacing-4));
+    left: 50%; transform: translate(-50%, -50%); z-index: 25;
+    pointer-events: none; width: 400px; height: 150px; display: flex;
+    justify-content: center; align-items: center;
+}
+.slot-score-popup { position: absolute; }
+.popup-inner { position: relative; }
+.popup-text, .popup-score {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    white-space: nowrap; text-shadow: 2px 2px 8px rgba(0,0,0,0.8);
+    font-weight: 700; color: white; opacity: 0;
+}
+.popup-score { font-weight: 900; font-size: 2em; }
+.score-popup--normal .popup-text { font-size: 2.5em; }
+.score-popup--normal .popup-score { font-size: 2em; color: #ffd700;}
+.score-popup--bonus .popup-text { font-size: 2.4em; }
+.score-popup--bonus .popup-score { font-size: 1.8em; color: #81c784; }
+.score-popup--nearmiss .popup-text { font-size: 3.5em; }
+.score-popup--nearmiss .popup-score { font-size: 2em; color: #ffd700;}
+.score-popup--penalty .popup-text { font-size: 2em; }
+.score-popup--penalty .popup-score { font-size: 1.5em; color: var(--color-accent-hover); }
+.score-popup--jackpot .popup-text {
+    font-size: 5em; font-weight: 900;
+    background: linear-gradient(45deg, #ffd700, #f0f0f0, #ffd700, #c0c0c0);
+    background-size: 400% 400%; -webkit-background-clip: text;
+    background-clip: text; -webkit-text-fill-color: transparent;
+}
+.score-popup--jackpot .popup-score { display: none; }
+
+/* 8. Log Container */
+.slot-log-container {
+    position: absolute;
+    bottom: var(--spacing-4);
+    left: var(--spacing-4);
+    width: 320px;
+    max-height: 160px;
+    z-index: 20;
+    overflow-y: auto;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column-reverse; /* New entries appear at the bottom */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.2) transparent;
+}
+.slot-log-container::-webkit-scrollbar { width: 5px; }
+.slot-log-container::-webkit-scrollbar-track { background: transparent; }
+.slot-log-container::-webkit-scrollbar-thumb { background-color: rgba(255,255,255,0.2); border-radius: 20px; }
+
+
+/* Hide on mobile */
+.slot-machine-backdrop.is-mobile .slot-log-container {
+    display: none;
+}
+
+.slot-log-entry {
+    padding: var(--spacing-1) var(--spacing-2);
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
+    font-size: 0.85em;
+    line-height: 1.5;
+    animation: fadeIn 0.5s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.slot-log-entry .log-header {
+    font-weight: bold;
+    color: #ffdd75; /* A nice gold color */
+    border-bottom: 1px solid rgba(255, 221, 117, 0.2);
+    margin-bottom: var(--spacing-1);
+    padding-bottom: var(--spacing-1);
+}
+
+.slot-log-entry .log-detail {
+    display: block;
+    margin-left: var(--spacing-2);
+}
+
+.slot-log-entry .score-positive { color: #a5d6a7; font-weight: 500; }
+.slot-log-entry .score-negative { color: #ef9a9a; font-weight: 500; }
+.slot-log-entry .score-neutral { color: #e0e0e0; }

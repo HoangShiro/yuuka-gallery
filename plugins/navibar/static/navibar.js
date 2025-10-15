@@ -416,7 +416,7 @@ class NavibarComponent {
                             service.start();
                         } else {
                             console.error(`[Navibar] Service launcher '${plugin.id}' or its 'start' method not found.`);
-                            showError(`KhÃ´ng thá»ƒ khá»Ÿi Ä‘á»™ng dá»‹ch vá»¥: ${plugin.name}`);
+                            showError(`Không thể khởi động dịch vụ: ${plugin.name}`);
                         }
                     };
                 } else {

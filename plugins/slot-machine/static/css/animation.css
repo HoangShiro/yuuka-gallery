@@ -1,0 +1,161 @@
+/* --- MODIFIED FILE: plugins/slot-machine/static/css/animation.css --- */
+/* Yuuka: Shared animations for Slot Machine */
+
+/* 1. Keyframes */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slot-button-appear {
+    to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes jackpot-fall {
+    from {
+        transform: translateY(0) rotate(0) scale(var(--card-scale, 0.8));
+        opacity: 1;
+    }
+    70% {
+        opacity: 1;
+    }
+    to {
+        transform: translateY(120vh) rotate(var(--card-rotation, 60deg)) scale(var(--card-scale, 0.8));
+        opacity: 0;
+    }
+}
+
+@keyframes rainbow-background-scroll {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+@keyframes rainbow-glow {
+    0%   { box-shadow: 0 0 12px 3px rgba(255, 0, 0, 0.7); }
+    15%  { box-shadow: 0 0 12px 3px rgba(255, 127, 0, 0.7); }
+    30%  { box-shadow: 0 0 12px 3px rgba(255, 255, 0, 0.7); }
+    45%  { box-shadow: 0 0 12px 3px rgba(0, 255, 0, 0.7); }
+    60%  { box-shadow: 0 0 12px 3px rgba(0, 0, 255, 0.7); }
+    75%  { box-shadow: 0 0 12px 3px rgba(75, 0, 130, 0.7); }
+    90%  { box-shadow: 0 0 12px 3px rgba(143, 0, 255, 0.7); }
+    100% { box-shadow: 0 0 12px 3px rgba(255, 0, 0, 0.7); }
+}
+
+@keyframes frame-glow-pulse {
+    50% { box-shadow: 0 0 12px 4px var(--glow-color); }
+}
+
+@keyframes frame-glow-rainbow {
+    0%   { box-shadow: 0 0 18px 6px rgba(255, 0, 0, 0.8); }
+    15%  { box-shadow: 0 0 18px 6px rgba(255, 127, 0, 0.8); }
+    30%  { box-shadow: 0 0 18px 6px rgba(255, 255, 0, 0.8); }
+    45%  { box-shadow: 0 0 18px 6px rgba(0, 255, 0, 0.8); }
+    60%  { box-shadow: 0 0 18px 6px rgba(0, 0, 255, 0.8); }
+    75%  { box-shadow: 0 0 18px 6px rgba(75, 0, 130, 0.8); }
+    90%  { box-shadow: 0 0 18px 6px rgba(143, 0, 255, 0.8); }
+    100% { box-shadow: 0 0 18px 6px rgba(255, 0, 0, 0.8); }
+}
+
+@keyframes score-popup-float {
+    0% { transform: translateY(20px) scale(0.5); opacity: 0; }
+    50% { transform: translateY(-50px) scale(1.1); opacity: 1; }
+    100% { transform: translateY(-120px) scale(1); opacity: 0; }
+}
+
+@keyframes jackpot-text-glow {
+    from { text-shadow: 0 0 10px #fff, 0 0 20px #fff, 0 0 30px #ffdd75; }
+    to { text-shadow: 0 0 20px #fff, 0 0 30px #ffdd75, 0 0 40px #ffdd75; }
+}
+
+@keyframes jackpot-text-gradient {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+@keyframes stat-delta-float {
+    0% { transform: translate(-50%, 0); opacity: 1; }
+    100% { transform: translate(-50%, -25px); opacity: 0; }
+}
+
+@keyframes slot-card-swap-flash {
+    0% { transform: scale(1); filter: brightness(1); }
+    35% { transform: scale(1.08) rotate(1deg); filter: brightness(1.2); }
+    70% { transform: scale(0.97) rotate(-1deg); filter: brightness(1.05); }
+    100% { transform: scale(1); filter: brightness(1); }
+}
+
+/* YUUKA: win effect v2.0 - Keyframes cho overlay */
+@keyframes card-overlay-blink-normal {
+    50% { background-color: rgba(255, 215, 0, 0.35); }
+}
+@keyframes card-overlay-blink-nearmiss {
+    50% { background-color: rgba(200, 220, 255, 0.45); }
+}
+@keyframes card-overlay-blink-jackpot {
+    0%   { background-color: rgba(255, 0, 0, 0.3); }
+    15%  { background-color: rgba(255, 127, 0, 0.3); }
+    30%  { background-color: rgba(255, 255, 0, 0.3); }
+    45%  { background-color: rgba(0, 255, 0, 0.3); }
+    60%  { background-color: rgba(0, 0, 255, 0.3); }
+    75%  { background-color: rgba(75, 0, 130, 0.3); }
+    90%  { background-color: rgba(143, 0, 255, 0.3); }
+    100% { background-color: rgba(255, 0, 0, 0.3); }
+}
+
+
+/* 2. Animation Classes */
+.slot-machine-frame.is-normal-win {
+    --glow-color: rgba(255, 215, 0, 0.4);
+    animation: frame-glow-pulse 1.2s ease-in-out 2;
+}
+
+.slot-machine-frame.is-nearmiss {
+    --glow-color: rgba(200, 220, 255, 1);
+    animation: frame-glow-pulse 0.8s ease-in-out 3;
+}
+
+.slot-machine-frame.is-jackpot {
+    animation: frame-glow-rainbow 2s linear infinite;
+}
+
+/* YUUKA: win effect v2.0 - Bỏ animation cũ và chỉ giữ lại glow khi hover/pick */
+.character-card.is-winning-card-normal-win.is-highlighted {
+    --glow-color: rgba(255, 215, 0, 0.9);
+    animation: frame-glow-pulse 1.2s ease-in-out infinite;
+}
+.character-card.is-winning-card-nearmiss.is-highlighted {
+    --glow-color: rgba(200, 220, 255, 1);
+    animation: frame-glow-pulse 0.8s ease-in-out infinite;
+}
+.character-card.is-winning-card-jackpot.is-highlighted {
+    animation: rainbow-glow 2s linear infinite;
+}
+
+.character-card.is-swapping {
+    animation: slot-card-swap-flash 0.6s ease-out;
+}
+
+.stat-delta.animate {
+    animation: stat-delta-float 1.2s ease-out forwards;
+}
+
+.jackpot-rain-card {
+    animation: jackpot-fall linear forwards, rainbow-glow 2s linear infinite;
+}
+
+.popup-inner {
+    animation: score-popup-float 2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.popup-inner .popup-text {
+    animation: fadeIn 0.3s ease-out forwards;
+}
+.popup-inner .popup-score {
+    animation: fadeIn 0.3s ease-out 0.5s forwards;
+}
+
+.score-popup--jackpot .popup-text {
+    animation: fadeIn 0.3s ease-out forwards, jackpot-text-glow 1s ease-in-out infinite alternate, jackpot-text-gradient 10s linear infinite;
+}

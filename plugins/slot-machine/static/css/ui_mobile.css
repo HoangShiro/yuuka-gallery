@@ -1,0 +1,122 @@
+/* --- MODIFIED FILE: plugins/slot-machine/static/css/ui_mobile.css --- */
+/* Yuuka: Slot Machine UI Styles (Mobile) v2.1 */
+
+.slot-machine-backdrop.is-mobile {
+    --slot-card-mobile-scale: 0.4;
+    justify-content: center;
+}
+
+/* 1. Container & Columns */
+.is-mobile .slot-machine-reels-container {
+    flex-direction: row; justify-content: center;
+    align-items: center; gap: var(--spacing-2);
+    position: relative; height: 100vh; width: auto;
+}
+.is-mobile .slot-column {
+    width: calc(var(--slot-card-width) * var(--slot-card-mobile-scale));
+    height: 100%; overflow: hidden; position: relative;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+}
+.is-mobile .slot-strip {
+    display: flex; flex-direction: column; align-items: center;
+    transition: transform 4s cubic-bezier(0.25, 1, 0.5, 1);
+    will-change: transform;
+}
+
+/* 2. Frame */
+.is-mobile .slot-machine-frame {
+    width: calc(var(--slot-card-width) * var(--slot-card-mobile-scale) * 3 + var(--spacing-2) * 4);
+    height: calc((var(--slot-card-height) * var(--slot-card-mobile-scale) * 3) + (var(--spacing-2) * 2) + 20px);
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    border-radius: var(--rounded-lg); border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+/* 3. Card */
+.is-mobile .character-card {
+    margin: 0 0 var(--spacing-2) 0;
+    width: calc(var(--slot-card-width) * var(--slot-card-mobile-scale));
+    height: calc(var(--slot-card-height) * var(--slot-card-mobile-scale));
+    flex-shrink: 0; position: relative;
+}
+.is-mobile .character-card img { height: calc(150px * var(--slot-card-mobile-scale)); }
+.is-mobile .character-card .name {
+    height: calc(50px * var(--slot-card-mobile-scale));
+    padding: var(--spacing-1); font-size: 0.4em;
+}
+.is-mobile .character-card .card-special-layer {
+    top: 4px; right: 4px; left: auto;
+    transform: scale(0.85); transform-origin: top right;
+}
+.is-mobile .slot-card-badge { padding: 3px 8px; gap: 4px; font-size: 0.65rem; }
+.is-mobile .slot-card-badge .material-symbols-outlined { font-size: 0.85rem; }
+.is-mobile .slot-card-badge__label { font-size: 0.65rem; }
+.is-mobile .slot-card-badge--reverse-spin { --badge-bg: rgba(38, 70, 83, 0.68); --badge-border: rgba(88, 129, 140, 0.72); --badge-color: #d6f4ff; }
+.is-mobile .slot-machine-reels-container.has-picked-card .character-card:not(.is-picked) {
+    transform: scale(0.9); filter: brightness(0.6);
+}
+
+/* 3.1 Yuuka: Special Card Glow & Stroke Effects (Mobile) */
+.is-mobile .character-card.has-special-card {
+    --special-glow-color: #f8fbff; /* Fallback color */
+    box-shadow: 
+        inset 0 0 0 3px hsla(from var(--special-glow-color) h s l / 0.7),
+        0 0 12px 2px hsla(from var(--special-glow-color) h s l / 0.5),
+        0 4px 6px -1px var(--color-shadow);
+}
+.is-mobile .character-card.special-card-multiplier_x2,
+.is-mobile .character-card.special-card-multiplier_x3,
+.is-mobile .character-card.special-card-multiplier_x5,
+.is-mobile .character-card.special-card-multiplier_x10 {
+    --special-glow-color: #d8fdd9;
+}
+.is-mobile .character-card.special-card-respin {
+    --special-glow-color: #e3f2fd;
+}
+.is-mobile .character-card.special-card-reverse_spin {
+    --special-glow-color: #d6f4ff;
+}
+.is-mobile .character-card.special-card-penalty_neg_10,
+.is-mobile .character-card.special-card-penalty_neg_50,
+.is-mobile .character-card.special-card-penalty_neg_100 {
+    --special-glow-color: #ffe5e3;
+}
+.is-mobile .character-card.special-card-free_plus_1,
+.is-mobile .character-card.special-card-free_plus_2,
+.is-mobile .character-card.special-card-free_plus_5 {
+    --special-glow-color: #f3e5f5;
+}
+.is-mobile .character-card.special-card-bonus_plus_10,
+.is-mobile .character-card.special-card-bonus_plus_50,
+.is-mobile .character-card.special-card-bonus_plus_100 {
+    --special-glow-color: #fff5e3;
+}
+.is-mobile .character-card.has-special-card.is-picked {
+     box-shadow: 
+        inset 0 0 0 3px hsla(from var(--special-glow-color) h s l / 0.9),
+        0 0 16px 6px hsla(from var(--special-glow-color) h s l / 0.7),
+        0 0 15px 5px var(--color-accent);
+}
+
+/* 4. Controls */
+.is-mobile .slot-controls { width: 100%; bottom: var(--spacing-4); position: absolute; }
+.is-mobile .slot-spin-btn { width: 80px; height: 80px; }
+.is-mobile .slot-spin-btn .material-symbols-outlined { font-size: 3em; }
+.is-mobile .slot-cost-indicator {
+    bottom: 100%; left: 50%; right: auto; top: auto;
+    transform: translate(-50%, -10px); margin-right: 0;
+    width: auto; background-color: rgba(0,0,0,0.3);
+}
+
+/* 5. Stats & Popups */
+.is-mobile .slot-stats {
+    top: var(--spacing-2); left: 50%; transform: translateX(-50%);
+    right: auto; gap: var(--spacing-3); font-size: var(--font-size-base);
+    width: 95vw; justify-content: center;
+}
+.is-mobile .stat-item .stat-value { min-width: 80px; }
+.is-mobile .slot-score-popup-container { width: 100vw; height: 100px; top: 25%; }
+.is-mobile .jackpot-rain-card {
+    width: calc(var(--slot-card-width) * 0.7);
+    height: calc(var(--slot-card-height) * 0.7);
+}

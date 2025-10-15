@@ -928,11 +928,13 @@ class PluginManager:
         return list(self._plugins.values())
 
     def get_frontend_assets(self):
-        assets = {'js': [], 'css': []}
+        assets = {'js': [], 'css': [], 'js_modules': []}
         for plugin in self._plugins.values():
             if 'assets' in plugin.metadata:
                 for js_file in plugin.metadata['assets'].get('js', []):
                     assets['js'].append(f"/plugins/{plugin.id}/static/{js_file}")
+                for js_module_file in plugin.metadata['assets'].get('js_modules', []):
+                    assets['js_modules'].append(f"/plugins/{plugin.id}/static/{js_module_file}")
                 for css_file in plugin.metadata['assets'].get('css', []):
                     assets['css'].append(f"/plugins/{plugin.id}/static/{css_file}")
         return assets

@@ -76,5 +76,10 @@
         <script src="{{ js_path }}?v={{ cache_version }}"></script>
     {% endfor %}
 
+    <!-- YUUKA: PLUGIN JS MODULES -->
+    {% for js_path in plugin_assets.js_modules %}
+        <script type="module" src="{{ js_path }}?v={{ cache_version }}"></script>
+    {% endfor %}
+
 </body>
 </html>

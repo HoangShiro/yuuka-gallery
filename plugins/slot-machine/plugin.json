@@ -1,7 +1,7 @@
 {
     "id": "slot-machine",
     "name": "Slot Machine Minigame",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "author": "Yuuka",
     "description": "Một minigame dạng overlay có thể được kích hoạt toàn cục.",
     "static_folder": "static",
@@ -10,8 +10,18 @@
         "frontend_component": "SlotMachineService"
     },
     "assets": {
-        "js": ["slot_machine.js", "slot_machine_mobile.js"],
-        "css": ["slot_machine.css", "slot_machine_mobile.css"]
+        "js_modules": [
+            "js/constants.js",
+            "js/result.js",
+            "js/reel_manager.js",
+            "js/ui_controller.js",
+            "js/slot_machine.js"
+        ],
+        "css": [
+            "css/animation.css",
+            "css/ui.css",
+            "css/ui_mobile.css"
+        ]
     },
     "dependencies": {
         "python": []
