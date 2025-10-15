@@ -599,14 +599,14 @@ class NavibarComponent {
         if (!this._isPointInsideRect(point, trayRect)) return null;
 
         const isInMain = this._isPointInsideRect(point, mainRect);
-        const isSubVisible = !!(this._isSubGridOpen && subRect && subRect.height > 0);
-        const isInSub = isSubVisible && subRect ? this._isPointInsideRect(point, subRect) : false;
+        const canUseSubGrid = !!(subRect && (this._isSubGridOpen || this._isDragActive)); // Treat tray as open while dragging
+        const isInSub = canUseSubGrid && subRect ? this._isPointInsideRect(point, subRect) : false;
 
         if (isInMain || isInSub) {
             return null;
         }
 
-        const target = this._resolveGapDropTarget(point, mainRect, subRect, isSubVisible);
+        const target = this._resolveGapDropTarget(point, mainRect, subRect, canUseSubGrid);
         const container = target === 'main' ? this._mainBar : this._subGrid;
         const index = this._calculateDropIndex(container, point.x);
 

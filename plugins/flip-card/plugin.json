@@ -1,0 +1,29 @@
+{
+    "id": "flip-card",
+    "name": "Flip Card Minigame",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Một minigame lật thẻ bài tìm cặp giống nhau.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:FlipCardPlugin",
+        "frontend_component": "FlipCardService"
+    },
+    "assets": {
+        "js": ["flip_card.js"],
+        "css": ["flip_card.css"]
+    },
+    "dependencies": {
+        "python": []
+    },
+    "ui": {
+        "is_singleton": true,
+        "tab": {
+            "id": "flip-card-game",
+            "icon": "style",
+            "label": "Flip Card",
+            "is_service_launcher": true
+        },
+        "order": 36
+    }
+}
