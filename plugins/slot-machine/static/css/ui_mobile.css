@@ -6,6 +6,25 @@
     justify-content: center;
 }
 
+.slot-machine-backdrop.is-mobile.is-menu-open .slot-overlay {
+    width: min(92vw, 360px);
+}
+
+.slot-machine-backdrop.is-mobile .slot-menu {
+    padding: var(--spacing-4);
+}
+
+.slot-machine-backdrop.is-mobile .slot-game-layer {
+    position: absolute;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
 /* 1. Container & Columns */
 .is-mobile .slot-machine-reels-container {
     flex-direction: row; justify-content: center;
@@ -78,7 +97,11 @@
 }
 .is-mobile .character-card.special-card-penalty_neg_10,
 .is-mobile .character-card.special-card-penalty_neg_50,
-.is-mobile .character-card.special-card-penalty_neg_100 {
+.is-mobile .character-card.special-card-penalty_neg_100,
+.is-mobile .character-card.special-card-penalty_percent_neg_5,
+.is-mobile .character-card.special-card-penalty_percent_neg_10,
+.is-mobile .character-card.special-card-penalty_percent_neg_25,
+.is-mobile .character-card.special-card-penalty_percent_neg_50 {
     --special-glow-color: #ffe5e3;
 }
 .is-mobile .character-card.special-card-free_plus_1,
@@ -106,6 +129,12 @@
     bottom: 100%; left: 50%; right: auto; top: auto;
     transform: translate(-50%, -10px); margin-right: 0;
     width: auto; background-color: rgba(0,0,0,0.3);
+}
+
+.is-mobile .pvp-turn-indicator {
+    top: var(--spacing-3);
+    padding: var(--spacing-1) var(--spacing-3);
+    font-size: 0.85rem;
 }
 
 /* 5. Stats & Popups */

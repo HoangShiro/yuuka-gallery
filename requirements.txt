@@ -3,3 +3,4 @@ flask
 websocket-client
 PILLOW
 packaging
+flask_sock

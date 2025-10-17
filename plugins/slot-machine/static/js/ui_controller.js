@@ -1,8 +1,6 @@
 // --- MODIFIED FILE: plugins/slot-machine/static/js/ui_controller.js ---
 // Yuuka: Handles all DOM manipulation, rendering, and animations.
-import { GAME_CONFIG, SPECIAL_CARD_CONFIGS } from './constants.js';
-
-const SPECIAL_CARD_CLASSNAMES = SPECIAL_CARD_CONFIGS.map(cfg => `special-card-${cfg.id}`);
+// Yuuka: new architecture v2.1 - Removed direct import of constants.js as it no longer exists.
 
 export class UIController {
     constructor(backdrop, isMobile) {
@@ -14,6 +12,8 @@ export class UIController {
         this.costIndicator = backdrop.querySelector('.slot-cost-indicator');
         this.popupContainer = backdrop.querySelector('.slot-score-popup-container');
         this.jackpotRainLayer = backdrop.querySelector('.slot-jackpot-rain-layer');
+        this.jackpotTitle = backdrop.querySelector('.slot-jackpot-banner');
+        this.jackpotTitleText = this.jackpotTitle ? this.jackpotTitle.querySelector('.slot-jackpot-banner__text') : null;
         this.logContainer = backdrop.querySelector('.slot-log-container');
         this.glowTimeout = null;
         this.jackpotInterval = null;
@@ -23,7 +23,24 @@ export class UIController {
         // YUUKA: win effect v2.0 - Thêm timer cho animation
         this.highlightTimer = null;
         this.swapAnimationTimers = [];
+        this.initialPositionTimers = [];
+
+        // Yuuka: new architecture v2.1 - Config will be injected later.
+        this.GAME_CONFIG = {};
+        this.SPECIAL_CARD_CONFIGS = [];
     }
+    
+    // Yuuka: new architecture v2.1 - New method to receive config after initialization
+    initialize(gameConfig, specialCardConfigs) {
+        this.GAME_CONFIG = gameConfig;
+        this.SPECIAL_CARD_CONFIGS = specialCardConfigs;
+        // Update any UI elements that depend on initial config
+        const costValueEl = this.costIndicator.querySelector('.cost-value');
+        if(costValueEl) {
+            costValueEl.textContent = this.GAME_CONFIG.SPIN_COST;
+        }
+    }
+
 
     // --- Card Rendering ---
 
@@ -57,8 +74,9 @@ export class UIController {
     }
 
     renderSpecialBadges(sessionSpecialMap) {
+        const specialCardClassNames = this.SPECIAL_CARD_CONFIGS.map(cfg => `special-card-${cfg.id}`);
         this.reelsContainer.querySelectorAll('.character-card[data-special-id]').forEach(card => {
-            card.classList.remove('has-special-card', ...SPECIAL_CARD_CLASSNAMES);
+            card.classList.remove('has-special-card', ...specialCardClassNames);
             card.removeAttribute('data-special-id');
             const layer = card.querySelector('.card-special-layer');
             if (layer) layer.innerHTML = '';
@@ -186,18 +204,25 @@ export class UIController {
         return typeof cell.row === 'number' && typeof cell.column === 'number';
     }
 
+    _clearInitialPositionAnimations() {
+        this.initialPositionTimers.forEach(id => clearTimeout(id));
+        this.initialPositionTimers = [];
+    }
+
     // --- Animation ---
 
     animateToInitialPosition(reelCharacters) {
-        const totalSize = this.isMobile 
-            ? (GAME_CONFIG.CARD_HEIGHT * GAME_CONFIG.MOBILE_CARD_SCALE) + 8 // 8 is margin
-            : GAME_CONFIG.CARD_WIDTH + GAME_CONFIG.CARD_MARGIN;
+        this._clearInitialPositionAnimations();
+        const cardHeight = this.isMobile ? (150 * 0.4) : 200; // Simplified
+        const cardWidth = this.isMobile ? (150 * 0.4) : 150;
+        const margin = 8;
+        const totalSize = this.isMobile ? (cardHeight + margin) : (cardWidth + (margin * 2));
         
         const reels = this.reelsContainer.querySelectorAll(this.isMobile ? '.slot-strip' : '.slot-row');
         this.currentReelTargetIndices = [];
 
         reels.forEach((reel, i) => {
-            const symbolsPerReel = this.isMobile ? GAME_CONFIG.MOBILE_SYMBOLS_PER_COLUMN : GAME_CONFIG.DESKTOP_SYMBOLS_PER_ROW;
+            const symbolsPerReel = reelCharacters[i]?.length || 21;
             const middleIndex = Math.floor(symbolsPerReel / 2);
             this.currentReelTargetIndices[i] = middleIndex;
 
@@ -209,24 +234,28 @@ export class UIController {
             if (this.isMobile) {
                 reel.style.transform = `translateY(${targetPos}px)`;
             } else {
-                 const startPos = i % 2 === 0 ? -window.innerWidth - 200 : window.innerWidth + 200;
-                 reel.style.transform = `translateX(${startPos}px)`;
-                 setTimeout(() => {
-                     reel.style.transition = 'transform 1000ms cubic-bezier(0.25, 1, 0.5, 1)';
-                     reel.style.transform = `translateX(${targetPos}px)`;
-                 }, 50);
+                const startPos = i % 2 === 0 ? -window.innerWidth - 200 : window.innerWidth + 200;
+                reel.style.transform = `translateX(${startPos}px)`;
+                const timer = window.setTimeout(() => {
+                    reel.style.transition = 'transform 1000ms cubic-bezier(0.25, 1, 0.5, 1)';
+                    reel.style.transform = `translateX(${targetPos}px)`;
+                    this.initialPositionTimers = this.initialPositionTimers.filter(id => id !== timer);
+                }, 50);
+                this.initialPositionTimers.push(timer);
             }
         });
     }
 
     animateSpin(finalResults, reelCharacters, pickedHash, direction = 1) {
+        this._clearInitialPositionAnimations();
         if (typeof pickedHash !== 'undefined') {
             this.updateHighlights(pickedHash);
         }
         const reels = this.reelsContainer.querySelectorAll(this.isMobile ? '.slot-strip' : '.slot-row');
-        const totalSize = this.isMobile 
-            ? (GAME_CONFIG.CARD_HEIGHT * GAME_CONFIG.MOBILE_CARD_SCALE) + 8 
-            : GAME_CONFIG.CARD_WIDTH + GAME_CONFIG.CARD_MARGIN;
+        const cardHeight = this.isMobile ? (150 * 0.4) : 200;
+        const cardWidth = this.isMobile ? (150 * 0.4) : 150;
+        const margin = 8;
+        const totalSize = this.isMobile ? (cardHeight + margin) : (cardWidth + (margin * 2));
         const directionSign = direction >= 0 ? 1 : -1;
         const finalCardIndices = [];
 
@@ -244,7 +273,7 @@ export class UIController {
                 if (finalCardIndex === -1) finalCardIndex = 0;
                 finalCardIndices[i] = finalCardIndex;
 
-                const symbolsPerReel = this.isMobile ? GAME_CONFIG.MOBILE_SYMBOLS_PER_COLUMN : GAME_CONFIG.DESKTOP_SYMBOLS_PER_ROW;
+                const symbolsPerReel = reelChars.length;
                 const duplicateSpan = symbolsPerReel;
                 const baseIndex = Math.floor(symbolsPerReel / 2);
                 const startIndexInStrip = directionSign >= 0
@@ -264,7 +293,7 @@ export class UIController {
                     reel.style.transition = 'none';
                     reel.style.transform = `${transformProp}(${startPosition}px)`;
                     requestAnimationFrame(() => {
-                        const duration = GAME_CONFIG.SPIN_DURATION_BASE + i * GAME_CONFIG.SPIN_DURATION_STAGGER;
+                        const duration = (this.GAME_CONFIG.SPIN_DURATION_BASE || 4000) + i * (this.GAME_CONFIG.SPIN_DURATION_STAGGER || 500);
                         reel.style.transition = `transform ${duration}ms cubic-bezier(0.25, 1, 0.5, 1)`;
                         reel.style.transform = `${transformProp}(${finalPosition}px)`;
                         setTimeout(resolve, duration);
@@ -278,9 +307,10 @@ export class UIController {
     recenterReels() {
         if (!this.reelsContainer) return;
         const reels = this.reelsContainer.querySelectorAll(this.isMobile ? '.slot-strip' : '.slot-row');
-        const totalSize = this.isMobile 
-            ? (GAME_CONFIG.CARD_HEIGHT * GAME_CONFIG.MOBILE_CARD_SCALE) + 8 
-            : GAME_CONFIG.CARD_WIDTH + GAME_CONFIG.CARD_MARGIN;
+        const cardHeight = this.isMobile ? (150 * 0.4) : 200;
+        const cardWidth = this.isMobile ? (150 * 0.4) : 150;
+        const margin = 8;
+        const totalSize = this.isMobile ? (cardHeight + margin) : (cardWidth + (margin * 2));
         const transformProp = this.isMobile ? 'translateY' : 'translateX';
 
         reels.forEach((reel, i) => {
@@ -295,35 +325,37 @@ export class UIController {
         });
     }
 
+    _setJackpotTitleVisible(visible) {
+        if (!this.jackpotTitle) return;
+        this.jackpotTitle.classList.toggle('is-visible', !!visible);
+        if (!this.jackpotTitleText) return;
+        if (visible) {
+            this.jackpotTitleText.classList.remove('is-animating');
+            void this.jackpotTitleText.offsetWidth;
+            this.jackpotTitleText.classList.add('is-animating');
+        } else {
+            this.jackpotTitleText.classList.remove('is-animating');
+        }
+    }
+
     triggerJackpotAnimation(primaryCharacter) {
         if (!this.backdrop || !primaryCharacter || !primaryCharacter.hash) return;
         this._stopJackpotRain();
         this.backdrop.classList.add('is-jackpot');
+        this._setJackpotTitleVisible(true);
         if (this.jackpotRainLayer) {
             this.jackpotRainLayer.innerHTML = '';
         }
 
-        const endTime = Date.now() + GAME_CONFIG.JACKPOT_ANIMATION_DURATION;
         const spawnRainCard = () => {
             if (!this.jackpotRainLayer) return;
-            if (Date.now() > endTime) {
-                if (this.jackpotInterval) {
-                    clearInterval(this.jackpotInterval);
-                    this.jackpotInterval = null;
-                }
-                return;
-            }
             const card = this._createJackpotRainCard(primaryCharacter);
             if (!card) return;
             this.jackpotRainLayer.appendChild(card);
         };
 
         spawnRainCard();
-        this.jackpotInterval = window.setInterval(spawnRainCard, 100);
-        this.jackpotCleanupTimeout = window.setTimeout(() => {
-            this._stopJackpotRain(true, false);
-            this.jackpotFinalCleanupTimeout = window.setTimeout(() => this._stopJackpotRain(false), 7000);
-        }, GAME_CONFIG.JACKPOT_ANIMATION_DURATION);
+        this.jackpotInterval = window.setInterval(spawnRainCard, 140);
     }
 
     _createJackpotRainCard(character) {
@@ -347,6 +379,10 @@ export class UIController {
         return card;
     }
 
+    stopJackpotCelebration(clearLayer = true) {
+        this._stopJackpotRain(true, clearLayer);
+    }
+
     _stopJackpotRain(removeBackdropClass = true, clearLayer = true) {
         if (this.jackpotInterval) {
             clearInterval(this.jackpotInterval);
@@ -366,6 +402,9 @@ export class UIController {
         if (removeBackdropClass && this.backdrop) {
             this.backdrop.classList.remove('is-jackpot');
         }
+        if (removeBackdropClass) {
+            this._setJackpotTitleVisible(false);
+        }
     }
     
     // --- UI State Updates ---
@@ -373,8 +412,8 @@ export class UIController {
     addLogEntry(logData) {
         if (!this.logContainer) return;
 
-        let detailsHTML = `<span class="log-detail score-neutral">Điểm: ${logData.scoreBefore} -> ${logData.scoreAfter}</span>`;
-        
+        let detailsHTML = `<span class="log-detail score-neutral">Score: ${logData.scoreBefore} -> ${logData.scoreAfter}</span>`;
+
         logData.outcome.eventsToDisplay.forEach(event => {
             let scorePart = '';
             if (event.score > 0) {
@@ -386,19 +425,19 @@ export class UIController {
             const text = event.displayValue ? `${event.text} (${event.displayValue})` : event.text;
             detailsHTML += `<span class="log-detail">${text} ${scorePart}</span>`;
         });
-        
+
         if (logData.outcome.freeSpinsAwarded > 0) {
-            detailsHTML += `<span class="log-detail score-positive">+${logData.outcome.freeSpinsAwarded} Lượt miễn phí</span>`;
+            detailsHTML += `<span class="log-detail score-positive">+${logData.outcome.freeSpinsAwarded} Free spins</span>`;
         }
         if (logData.outcome.respinCount > 0) {
-            detailsHTML += `<span class="log-detail score-positive">+${logData.outcome.respinCount} Respin</span>`;
+            detailsHTML += `<span class="log-detail score-positive">+${logData.outcome.respinCount} Respins</span>`;
         }
 
         const entryHTML = `
-            <div class="log-header">Lượt #${logData.spin}</div>
+            <div class="log-header">Spin #${logData.spin}</div>
             ${detailsHTML}
         `;
-        
+
         const entry = document.createElement('div');
         entry.className = 'slot-log-entry';
         entry.innerHTML = entryHTML;
@@ -408,19 +447,18 @@ export class UIController {
             this.logContainer.lastElementChild.remove();
         }
     }
-
     updateControlsDisplay(freeSpins, sessionScore, isSpinning, pickedHash) {
-        if (!this.costIndicator) return;
+        if (!this.costIndicator || !this.GAME_CONFIG) return;
         this.backdrop.querySelector('.slot-controls').classList.toggle('has-picked-card', !!pickedHash);
-    
+
         const costEl = this.costIndicator.querySelector('[data-type="cost"]');
         const freeEl = this.costIndicator.querySelector('[data-type="free"]');
-    
+
         const requiredFreeSpins = pickedHash ? 2 : 1;
         const hasEnoughFreeSpins = freeSpins >= requiredFreeSpins;
-        const hasEnoughPoints = sessionScore >= GAME_CONFIG.SPIN_COST;
-    
-        // Logic hiển thị
+        const hasEnoughPoints = sessionScore >= this.GAME_CONFIG.SPIN_COST;
+        const canAfford = hasEnoughFreeSpins || hasEnoughPoints;
+
         if (hasEnoughFreeSpins) {
             costEl.classList.remove('is-visible');
             freeEl.classList.add('is-visible');
@@ -429,9 +467,10 @@ export class UIController {
             costEl.classList.add('is-visible');
             freeEl.classList.remove('is-visible');
         }
-    
-        // Logic vô hiệu hóa nút
-        this.spinBtn.disabled = isSpinning || (!hasEnoughFreeSpins && !hasEnoughPoints);
+
+        this.spinBtn.dataset.canAfford = canAfford ? '1' : '0';
+        this.spinBtn.classList.toggle('is-afford-locked', !canAfford);
+        this.spinBtn.disabled = isSpinning || !canAfford;
     }
 
     updateHighlights(pickedHash) {
@@ -443,10 +482,11 @@ export class UIController {
 
     setSpinningState(spinning) {
         this.spinBtn.disabled = spinning;
+        this.spinBtn.dataset.isSpinning = spinning ? '1' : '0';
         this.spinBtn.querySelector('.material-symbols-outlined').textContent = spinning ? 'sync' : 'casino';
-        // YUUKA: win effect v2.0 - Dọn dẹp highlight khi bắt đầu spin
         if (spinning) {
             this.clearHighlights();
+            this.stopJackpotCelebration();
         }
     }
 
@@ -559,6 +599,6 @@ export class UIController {
         clearTimeout(this.highlightTimer);
         this.swapAnimationTimers.forEach(timer => clearTimeout(timer));
         this.swapAnimationTimers = [];
+        this._clearInitialPositionAnimations();
     }
 }
-

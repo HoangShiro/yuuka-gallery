@@ -31,12 +31,7 @@ def restart_application():
     """Khởi động lại ứng dụng bằng cách gọi RUN.bat."""
     print("Yuuka: Tác vụ hoàn tất. Đang khởi động lại ứng dụng...")
     time.sleep(2)
-    run_bat_path = os.path.abspath("RUN.bat")
-    if os.path.exists(run_bat_path):
-        subprocess.Popen([run_bat_path], shell=True)
-    else:
-        # Fallback nếu không có RUN.bat
-        subprocess.Popen([sys.executable] + sys.argv, shell=True)
+    # Yuuka: restart loop is handled by RUN.bat; just exit cleanly here.
     sys.exit(0)
 
 # Yuuka: auto-install v1.0 - Gỡ bỏ hàm run_install_and_exit()

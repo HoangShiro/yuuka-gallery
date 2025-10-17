@@ -5,12 +5,14 @@ import threading
 import time # Yuuka: Thêm time để tạo version cho cache
 import datetime # Yuuka: uptime tracking v1.0
 from flask import Flask, render_template, jsonify, send_from_directory, abort, Response, request
+from flask_sock import Sock # Yuuka: PvP game feature v1.0 - Thư viện cho WebSocket
 
 from core.plugin_manager import PluginManager
 from core.data_manager import DataManager
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
+sock = Sock(app) # Yuuka: PvP game feature v1.0 - Khởi tạo Sock
 # Yuuka: Tắt cache phía server khi debug
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 
 
@@ -274,6 +276,25 @@ def cancel_generation():
         return jsonify({"error": str(e)}), 401
 
 
+# === Yuuka: Game Service (WebSocket) v1.0 ===
+@sock.route('/ws/game')
+def game_websocket(ws):
+    """Endpoint WebSocket để xử lý các kết nối game PvP."""
+    game_service = plugin_manager.core_api.game_service
+    game_service.handle_connect(ws)
+    try:
+        while True:
+            message = ws.receive()
+            if message:
+                game_service.handle_message(ws, message)
+    except Exception as e:
+        # Lỗi xảy ra thường là do client đã ngắt kết nối
+        # print(f"[WebSocket] Connection error: {e}")
+        pass
+    finally:
+        game_service.handle_disconnect(ws)
+
+
 # === Server Control ===
 def _shutdown_server():
     print("Yuuka: Nhận được lệnh tắt server. Tạm biệt senpai!")
@@ -304,7 +325,7 @@ def initialize_server():
     uptime_thread = threading.Thread(target=_uptime_tracking_thread, daemon=True)
     uptime_thread.start()
 
-    print("\n✅ Yuuka's Server V3.0 is ready!")
+    print("\n✅ Yuuka's Server V3.1 is ready!")
     print(f"   - Loaded {len(plugin_manager.get_active_plugins())} plugins.")
     print("   - Local access at: http://127.0.0.1:5000")
     print("   - To access from other devices on the same network, use this machine's IP address.")
@@ -313,4 +334,7 @@ def initialize_server():
 # === Run Server ===
 if __name__ == '__main__':
     initialize_server() # Yuuka: main.py compatibility v1.0
+    # Yuuka: Chú ý - app.run() sẽ không hoạt động tốt với WebSocket trong production.
+    # Senpai nên cân nhắc dùng một server WSGI như Gunicorn với gevent.
+    # Ví dụ: gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 app:app
     app.run(host='127.0.0.1', debug=False, port=5000)

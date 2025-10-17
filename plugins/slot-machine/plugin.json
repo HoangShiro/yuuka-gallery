@@ -11,9 +11,6 @@
     },
     "assets": {
         "js_modules": [
-            "js/constants.js",
-            "js/result.js",
-            "js/reel_manager.js",
             "js/ui_controller.js",
             "js/slot_machine.js"
         ],

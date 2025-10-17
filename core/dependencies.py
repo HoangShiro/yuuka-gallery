@@ -4,6 +4,7 @@ import os
 import json
 import sys
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import parse as parse_version
 
 def get_installed_packages():
@@ -24,7 +25,7 @@ def get_installed_packages():
         for line in result.stdout.strip().split('\n'):
             if '==' in line:
                 name, version = line.split('==', 1)
-                installed[name.lower()] = version
+                installed[canonicalize_name(name)] = version
         return installed
     except Exception as e:
         print(f"Yuuka: Không thể chạy 'pip freeze': {e}")
@@ -86,7 +87,7 @@ def check_dependencies():
     for req_str in required_deps_str:
         try:
             req = Requirement(req_str)
-            package_name = req.name.lower()
+            package_name = canonicalize_name(req.name)
 
             if package_name not in installed_packages:
                 missing_packages.append(req_str)
