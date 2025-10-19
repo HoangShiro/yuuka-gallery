@@ -2,8 +2,10 @@
 import uuid
 import time
 import threading
-import websocket # Yuuka: Thêm thư viện websocket
-import json      # Yuuka: Thêm thư viện json
+import hashlib
+import re
+import websocket
+import json
 
 from flask import Blueprint, jsonify, request, abort
 
@@ -82,6 +84,11 @@ class ScenePlugin:
                             for category, group_ids in stage['tags'].items():
                                 if isinstance(group_ids, list) and group_id in group_ids:
                                     stage['tags'][category] = [gid for gid in group_ids if gid != group_id]
+                        tag_weights = stage.get('tagWeights')
+                        if isinstance(tag_weights, dict) and group_id in tag_weights:
+                            tag_weights.pop(group_id, None)
+                            if not tag_weights:
+                                stage.pop('tagWeights', None)
                 self.core_api.data_manager.save_user_data(scenes, self.SCENE_DATA_FILENAME, user_hash)
                 return jsonify({"status": "success"})
 
@@ -169,6 +176,15 @@ class ScenePlugin:
                 all_choices['checkpoints'] = [{"name": c, "value": c} for c in all_choices.get('checkpoints', [])]
                 all_choices['samplers'] = [{"name": s, "value": s} for s in all_choices.get('samplers', [])]
                 all_choices['schedulers'] = [{"name": s, "value": s} for s in all_choices.get('schedulers', [])]
+                lora_names = all_choices.get('loras', [])
+                lora_options = [{"name": "None", "value": "None"}]
+                seen_loras = {"None"}
+                for name in lora_names:
+                    if not name or name in seen_loras:
+                        continue
+                    lora_options.append({"name": name, "value": name})
+                    seen_loras.add(name)
+                all_choices['loras'] = lora_options
                 return jsonify({"global_choices": all_choices, "last_config": {}})
             except Exception as e:
                 abort(500, description=f"Failed to get info from ComfyUI: {e}")
@@ -240,27 +256,75 @@ class ScenePlugin:
                     break # Hoàn thành công việc
                 
                 # 4. Xử lý và thực thi stage tìm được
-                scene_config, prompt_parts, char_name = scene.get('generationConfig', {}), {'outfits': [], 'expression': [], 'action': [], 'context': []}, None
+                scene_config = scene.get('generationConfig', {})
+                prompt_parts = {'character': [], 'outfits': [], 'expression': [], 'action': [], 'context': []}
+                char_name = None
+                raw_tag_weights = stage.get('tagWeights') or {}
+                stage_tag_weights = raw_tag_weights if isinstance(raw_tag_weights, dict) else {}
+
+                weight_suffix_pattern = re.compile(r':-?\d+(?:\.\d+)?$')
+
+                def apply_weight(tag_text, group_identifier):
+                    key = str(group_identifier)
+                    text = tag_text.strip()
+                    if weight_suffix_pattern.search(text):
+                        return text
+                    weight_value = stage_tag_weights.get(key)
+                    try:
+                        weight = float(weight_value)
+                    except (TypeError, ValueError):
+                        return text
+                    weight = max(0.1, min(2.0, round(weight * 10) / 10))
+                    if abs(weight - 1.0) < 1e-6:
+                        return text
+                    weight_str = f"{weight:.1f}".rstrip('0').rstrip('.')
+                    return f"{text}:{weight_str}"
+
                 for category, group_ids in stage.get('tags', {}).items():
                     if not group_ids: continue
                     if category.lower() == 'character':
-                        if group := all_groups_map.get(group_ids[-1]): char_name = group['tags'][0]
+                        if group := all_groups_map.get(group_ids[-1]):
+                            char_name = group.get('name') or (group.get('tags') or [None])[0]
+                            for tag in group.get('tags', []):
+                                cleaned_tag = tag.strip()
+                                if cleaned_tag:
+                                    prompt_parts['character'].append(apply_weight(cleaned_tag, group_ids[-1]))
                     else:
                         key = {'pose': 'action', 'outfits': 'outfits', 'view': 'expression'}.get(category.lower(), 'context')
                         for group_id in group_ids:
-                            if group := all_groups_map.get(group_id): prompt_parts[key].extend(group['tags'])
+                            if group := all_groups_map.get(group_id):
+                                for tag in group.get('tags', []):
+                                    cleaned_tag = tag.strip()
+                                    if cleaned_tag:
+                                        prompt_parts[key].append(apply_weight(cleaned_tag, group_id))
                 
                 if not char_name:
                     last_completed_stage_id = stage['id']
                     continue
                 
                 clean_name = str(char_name).replace(':', '').replace('  ', ' ').strip()
-                char_info = next((c for c in self.core_api.get_all_characters_list() if str(c['name']).replace(':', '').replace('  ', ' ').strip() == clean_name), None)
-                if not char_info:
+                if not clean_name:
                     last_completed_stage_id = stage['id']
                     continue
-                
-                char_hash, final_prompt = char_info['hash'], {k: ', '.join(v) for k, v in prompt_parts.items()}
+
+                char_info = next(
+                    (c for c in self.core_api.get_all_characters_list()
+                     if str(c['name']).replace(':', '').replace('  ', ' ').strip() == clean_name),
+                    None
+                )
+
+                if char_info:
+                    char_hash = char_info['hash']
+                    effective_character_name = char_name
+                else:
+                    generated_hash = hashlib.md5(clean_name.lower().encode('utf-8')).hexdigest()
+                    char_hash = f"custom-{generated_hash}"
+                    effective_character_name = clean_name
+                    print(f"[ScenePlugin] Using custom character '{clean_name}' for scene generation.")
+
+                character_prompt = ', '.join(prompt_parts['character']) if prompt_parts['character'] else effective_character_name
+                final_prompt = {k: ', '.join(v) for k, v in prompt_parts.items() if v}
+                final_prompt['character_prompt'] = character_prompt
                 quantity = scene_config.get('quantity_per_stage', 1)
 
                 stage_task_ids = []
@@ -268,7 +332,7 @@ class ScenePlugin:
                     with self.scene_run_lock:
                         if self.scene_run_state['cancel_requested']: raise InterruptedError("Scene run cancelled.")
                     
-                    gen_config = {**scene_config, **final_prompt, "character": char_name}
+                    gen_config = {**scene_config, **final_prompt, "character": effective_character_name}
                     context = {"source": "scene", "scene_id": scene['id'], "stage_id": stage['id']}
                     
                     task_id, _ = self.core_api.generation_service.start_generation_task(user_hash, char_hash, gen_config, context)

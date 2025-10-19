@@ -4,6 +4,69 @@
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: var(--spacing-4);
 }
+.album-character-card,
+.album-add-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.album-character-card .image-container,
+.album-add-card .image-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 150px;
+    background-color: var(--color-border);
+    border-radius: var(--rounded-md);
+    overflow: hidden;
+}
+
+.album-character-card .image-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.album-character-card .name,
+.album-add-card .name {
+    font-weight: var(--font-weight-medium);
+}
+.album-add-card:hover .image-container.no-cover span {
+    color: var(--color-accent);
+}
+
+
+.album-add-card .image-container.no-cover span,
+.album-character-card .image-container.no-cover span {
+    font-size: 42px;
+    color: var(--color-secondary-text);
+}
+
+.album-add-card .image-container.no-cover,
+.album-character-card .image-container.no-cover {
+    background-color: var(--color-border);
+}
+
+.plugin-album__settings-card {
+    aspect-ratio: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-3);
+}
+
+.plugin-album__settings-card .image-container {
+    width: 100%;
+    height: 100%;
+    border-radius: var(--rounded-md);
+}
+
+.plugin-album__settings-card .image-container.no-cover {
+    background-color: #453e3b00;
+}
+
+
 
 /* Yuuka: Sửa lại selector cho card trong album */
 .plugin-album__album-card {
@@ -228,6 +291,13 @@
 }
 
 .plugin-album__settings-modal .modal-actions .btn-save { background: var(--color-accent); color: white; }
+.plugin-album__settings-modal .modal-actions .btn-generate {
+    background: var(--color-accent);
+    color: white;
+}
+.plugin-album__settings-modal .modal-actions .btn-generate:hover {
+    filter: brightness(1.05);
+}
 .plugin-album__settings-modal .modal-actions .btn-cancel { 
     background: var(--color-border); 
     color: var(--color-primary-text); 

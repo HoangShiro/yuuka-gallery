@@ -13,7 +13,23 @@ class ResultProcessor:
         self.session_score_before_spin = max(session_score_before_spin or 0, 0)
 
         # Khởi tạo các list trong summary nếu chưa có
-        for key in ['multipliers', 'penalties', 'freeSpins', 'bonusPoints', 'swaps', 'clears', 'clearReassignments', 'reverseSpins']:
+        for key in [
+            'multipliers',
+            'penalties',
+            'freeSpins',
+            'bonusPoints',
+            'swaps',
+            'clears',
+            'clearReassignments',
+            'reverseSpins',
+            # Future feature placeholders
+            'blindEffects',
+            'rowSwaps',
+            'replacementCards',
+            'fakeCardOverlays',
+            'specialMutations',
+            'spinPowerModifiers',
+        ]:
             self.summary.setdefault(key, [])
         self.summary.setdefault('respins', 0)
 
@@ -71,7 +87,24 @@ class ResultProcessor:
             # Yuuka: Gửi lại thông tin swap chi tiết cho frontend để chạy animation
             "executedSwaps": self.summary.get('swaps', []),
             "jackpotCharacter": self.jackpot_character,
+            # Placeholder hooks for future mechanics (currently carry no behaviour)
+            "blindDirectives": self.summary.get('blindEffects', []),
+            "rowSwapIntents": self.summary.get('rowSwaps', []),
+            "replacementCharacters": self.summary.get('replacementCards', []),
+            "fakeCardOverlays": self.summary.get('fakeCardOverlays', []),
+            "specialMutationSummary": self.summary.get('specialMutations', []),
+            "spinPower": self._resolve_spin_power(),
         }
+
+    def _resolve_spin_power(self):
+        modifiers = self.summary.get('spinPowerModifiers', [])
+        if not modifiers:
+            return None
+        aggregate = {"mode": "default", "value": 0}
+        for entry in modifiers:
+            if isinstance(entry, dict):
+                aggregate.update(entry)
+        return aggregate
 
     def _apply_special_card_effects(self, current_score, base_win_score):
         events = []

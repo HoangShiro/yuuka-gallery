@@ -22,6 +22,14 @@ class SlotMachineService {
         this.gameConfig = {};
         this.specialCardConfigs = [];
         this.spinDirection = 1;
+        this.pendingVisualEffects = {
+            blindDirectives: [],
+            rowSwapIntents: [],
+            replacementCharacters: [],
+            fakeCardOverlays: [],
+            specialMutationSummary: [],
+            spinPower: null
+        };
 
         this.currentMode = 'menu'; // menu | single | pvp
         this.pendingMode = null;
@@ -568,6 +576,14 @@ class SlotMachineService {
         if (!data) return;
 
         this.state = data;
+        this.pendingVisualEffects = {
+            blindDirectives: [],
+            rowSwapIntents: [],
+            replacementCharacters: [],
+            fakeCardOverlays: [],
+            specialMutationSummary: [],
+            spinPower: null
+        };
         this.state.sessionSpecialMap = data.sessionSpecialMap || {};
         this.gameConfig = data.gameConfig || this.gameConfig;
         this.specialCardConfigs = data.specialCardConfigs || this.specialCardConfigs;
@@ -618,12 +634,29 @@ class SlotMachineService {
             reverseSpinCredits
         } = data;
 
+        const {
+            blindDirectives = [],
+            rowSwapIntents = [],
+            replacementCharacters = [],
+            fakeCardOverlays = [],
+            specialMutationSummary = [],
+            spinPower = null
+        } = outcome || {};
+
         const isDemo = !!demoMode;
         const isMySpin = !playerHash || playerHash === this.userHash;
         const hasPendingRespin = Boolean(pendingRespin);
         const hasPendingReverseSpin = Boolean(pendingReverseSpin) || (typeof reverseSpinCredits === 'number' && reverseSpinCredits > 0);
         const spinDirectionForResult = typeof resultSpinDirection === 'number' ? resultSpinDirection : this.spinDirection;
         const spinDirectionForNext = typeof nextSpinDirection === 'number' ? nextSpinDirection : spinDirectionForResult;
+        this.pendingVisualEffects = {
+            blindDirectives,
+            rowSwapIntents,
+            replacementCharacters,
+            fakeCardOverlays,
+            specialMutationSummary,
+            spinPower
+        };
 
         if (!isDemo && isMySpin && newState) {
             this.state.stats = newState;

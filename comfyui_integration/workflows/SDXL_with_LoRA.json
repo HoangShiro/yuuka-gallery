@@ -1,8 +1,8 @@
 {
   "3": {
     "inputs": {
-      "seed": 436252454073761,
-      "steps": 30,
+      "seed": 732626112275528,
+      "steps": 25,
       "cfg": 2.5,
       "sampler_name": "euler_ancestral",
       "scheduler": "karras",
@@ -51,7 +51,7 @@
   },
   "6": {
     "inputs": {
-      "text": "1girl, yuipcrbase, pink hair,\n\nopen mouth, blushing, smile, looking at viewer,\n\nyuipcrbase, pink hair, ykpcrdefclothes, hair ornament, yellow hairband, white shirt, juliet sleeves, long sleeves, red pleated skirt, thighhighs, white knee boots,\n\nmasterpiece, best quality,",
+      "text": "Star Resonance Style,\n\nopen mouth, blushing, smile, looking at viewer,\n\n(1girl, ((Airona)), green hair, top braid with highlights, hair ornaments, long braid, hair between eyes, sideburns, ahoge, purple hairties, multicolored eyes, green eyes, purple eyes),\n\nmasterpiece, best quality,",
       "clip": [
         "13",
         1
@@ -91,24 +91,11 @@
       "title": "VAE Decode"
     }
   },
-  "9": {
-    "inputs": {
-      "filename_prefix": "2loras_test_",
-      "images": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
-  },
   "13": {
     "inputs": {
-      "lora_name": "_yui_pcr-elesico-ponyr1.safetensors",
-      "strength_model": 1.0000000000000002,
-      "strength_clip": 1.0000000000000002,
+      "lora_name": "Airona_-_Blue_Protocol_Star_resonance_-_Illustrious.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
       "model": [
         "4",
         0
@@ -121,6 +108,18 @@
     "class_type": "LoraLoader",
     "_meta": {
       "title": "Load LoRA"
+    }
+  },
+  "15": {
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "ImageToBase64_Yuuka",
+    "_meta": {
+      "title": "Yuuka Image to Base64 (API)"
     }
   }
 }

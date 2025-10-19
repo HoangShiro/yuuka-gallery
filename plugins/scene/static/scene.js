@@ -124,7 +124,7 @@ class SceneComponent {
         
         // Yuuka: generate button consistency v1.0
         buttons.innerHTML = `
-            <button class="header-btn" data-action="generate" title="${isRunning ? 'Hủy & chạy lại từ đây' : 'Chạy từ đây'}"><span class="material-symbols-outlined">play_arrow</span></button>
+            <button class="header-btn" data-action="generate" title="${isRunning ? 'Cancel & chạy lại từ đây' : 'Chạy từ đây'}"><span class="material-symbols-outlined">play_arrow</span></button>
             <button class="header-btn" data-action="toggle-collapse" title="${item.isCollapsed ? 'Mở rộng' : 'Thu gọn'}"><span class="material-symbols-outlined">${item.isCollapsed ? 'unfold_more' : 'unfold_less'}</span></button>
             <button class="header-btn" data-action="toggle-bypass" title="${item.bypassed ? 'Kích hoạt' : 'Bỏ qua'}"><span class="material-symbols-outlined">${item.bypassed ? 'visibility' : 'visibility_off'}</span></button>
             ${type === 'scene' ? `<button class="header-btn" data-action="settings" title="Cấu hình"><span class="material-symbols-outlined">tune</span></button>` : ''}
@@ -280,7 +280,7 @@ class SceneComponent {
     select(el) { if(!el){this.state.selected={type:null,id:null,parentId:null};}else if(el.classList.contains('stage-block')){this.state.selected={type:'stage',id:el.dataset.stageId,parentId:el.dataset.sceneId};}else if(el.classList.contains('scene-row')){this.state.selected={type:'scene',id:el.dataset.sceneId,parentId:null};} this.render(); }
     
     addScene() { const lastScene = this.state.scenes.at(-1); const newScene = { id: `s_${Date.now()}`, stages: [], bypassed: false, isCollapsed: false, generationConfig: lastScene ? JSON.parse(JSON.stringify(lastScene.generationConfig || {})) : {} }; this.state.scenes.push(newScene); this.saveScenes(); this.render(); }
-    addStage(sceneId) { const scene = this.state.scenes.find(sc => sc.id === sceneId); if (!scene) return; const lastStage = scene.stages.at(-1); const newStage = { id: `st_${Date.now()}`, tags: lastStage ? JSON.parse(JSON.stringify(lastStage.tags || {})) : {}, bypassed: false, isCollapsed: false }; scene.stages.push(newStage); this.saveScenes(); this.render(); }
+    addStage(sceneId) { const scene = this.state.scenes.find(sc => sc.id === sceneId); if (!scene) return; const lastStage = scene.stages.at(-1); const newStage = { id: `st_${Date.now()}`, tags: lastStage ? JSON.parse(JSON.stringify(lastStage.tags || {})) : {}, bypassed: false, isCollapsed: false }; if (lastStage?.tagWeights) newStage.tagWeights = JSON.parse(JSON.stringify(lastStage.tagWeights)); scene.stages.push(newStage); this.saveScenes(); this.render(); }
     
     // Yuuka: generate button consistency v1.0
     async handleGenerateClick(type, id, parentId) {
@@ -395,7 +395,7 @@ class SceneComponent {
                     bar.innerHTML = `
                         <div class="plugin-scene__progress-text"></div>
                         <div class="plugin-scene__progress-bar-container"><div class="plugin-scene__progress-bar"></div></div>
-                        <button class="stage-cancel-btn"><span class="material-symbols-outlined">stop</span> Hủy</button>
+                        <button class="stage-cancel-btn"><span class="material-symbols-outlined">stop</span> Cancel</button>
                     `;
                     stageEl.appendChild(bar);
                 }
@@ -609,6 +609,14 @@ class SceneComponent {
                     const [movedId] = fromTags.splice(idx, 1);
                     if (!toStage.tags[category]) toStage.tags[category] = [];
                     toStage.tags[category].splice(targetIndex, 0, movedId);
+                    if (fromStage !== toStage) {
+                        const weightToTransfer = this._getStageTagWeight(fromStage, movedId);
+                        if (weightToTransfer !== 1) {
+                            this._setStageTagWeight(toStage, movedId, weightToTransfer);
+                        }
+                        this._setStageTagWeight(fromStage, movedId, 1);
+                    }
+                    this._sweepUnusedStageTagWeights(fromStage);
                 }
             }
         }
@@ -779,8 +787,345 @@ class SceneComponent {
     }
     
     _createModal(contentHtml, isPersistent = false) { const modal = this._createUIElement('div', { className: 'modal-backdrop plugin-scene__modal' }); modal.innerHTML = `<div class="modal-dialog">${contentHtml}</div>`; const close = () => modal.remove(); if (!isPersistent) modal.addEventListener('click', (e) => e.target === modal && close()); document.body.appendChild(modal); return { modal, dialog: modal.querySelector('.modal-dialog'), close }; }
-    async _openSceneSettingsModal(scene) { const defaults = { quantity_per_stage: 1, quality: '', negative: '', lora_name: '', steps: 25, cfg: 3.0, seed: 0, sampler_name: 'euler_ancestral', scheduler: 'karras', ckpt_name: '', server_address: '127.0.0.1:8888', width: 832, height: 1216 }; const config = { ...defaults, ...(scene.generationConfig || {}) }; const currentSize = `${config.width}x${config.height}`; const cNum=(k,l,v,min,max,step)=>`<div class="form-group"><label>${l}</label><input type="number" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}"></div>`; const cTxt=(k,l,v)=>`<div class="form-group"><label>${l}</label><textarea name="${k}" rows="2">${v}</textarea></div>`; const cSli=(k,l,v,min,max,step)=>`<div class="form-group form-group-slider"><label>${l}: <span id="val-${k}">${v}</span></label><input type="range" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}" oninput="this.previousElementSibling.textContent = this.value"></div>`; const cSel=(k,l,opts,v)=>`<div class="form-group"><label>${l}</label><select name="${k}">${opts.map(o=>`<option value="${o.value}" ${o.value==v?'selected':''}>${o.name}</option>`).join('')}</select></div>`; const cInp=(k,l,v)=>`<div class="form-group"><label>${l}</label><input type="text" name="${k}" value="${v}"></div>`; const cInpBtn=(k,l,v)=>`<div class="form-group"><label>${l}</label><div class="input-with-button"><input type="text" name="${k}" value="${v}"><button type="button" class="connect-btn">Connect</button></div></div>`; const modalHtml = `<h3>Cấu hình cho Scene</h3><div class="settings-form-container"><form id="scene-cfg-form">${cNum('quantity_per_stage', 'Số lượng ảnh mỗi Stage', config.quantity_per_stage, 1, 10, 1)}${cTxt('quality', 'Quality', config.quality)}${cTxt('negative', 'Negative', config.negative)}${cInp('lora_name', 'LoRA Name', config.lora_name)}${cSli('steps', 'Steps', config.steps, 10, 50, 1)}${cSli('cfg', 'CFG', config.cfg, 1.0, 7.0, 0.1)}${cNum('seed', 'Seed (0 = random)', config.seed, 0, Number.MAX_SAFE_INTEGER, 1)}${cSel('size', 'W x H', [{ name: 'Đang tải...', value: currentSize }], currentSize)}${cSel('sampler_name', 'Sampler', [{ name: 'Đang tải...', value: config.sampler_name }], config.sampler_name)}${cSel('scheduler', 'Scheduler', [{ name: 'Đang tải...', value: config.scheduler }], config.scheduler)}${cSel('ckpt_name', 'Checkpoint', [{ name: 'Đang tải...', value: config.ckpt_name }], config.ckpt_name)}${cInpBtn('server_address', 'Server Address', config.server_address)}</form></div><div class="modal-actions"><button id="btn-cancel" class="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button><button id="btn-save" class="btn-save" title="Lưu"><span class="material-symbols-outlined">save</span></button></div>`; const { dialog, close } = this._createModal(modalHtml, true); const form = dialog.querySelector('form'); const connectBtn = dialog.querySelector('.connect-btn'); const serverAddressInput = form.elements['server_address']; const loadAndPopulateOptions = async (address) => { try { const { global_choices } = await this.api.scene.get(`/comfyui/info?server_address=${encodeURIComponent(address)}`); const populate = (key, choices, currentValue) => { const select = form.elements[key]; select.innerHTML = choices.map(c => `<option value="${c.value}" ${c.value == currentValue ? 'selected' : ''}>${c.name}</option>`).join(''); }; populate('size', global_choices.sizes, form.elements['size'].value); populate('sampler_name', global_choices.samplers, form.elements['sampler_name'].value); populate('scheduler', global_choices.schedulers, form.elements['scheduler'].value); populate('ckpt_name', global_choices.checkpoints, form.elements['ckpt_name'].value); } catch (err) { showError(`Không thể tải dữ liệu từ ComfyUI: ${err.message}`); } }; connectBtn.addEventListener('click', async () => { const address = serverAddressInput.value.trim(); if (!address) { showError("Vui lòng nhập địa chỉ server."); return; } connectBtn.textContent = '...'; connectBtn.disabled = true; try { await this.api.server.checkComfyUIStatus(address); showError("Kết nối thành công!"); await loadAndPopulateOptions(address); } catch (e) { showError("Kết nối thất bại."); } finally { connectBtn.textContent = 'Connect'; connectBtn.disabled = false; } }); dialog.querySelector('#btn-cancel').onclick = close; dialog.querySelector('#btn-save').onclick = () => { const updates = {}; ['quality','negative','lora_name','server_address','sampler_name','scheduler','ckpt_name'].forEach(k => updates[k] = form.elements[k].value); ['steps','cfg'].forEach(k => updates[k] = parseFloat(form.elements[k].value)); ['quantity_per_stage','seed'].forEach(k => updates[k] = parseInt(form.elements[k].value, 10)); const [w,h] = form.elements['size'].value.split('x').map(Number); updates.width = w; updates.height = h; scene.generationConfig = updates; this.saveScenes(); showError("Lưu cấu hình Scene thành công."); close(); }; loadAndPopulateOptions(serverAddressInput.value.trim()); }
-    openTagSelector(category, sceneId, stageId) { const stage = this.state.scenes.find(s=>s.id===sceneId)?.stages.find(st=>st.id===stageId); if (!stage) return; const assignedIds = new Set(stage.tags[category] || []); const buttonsHTML = (this.state.tagGroups.grouped[category] || []).map(g => `<button class="tag-group-select-btn ${assignedIds.has(g.id) ? 'selected' : ''}" data-group-id="${g.id}">${g.name}</button>`).join(''); const modalHtml = `<h3>Chọn Group cho ${category}</h3><div class="tag-group-selector-grid">${buttonsHTML}</div><div class="modal-actions"><button id="btn-new" title="Tạo mới"><span class="material-symbols-outlined">add</span></button><div style="flex-grow:1"></div><button id="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button><button id="btn-done" title="Xong"><span class="material-symbols-outlined">check</span></button></div>`; const { dialog, close } = this._createModal(modalHtml); dialog.querySelector('.tag-group-selector-grid').addEventListener('click', e => e.target.matches('.tag-group-select-btn') && e.target.classList.toggle('selected')); dialog.querySelector('#btn-new').onclick = () => { close(); this.openTagEditor(null, category, { sceneId, stageId }); }; dialog.querySelector('#btn-cancel').onclick = close; dialog.querySelector('#btn-done').onclick = () => { const selectedIds = Array.from(dialog.querySelectorAll('.tag-group-select-btn.selected')).map(btn => btn.dataset.groupId); if (category === 'Character') { stage.tags[category] = selectedIds.slice(-1); } else { stage.tags[category] = selectedIds; } this.saveScenes(); this.render(); close(); }; }
-    async openTagEditor(groupId, category, context) { const isEditing = !!groupId; const group = isEditing ? this.state.tagGroups.flat[groupId] : null; let actions = ''; if (isEditing) { actions += `<button id="btn-remove-from-stage" class="btn-secondary" title="Gỡ khỏi Stage"><span class="material-symbols-outlined">remove</span></button>`; actions += `<button id="btn-delete" class="btn-danger" title="Xoá vĩnh viễn"><span class="material-symbols-outlined">delete_forever</span></button>`; } actions += `<div style="flex-grow:1"></div><button id="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button><button id="btn-save" title="${isEditing ? 'Cập nhật' : 'Lưu'}"><span class="material-symbols-outlined">check</span></button>`; const modalHtml = `<h3>${isEditing ? 'Sửa' : 'Tạo mới'} Group: ${category}</h3><div class="form-group"><label>Tên Group</label><input type="text" id="group-name" value="${isEditing ? group.name : ''}"></div><div class="form-group"><label>Tags (cách nhau bởi dấu phẩy)</label><textarea id="group-tags" rows="3">${isEditing ? group.tags.join(', ') : ''}</textarea></div><div class="modal-actions">${actions}</div>`; const { dialog, close } = this._createModal(modalHtml, true); const tagsTextarea = dialog.querySelector('#group-tags'); if (tagsTextarea) { Yuuka.ui._initTagAutocomplete(tagsTextarea.parentElement, this.state.tagPredictions); } dialog.querySelector('#btn-cancel').onclick = close; if (isEditing) { dialog.querySelector('#btn-remove-from-stage').onclick = () => { const stageBlock = context.closest('.stage-block'); if (!stageBlock) return; const sceneId = stageBlock.dataset.sceneId; const stageId = stageBlock.dataset.stageId; const stage = this.state.scenes.find(s => s.id === sceneId)?.stages.find(st => st.id === stageId); if (stage?.tags[category]) { stage.tags[category] = stage.tags[category].filter(id => id !== groupId); this.saveScenes(); this.render(); close(); } }; dialog.querySelector('#btn-delete').onclick = async () => { if (!await Yuuka.ui.confirm(`Bạn có chắc muốn XOÁ VĨNH VIỄN group '${group.name}'?`)) return; try { await this.api.scene.delete(`/tag_groups/${groupId}`); delete this.state.tagGroups.flat[groupId]; if(this.state.tagGroups.grouped[category]) this.state.tagGroups.grouped[category] = this.state.tagGroups.grouped[category].filter(g => g.id !== groupId); this.state.scenes.forEach(s => s.stages.forEach(st => { if (st.tags?.[category]) st.tags[category] = st.tags[category].filter(id => id !== groupId); })); this.saveScenes(); this.render(); close(); } catch (e) { showError(`Lỗi khi xóa: ${e.message}`); } }; } dialog.querySelector('#btn-save').onclick = async () => { const name = dialog.querySelector('#group-name').value.trim(); const tagsRaw = dialog.querySelector('#group-tags').value; const cleanedTags = tagsRaw.replace(/^[\s,]+|[\s,]+$/g, '').trim(); const tags = cleanedTags ? cleanedTags.split(',').map(t => t.trim()).filter(Boolean) : []; if (!name || tags.length === 0) { showError("Vui lòng điền đủ thông tin."); return; } try { if (isEditing) { const updatedGroup = await this.api.scene.put(`/tag_groups/${groupId}`, { name, tags }); this.state.tagGroups.flat[groupId] = updatedGroup; const groupList = this.state.tagGroups.grouped[category] || []; const idx = groupList.findIndex(g => g.id === groupId); if (idx > -1) groupList[idx] = updatedGroup; } else { const newGroup = await this.api.scene.post('/tag_groups', { name, category, tags }); this.state.tagGroups.flat[newGroup.id] = newGroup; if (!this.state.tagGroups.grouped[category]) this.state.tagGroups.grouped[category] = []; this.state.tagGroups.grouped[category].push(newGroup); const stage = this.state.scenes.find(s=>s.id===context.sceneId)?.stages.find(st=>st.id===context.stageId); if (stage) { if (!stage.tags[category]) stage.tags[category] = []; if (category === 'Character') stage.tags[category] = [newGroup.id]; else stage.tags[category].push(newGroup.id); } } this.saveScenes(); this.render(); close(); } catch (e) { showError(`Lỗi: ${e.message}`); } }; }
+    async _openSceneSettingsModal(scene) {
+        const defaults = {
+            quantity_per_stage: 1,
+            quality: '',
+            negative: '',
+            lora_name: 'None',
+            steps: 25,
+            cfg: 3.0,
+            seed: 0,
+            sampler_name: 'euler_ancestral',
+            scheduler: 'karras',
+            ckpt_name: 'waiNSFWIllustrious_v150.safetensors',
+            server_address: '127.0.0.1:8888',
+            width: 832,
+            height: 1216
+        };
+        const config = { ...defaults, ...(scene.generationConfig || {}) };
+        if (!config.ckpt_name) config.ckpt_name = defaults.ckpt_name;
+        if (!config.server_address) config.server_address = defaults.server_address;
+        if (!config.lora_name) config.lora_name = defaults.lora_name;
+        const currentSize = `${config.width}x${config.height}`;
+        const currentLora = config.lora_name || 'None';
+
+        const cNum = (k, l, v, min, max, step) => `<div class="form-group"><label>${l}</label><input type="number" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}"></div>`;
+        const cTxt = (k, l, v) => `<div class="form-group"><label>${l}</label><textarea name="${k}" rows="2">${v}</textarea></div>`;
+        const cSli = (k, l, v, min, max, step) => `<div class="form-group form-group-slider"><label>${l}: <span id="val-${k}">${v}</span></label><input type="range" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}" oninput="this.previousElementSibling.textContent = this.value"></div>`;
+        const cSel = (k, l, opts, v) => `<div class="form-group"><label>${l}</label><select name="${k}">${opts.map(o => `<option value="${o.value}" ${o.value == v ? 'selected' : ''}>${o.name}</option>`).join('')}</select></div>`;
+        const cInpBtn = (k, l, v) => `<div class="form-group"><label>${l}</label><div class="input-with-button"><input type="text" name="${k}" value="${v}"><button type="button" class="connect-btn">Connect</button></div></div>`;
+
+        const modalHtml = `<h3>Configure Scene</h3><div class="settings-form-container"><form id="scene-cfg-form">${cNum('quantity_per_stage', 'Images per Stage', config.quantity_per_stage, 1, 10, 1)}${cTxt('quality', 'Quality', config.quality)}${cTxt('negative', 'Negative', config.negative)}${cSel('lora_name', 'LoRA Name', [{ name: 'Loading...', value: currentLora }], currentLora)}${cSli('steps', 'Steps', config.steps, 10, 50, 1)}${cSli('cfg', 'CFG', config.cfg, 1.0, 7.0, 0.1)}${cNum('seed', 'Seed (0 = random)', config.seed, 0, Number.MAX_SAFE_INTEGER, 1)}${cSel('size', 'W x H', [{ name: 'Loading...', value: currentSize }], currentSize)}${cSel('sampler_name', 'Sampler', [{ name: 'Loading...', value: config.sampler_name }], config.sampler_name)}${cSel('scheduler', 'Scheduler', [{ name: 'Loading...', value: config.scheduler }], config.scheduler)}${cSel('ckpt_name', 'Checkpoint', [{ name: 'Loading...', value: config.ckpt_name }], config.ckpt_name)}${cInpBtn('server_address', 'Server Address', config.server_address)}</form></div><div class="modal-actions"><button id="btn-cancel" class="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button><button id="btn-save" class="btn-save" title="Save"><span class="material-symbols-outlined">save</span></button></div>`;
+
+        const { dialog, close } = this._createModal(modalHtml, true);
+        const form = dialog.querySelector('form');
+        dialog.querySelectorAll('textarea').forEach(textarea => {
+            const autoGrow = () => {
+                textarea.style.height = 'auto';
+                textarea.style.height = `${textarea.scrollHeight}px`;
+            };
+            textarea.addEventListener('input', autoGrow);
+            setTimeout(autoGrow, 0);
+        });
+        const connectBtn = dialog.querySelector('.connect-btn');
+        const serverAddressInput = form.elements['server_address'];
+
+        const loadAndPopulateOptions = async (address) => {
+            try {
+                const { global_choices } = await this.api.scene.get(`/comfyui/info?server_address=${encodeURIComponent(address)}`);
+                const populate = (key, choices, currentValue) => {
+                    const select = form.elements[key];
+                    select.innerHTML = choices.map(c => `<option value="${c.value}" ${c.value == currentValue ? 'selected' : ''}>${c.name}</option>`).join('');
+                };
+                populate('lora_name', global_choices.loras || [{ name: 'None', value: 'None' }], form.elements['lora_name'].value);
+                populate('size', global_choices.sizes, form.elements['size'].value);
+                populate('sampler_name', global_choices.samplers, form.elements['sampler_name'].value);
+                populate('scheduler', global_choices.schedulers, form.elements['scheduler'].value);
+                populate('ckpt_name', global_choices.checkpoints, form.elements['ckpt_name'].value);
+            } catch (err) {
+                showError(`Cannot load data from ComfyUI: ${err.message}`);
+            }
+        };
+
+        connectBtn.addEventListener('click', async () => {
+            const address = serverAddressInput.value.trim();
+            if (!address) {
+                showError('Please enter a server address.');
+                return;
+            }
+            connectBtn.textContent = '...';
+            connectBtn.disabled = true;
+            try {
+                await this.api.server.checkComfyUIStatus(address);
+                showError('Connection successful!');
+                await loadAndPopulateOptions(address);
+            } catch (e) {
+                showError('Connection failed.');
+            } finally {
+                connectBtn.textContent = 'Connect';
+                connectBtn.disabled = false;
+            }
+        });
+
+        dialog.querySelector('#btn-cancel').onclick = close;
+        dialog.querySelector('#btn-save').onclick = () => {
+            const updates = {};
+            ['quality', 'negative', 'lora_name', 'server_address', 'sampler_name', 'scheduler', 'ckpt_name'].forEach(k => updates[k] = form.elements[k].value);
+            ['steps', 'cfg'].forEach(k => updates[k] = parseFloat(form.elements[k].value));
+            ['quantity_per_stage', 'seed'].forEach(k => updates[k] = parseInt(form.elements[k].value, 10));
+            const [w, h] = form.elements['size'].value.split('x').map(Number);
+            updates.width = w;
+            updates.height = h;
+            scene.generationConfig = updates;
+            this.saveScenes();
+            showError('Scene settings saved.');
+            close();
+        };
+
+        loadAndPopulateOptions(serverAddressInput.value.trim());
+    }
+
+
+
+    openTagSelector(category, sceneId, stageId) {
+        const scene = this.state.scenes.find(s => s.id === sceneId);
+        const stage = scene?.stages.find(st => st.id === stageId);
+        if (!stage) return;
+
+        const assignedIds = new Set(stage.tags[category] || []);
+        const buttonsHTML = (this.state.tagGroups.grouped[category] || [])
+            .map(g => `<button class="tag-group-select-btn ${assignedIds.has(g.id) ? 'selected' : ''}" data-group-id="${g.id}">${g.name}</button>`)
+            .join('');
+
+        const modalHtml = `<h3>Chọn Group cho ${category}</h3><div class="tag-group-selector-grid">${buttonsHTML}</div><div class="modal-actions"><button id="btn-new" title="Tạo mới"><span class="material-symbols-outlined">add</span></button><div style="flex-grow:1"></div><button id="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button><button id="btn-done" title="Xong"><span class="material-symbols-outlined">check</span></button></div>`;
+        const { dialog, close } = this._createModal(modalHtml);
+
+        dialog.querySelector('.tag-group-selector-grid').addEventListener('click', e => {
+            if (e.target.matches('.tag-group-select-btn')) {
+                e.target.classList.toggle('selected');
+            }
+        });
+
+        dialog.querySelector('#btn-new').onclick = () => {
+            close();
+            this.openTagEditor(null, category, { sceneId, stageId });
+        };
+        dialog.querySelector('#btn-cancel').onclick = close;
+        dialog.querySelector('#btn-done').onclick = () => {
+            const selectedIds = Array.from(dialog.querySelectorAll('.tag-group-select-btn.selected')).map(btn => btn.dataset.groupId);
+            if (category === 'Character') {
+                stage.tags[category] = selectedIds.slice(-1);
+            } else {
+                stage.tags[category] = selectedIds;
+            }
+            this._sweepUnusedStageTagWeights(stage);
+            this.saveScenes();
+            this.render();
+            close();
+        };
+    }
+
+
+
+
+    async openTagEditor(groupId, category, context) {
+        const isEditing = !!groupId;
+        const group = isEditing ? this.state.tagGroups.flat[groupId] : null;
+        const stageContext = this._resolveStageContext(context);
+        const currentWeight = stageContext && isEditing ? this._getStageTagWeight(stageContext.stage, groupId) : 1;
+        const sliderHtml = stageContext
+            ? `<div class="form-group"><label>Tags Weight: <span id="tags-weight-display">${this._formatWeightLabel(currentWeight)}</span></label><input type="range" id="tags-weight" min="0.1" max="2" step="0.1" value="${currentWeight}"></div>`
+            : '';
+
+        let actions = '';
+        if (isEditing) {
+            actions += `<button id="btn-remove-from-stage" class="btn-secondary" title="Gỡ khỏi Stage"><span class="material-symbols-outlined">remove</span></button>`;
+            actions += `<button id="btn-delete" class="btn-danger" title="Xoá vĩnh viễn"><span class="material-symbols-outlined">delete_forever</span></button>`;
+        }
+        actions += `<div style="flex-grow:1"></div><button id="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button><button id="btn-save" title="${isEditing ? 'Cập nhật' : 'Save'}"><span class="material-symbols-outlined">check</span></button>`;
+
+        const modalHtml = `<h3>${isEditing ? 'Sửa' : 'Tạo mới'} Group: ${category}</h3><div class="form-group"><label>Tên Group</label><input type="text" id="group-name" value="${isEditing ? group.name : ''}"></div><div class="form-group"><label>Tags (cách nhau bởi dấu phẩy)</label><textarea id="group-tags" rows="3">${isEditing ? group.tags.join(', ') : ''}</textarea></div>${sliderHtml}<div class="modal-actions">${actions}</div>`;
+        const { dialog, close } = this._createModal(modalHtml, true);
+
+        const tagsTextarea = dialog.querySelector('#group-tags');
+        if (tagsTextarea) {
+            Yuuka.ui._initTagAutocomplete(tagsTextarea.parentElement, this.state.tagPredictions);
+            const autoGrowTags = () => {
+                tagsTextarea.style.height = 'auto';
+                tagsTextarea.style.height = `${tagsTextarea.scrollHeight}px`;
+            };
+            tagsTextarea.addEventListener('input', autoGrowTags);
+            setTimeout(autoGrowTags, 0);
+        }
+
+        const weightInput = dialog.querySelector('#tags-weight');
+        const weightDisplay = dialog.querySelector('#tags-weight-display');
+        if (weightInput && weightDisplay) {
+            weightInput.addEventListener('input', () => {
+                weightDisplay.textContent = this._formatWeightLabel(weightInput.value);
+            });
+        }
+
+        dialog.querySelector('#btn-cancel').onclick = close;
+
+        if (isEditing && stageContext?.stage) {
+            const removeBtn = dialog.querySelector('#btn-remove-from-stage');
+            if (removeBtn) {
+                removeBtn.onclick = () => {
+                    const stage = stageContext.stage;
+                    if (stage?.tags[category]) {
+                        stage.tags[category] = stage.tags[category].filter(id => id !== groupId);
+                        this._sweepUnusedStageTagWeights(stage);
+                        this.saveScenes();
+                        this.render();
+                        close();
+                    }
+                };
+            }
+        }
+
+        if (isEditing) {
+            const deleteBtn = dialog.querySelector('#btn-delete');
+            if (deleteBtn) {
+                deleteBtn.onclick = async () => {
+                    if (!await Yuuka.ui.confirm(`Bạn có chắc muốn XOÁ VĨNH VIỄN group '${group.name}'?`)) return;
+                    try {
+                        await this.api.scene.delete(`/tag_groups/${groupId}`);
+                        delete this.state.tagGroups.flat[groupId];
+                        if (this.state.tagGroups.grouped[category]) {
+                            this.state.tagGroups.grouped[category] = this.state.tagGroups.grouped[category].filter(g => g.id !== groupId);
+                        }
+                        this.state.scenes.forEach(s => s.stages.forEach(st => {
+                            if (st.tags) {
+                                Object.keys(st.tags).forEach(cat => {
+                                    if (Array.isArray(st.tags[cat])) {
+                                        st.tags[cat] = st.tags[cat].filter(id => id !== groupId);
+                                    }
+                                });
+                            }
+                            this._sweepUnusedStageTagWeights(st);
+                        }));
+                        this.saveScenes();
+                        this.render();
+                        close();
+                    } catch (e) {
+                        showError(`Lỗi khi xóa: ${e.message}`);
+                    }
+                };
+            }
+        }
+
+        dialog.querySelector('#btn-save').onclick = async () => {
+            const name = dialog.querySelector('#group-name').value.trim();
+            const tagsRaw = dialog.querySelector('#group-tags').value;
+            const cleanedTags = tagsRaw.replace(/^[\s,]+|[\s,]+$/g, '').trim();
+            const tags = cleanedTags ? cleanedTags.split(',').map(t => t.trim()).filter(Boolean) : [];
+            if (!name || tags.length === 0) {
+                showError('Vui lòng điền đủ thông tin.');
+                return;
+            }
+
+            const desiredWeight = stageContext && weightInput ? this._clampWeight(weightInput.value) : 1;
+
+            try {
+                if (isEditing) {
+                    const updatedGroup = await this.api.scene.put(`/tag_groups/${groupId}`, { name, tags });
+                    this.state.tagGroups.flat[groupId] = updatedGroup;
+                    const groupList = this.state.tagGroups.grouped[category] || [];
+                    const idx = groupList.findIndex(g => g.id === groupId);
+                    if (idx > -1) groupList[idx] = updatedGroup;
+                    if (stageContext?.stage) {
+                        this._setStageTagWeight(stageContext.stage, groupId, desiredWeight);
+                        this._sweepUnusedStageTagWeights(stageContext.stage);
+                    }
+                } else {
+                    const newGroup = await this.api.scene.post('/tag_groups', { name, category, tags });
+                    this.state.tagGroups.flat[newGroup.id] = newGroup;
+                    if (!this.state.tagGroups.grouped[category]) this.state.tagGroups.grouped[category] = [];
+                    this.state.tagGroups.grouped[category].push(newGroup);
+                    if (stageContext?.stage) {
+                        const stage = stageContext.stage;
+                        if (!stage.tags[category]) stage.tags[category] = [];
+                        if (category === 'Character') stage.tags[category] = [newGroup.id];
+                        else stage.tags[category].push(newGroup.id);
+                        this._setStageTagWeight(stage, newGroup.id, desiredWeight);
+                        this._sweepUnusedStageTagWeights(stage);
+                    }
+                }
+                this.saveScenes();
+                this.render();
+                close();
+            } catch (e) {
+                showError(`Lỗi: ${e.message}`);
+            }
+        };
+    }
+
+
+
+    _resolveStageContext(context) {
+        if (!context) return null;
+        if (context.sceneId && context.stageId) {
+            const scene = this.state.scenes.find(s => s.id === context.sceneId);
+            const stage = scene?.stages.find(st => st.id === context.stageId);
+            return stage ? { sceneId: context.sceneId, stageId: context.stageId, stage } : null;
+        }
+        if (typeof context?.closest === 'function') {
+            const stageBlock = context.closest('.stage-block');
+            if (!stageBlock) return null;
+            const sceneId = stageBlock.dataset.sceneId;
+            const stageId = stageBlock.dataset.stageId;
+            const scene = this.state.scenes.find(s => s.id === sceneId);
+            const stage = scene?.stages.find(st => st.id === stageId);
+            return stage ? { sceneId, stageId, stage } : null;
+        }
+        return null;
+    }
+
+    _clampWeight(value) {
+        const num = Number(value);
+        if (Number.isNaN(num)) return 1;
+        const clamped = Math.min(2, Math.max(0.1, num));
+        return Math.round(clamped * 10) / 10;
+    }
+
+    _formatWeightLabel(value) {
+        return this._clampWeight(value).toFixed(1);
+    }
+
+    _getStageTagWeight(stage, groupId) {
+        if (!stage?.tagWeights) return 1;
+        const weight = stage.tagWeights[groupId];
+        return typeof weight === 'number' ? this._clampWeight(weight) : 1;
+    }
+
+    _setStageTagWeight(stage, groupId, value) {
+        if (!stage || !groupId) return;
+        const weight = this._clampWeight(value);
+        if (Math.abs(weight - 1) < 1e-6) {
+            if (stage.tagWeights && Object.prototype.hasOwnProperty.call(stage.tagWeights, groupId)) {
+                delete stage.tagWeights[groupId];
+                if (Object.keys(stage.tagWeights).length === 0) delete stage.tagWeights;
+            }
+            return;
+        }
+        if (!stage.tagWeights) stage.tagWeights = {};
+        stage.tagWeights[groupId] = weight;
+    }
+
+    _sweepUnusedStageTagWeights(stage) {
+        if (!stage?.tagWeights) return;
+        const activeIds = new Set();
+        Object.values(stage.tags || {}).forEach(ids => {
+            if (Array.isArray(ids)) ids.forEach(id => activeIds.add(id));
+        });
+        Object.keys(stage.tagWeights).forEach(id => {
+            if (!activeIds.has(id)) delete stage.tagWeights[id];
+        });
+        if (Object.keys(stage.tagWeights).length === 0) delete stage.tagWeights;
+    }
+
+
 }
 window.Yuuka.components['SceneComponent'] = SceneComponent;

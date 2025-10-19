@@ -236,6 +236,7 @@ html.dark-mode .plugin-scene__modal .tag-group-select-btn.selected { background-
 .plugin-scene__modal .form-group { margin-bottom: 15px; }
 .plugin-scene__modal .form-group label { display: block; font-weight: 500; margin-bottom: 5px; }
 .plugin-scene__modal .form-group input[type="text"], .plugin-scene__modal .form-group input[type="number"], .plugin-scene__modal .form-group select, .plugin-scene__modal .form-group textarea { width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box; font-family: inherit; font-size: 1em; background-color: var(--color-primary-bg); color: var(--color-primary-text); }
+.plugin-scene__modal .form-group textarea { min-height: 96px; resize: vertical; }
 .plugin-scene__modal .form-group-slider { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; }
 .plugin-scene__modal .form-group-slider label { flex-basis: 100%; }
 .plugin-scene__modal .input-with-button { display: flex; gap: 8px; }

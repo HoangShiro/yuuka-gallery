@@ -77,8 +77,8 @@ def main():
         initialize_server() # Yuuka: main.py compatibility v1.0
         
         # Khởi chạy server Flask
-        app.run(host='127.0.0.1', debug=False, port=5000, request_handler=No200RequestHandler)
-        #app.run(host='0.0.0.0', debug=False, port=5000, request_handler=No200RequestHandler)
+        #app.run(host='127.0.0.1', debug=False, port=5000, request_handler=No200RequestHandler)
+        app.run(host='0.0.0.0', debug=False, port=5000, request_handler=No200RequestHandler)
 
     except ImportError as e:
         print(f"LỖI NGHIÊM TRỌNG: Không thể import ứng dụng Flask. Lỗi: {e}")

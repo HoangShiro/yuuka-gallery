@@ -84,9 +84,22 @@ class ReelManager:
         """
         assignments = {}
         summary = {
-            "multipliers": [], "penalties": [], "freeSpins": [], "respins": 0,
-            "bonusPoints": [], "swaps": [], "clears": [], "clearReassignments": [],
-            "reverseSpins": []
+            "multipliers": [],
+            "penalties": [],
+            "freeSpins": [],
+            "respins": 0,
+            "bonusPoints": [],
+            "swaps": [],
+            "clears": [],
+            "clearReassignments": [],
+            "reverseSpins": [],
+            # Placeholders for future mechanics
+            "blindEffects": [],
+            "rowSwaps": [],
+            "replacementCards": [],
+            "fakeCardOverlays": [],
+            "specialMutations": [],
+            "spinPowerModifiers": [],
         }
 
         for i in range(self.reel_count):

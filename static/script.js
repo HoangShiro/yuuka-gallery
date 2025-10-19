@@ -147,10 +147,14 @@ window.Yuuka = {
                 const cse = (k,l,v,o)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><select id="cfg-${k}" name="${k}">${o.map(opt=>`<option value="${opt.value}" ${opt.value==v?'selected':''}>${opt.name}</option>`).join('')}</select></div>`;
                 const cti = (k,l,v)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><input type="text" id="cfg-${k}" name="${k}" value="${v||''}"></div>`;
                 const ciwb = (k,l,v)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><div class="input-with-button"><input type="text" id="cfg-${k}" name="${k}" value="${v||''}"><button type="button" class="connect-btn">Connect</button></div></div>`;
+                const loraOptions = (global_choices && Array.isArray(global_choices.loras) && global_choices.loras.length > 0) ? global_choices.loras : [{ name: 'None', value: 'None' }];
+                const selectedLora = last_config.lora_name || 'None';
                 
-                dialog.innerHTML = `<h3>${options.title}</h3><div class="settings-form-container"><form id="core-settings-form">${ct('character','Character',last_config.character)}${ct('outfits','Outfits',last_config.outfits)}${ct('expression','Expression',last_config.expression)}${ct('action','Action',last_config.action)}${ct('context','Context',last_config.context)}${ct('quality','Quality',last_config.quality)}${ct('negative','Negative',last_config.negative)}${cti('lora_name','LoRA Name',last_config.lora_name)}${cs('steps','Steps',last_config.steps,10,50,1)}${cs('cfg','CFG',last_config.cfg,1.0,7.0,0.1)}${cse('size','W x H',`${last_config.width}x${last_config.height}`,global_choices.sizes)}${cse('sampler_name','Sampler',last_config.sampler_name,global_choices.samplers)}${cse('scheduler','Scheduler',last_config.scheduler,global_choices.schedulers)}${cse('ckpt_name','Checkpoint',last_config.ckpt_name,global_choices.checkpoints)}${ciwb('server_address','Server Address',last_config.server_address)}</form></div><div class="modal-actions"><button type="button" class="btn-paste" title="Dán"><span class="material-symbols-outlined">content_paste</span></button><button type="button" class="btn-copy" title="Copy"><span class="material-symbols-outlined">content_copy</span></button><button type="button" class="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button><button type="submit" class="btn-save" title="Lưu" form="core-settings-form"><span class="material-symbols-outlined">save</span></button></div>`;
+                dialog.innerHTML = `<h3>${options.title}</h3><div class="settings-form-container"><form id="core-settings-form">${ct('character','Character',last_config.character)}${ct('outfits','Outfits',last_config.outfits)}${ct('expression','Expression',last_config.expression)}${ct('action','Action',last_config.action)}${ct('context','Context',last_config.context)}${ct('quality','Quality',last_config.quality)}${ct('negative','Negative',last_config.negative)}${cse('lora_name','LoRA Name',selectedLora,loraOptions)}${cs('steps','Steps',last_config.steps,10,50,1)}${cs('cfg','CFG',last_config.cfg,1.0,7.0,0.1)}${cse('size','W x H',`${last_config.width}x${last_config.height}`,global_choices.sizes)}${cse('sampler_name','Sampler',last_config.sampler_name,global_choices.samplers)}${cse('scheduler','Scheduler',last_config.scheduler,global_choices.schedulers)}${cse('ckpt_name','Checkpoint',last_config.ckpt_name,global_choices.checkpoints)}${ciwb('server_address','Server Address',last_config.server_address)}</form></div><div class="modal-actions"><button type="button" class="btn-paste" title="Dán"><span class="material-symbols-outlined">content_paste</span></button><button type="button" class="btn-copy" title="Copy"><span class="material-symbols-outlined">content_copy</span></button><button type="button" class="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button><button type="submit" class="btn-save" title="Lưu" form="core-settings-form"><span class="material-symbols-outlined">save</span></button><button type="button" class="btn-generate" title="Generate" style="display:none"><span class="material-symbols-outlined">auto_awesome</span></button></div>`;
 
                 const form = dialog.querySelector('form');
+                const saveBtn = dialog.querySelector('.btn-save');
+                const generateBtn = dialog.querySelector('.btn-generate');
                 
                 // --- Logic autocomplete, copy, paste, etc. (đã được tối ưu hóa)
                 this._initTagAutocomplete(dialog, tagPredictions);
@@ -158,7 +162,48 @@ window.Yuuka = {
                 dialog.querySelector('.btn-cancel').addEventListener('click', close);
                 dialog.querySelector('.btn-copy').addEventListener('click',()=>{const p=['outfits','expression','action','context','quality','negative'];options.promptClipboard=new Map(p.map(k=>[k,form.elements[k]?form.elements[k].value.trim():'']));showError("Prompt đã sao chép.");});
                 dialog.querySelector('.btn-paste').addEventListener('click',()=>{if(!options.promptClipboard){showError("Chưa có prompt.");return;}options.promptClipboard.forEach((v,k)=>{if(form.elements[k])form.elements[k].value=v;});dialog.querySelectorAll('textarea').forEach(t=>t.dispatchEvent(new Event('input',{bubbles:true})));showError("Đã dán prompt.");});
-                
+
+                const collectFormValues = () => {
+                    const payload = {};
+                    ['character','outfits','expression','action','context','quality','negative','lora_name','server_address','sampler_name','scheduler','ckpt_name'].forEach(k=>payload[k]=form.elements[k].value);
+                    ['steps','cfg'].forEach(k=>payload[k]=parseFloat(form.elements[k].value));
+                    const [w,h] = form.elements['size'].value.split('x').map(Number);
+                    payload.width = w;
+                    payload.height = h;
+                    return payload;
+                };
+
+                const setActionButtonsDisabled = (disabled) => {
+                    if (saveBtn) saveBtn.disabled = disabled;
+                    if (generateBtn) generateBtn.disabled = disabled;
+                };
+
+                const handleSave = async (shouldGenerate = false) => {
+                    const payload = collectFormValues();
+                    setActionButtonsDisabled(true);
+                    try {
+                        try {
+                            await options.onSave(payload);
+                        } catch (err) {
+                            showError(`Lỗi khi lưu: ${err.message}`);
+                            return;
+                        }
+                        if (shouldGenerate && typeof options.onGenerate === 'function') {
+                            try {
+                                await options.onGenerate(payload);
+                            } catch (err) {
+                                showError(`Lỗi khi tạo: ${err.message}`);
+                                return;
+                            }
+                        }
+                        const successMessage = shouldGenerate && typeof options.onGenerate === 'function' ? 'Đã lưu và bắt đầu tạo ảnh.' : 'Lưu cấu hình thành công!';
+                        showError(successMessage);
+                        close();
+                    } finally {
+                        setActionButtonsDisabled(false);
+                    }
+                };
+
                 // Yuuka: comfyui fetch optimization v1.0 - Nâng cấp logic nút Connect
                 const connectBtn = dialog.querySelector('.connect-btn');
                 connectBtn.addEventListener('click', async (e) => {
@@ -186,17 +231,17 @@ window.Yuuka = {
                 
                 form.addEventListener('submit', async(e) => {
                     e.preventDefault();
-                    const u = {};
-                    ['character','outfits','expression','action','context','quality','negative','lora_name','server_address','sampler_name','scheduler','ckpt_name'].forEach(k=>u[k]=form.elements[k].value);
-                    ['steps','cfg'].forEach(k=>u[k]=parseFloat(form.elements[k].value));
-                    const [w,h] = form.elements['size'].value.split('x').map(Number);
-                    u.width=w; u.height=h;
-                    try {
-                        await options.onSave(u);
-                        showError('Lưu cấu hình thành công!');
-                        close();
-                    } catch(err) { showError(`Lỗi khi lưu: ${err.message}`); }
+                    await handleSave(false);
                 });
+
+                if (generateBtn) {
+                    if (typeof options.onGenerate === 'function') {
+                        generateBtn.style.display = '';
+                        generateBtn.addEventListener('click', () => { handleSave(true); });
+                    } else {
+                        generateBtn.style.display = 'none';
+                    }
+                }
 
             } catch (e) {
                  // Yuuka: ComfyUI connection error handling v1.0

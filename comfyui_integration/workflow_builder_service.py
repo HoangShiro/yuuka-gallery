@@ -49,7 +49,7 @@ def normalize_tag_list(tags: str) -> List[str]:
 def build_full_prompt_from_cfg(cfg_data: Dict[str, Any]) -> str:
     """Xây dựng prompt đầy đủ từ các thành phần trong config."""
     prompt_parts = [
-        cfg_data.get('character', ''),
+        cfg_data.get('character_prompt') or cfg_data.get('character', ''),
         cfg_data.get('outfits', ''),
         cfg_data.get('expression', ''),
         cfg_data.get('action', ''),
@@ -166,7 +166,8 @@ class WorkflowBuilderService:
             return self._build_standard_workflow(cfg_data, seed)
         
         workflow = deepcopy(template)
-        workflow["13"]["inputs"]["lora_name"] = cfg_data['lora_name']
+        selected_lora = cfg_data.get("lora_name", DEFAULT_CONFIG["lora_name"])
+        workflow["13"]["inputs"]["lora_name"] = selected_lora
         workflow["13"]["inputs"]["strength_model"] = cfg_data.get('lora_strength_model', DEFAULT_CONFIG['lora_strength_model'])
         workflow["13"]["inputs"]["strength_clip"] = cfg_data.get('lora_strength_clip', DEFAULT_CONFIG['lora_strength_clip'])
         

@@ -318,44 +318,114 @@ class AlbumComponent {
     }
     
     async showCharacterSelectionGrid() {
+        this.state.viewMode = 'grid';
+        this._updateNav();
         this.state.selectedCharacter = null;
         this.state.cachedComfyGlobalChoices = null; // Yuuka: comfyui fetch optimization v1.0
-        this.updateUI('loading', 'Đang tải danh sách album...');
+        this.updateUI('loading', 'Dang tai danh sach album...');
         try {
-            const hashesWithAlbums = await this.api.album.get('/characters_with_albums');
-            if (!hashesWithAlbums || hashesWithAlbums.length === 0) {
-                this.contentArea.innerHTML = `<p class="plugin-album__empty-msg">Chưa có album nào.</p>`;
-                this.updateUI(); 
-                this._updateNav();
-                return;
-            }
-            const characters = await this.api.getCharactersByHashes(hashesWithAlbums);
+            const albums = await this.api.album.get('/albums');
             this.contentArea.innerHTML = `<div class="plugin-album__grid"></div>`;
             const grid = this.contentArea.querySelector('.plugin-album__grid');
             if (!grid) return;
-            
-            characters.sort((a, b) => a.name.localeCompare(b.name)).forEach(char => {
-                const card = document.createElement('div');
-                card.className = 'character-card';
-                card.dataset.hash = char.hash;
-                card.innerHTML = `<div class="image-container"><img src="/image/${char.hash}" alt="${char.name}"></div><div class="name">${char.name}</div>`;
-                card.addEventListener('click', async () => {
-                    this.state.selectedCharacter = char;
-                    this.state.viewMode = 'album';
-                    await this.loadAndDisplayCharacterAlbum();
-                    this._updateNav();
+
+            grid.appendChild(this._createAddAlbumCard());
+
+            if (!albums || albums.length === 0) {
+                const emptyMsg = document.createElement('p');
+                emptyMsg.className = 'plugin-album__empty-msg';
+                emptyMsg.textContent = 'Chua co album nao.';
+                grid.appendChild(emptyMsg);
+            } else {
+                albums.forEach(album => {
+                    grid.appendChild(this._createAlbumGridCard(album));
                 });
-                grid.appendChild(card);
-            });
-            // Đồng bộ hóa overlay tiến độ ngay khi grid được tạo
+            }
+
             const currentStatus = await this.api.generation.getStatus();
             this.handleGenerationUpdate(currentStatus.tasks || {});
         } catch (e) {
-            showError(`Lỗi tải album: ${e.message}`);
-            this.updateUI('error', `Lỗi: ${e.message}`);
+            showError(`Loi tai album: ${e.message}`);
+            this.updateUI('error', `Loi: ${e.message}`);
         }
     }
-    
+
+    _createAlbumGridCard(album) {
+        const card = document.createElement('div');
+        card.className = 'character-card album-character-card';
+        card.dataset.hash = album.hash;
+        if (album.is_custom) {
+            card.dataset.isCustom = '1';
+        }
+        const displayName = (album.name && album.name.trim()) ? album.name : 'Album chua dat ten';
+        const imageContainer = document.createElement('div');
+        imageContainer.className = 'image-container';
+        if (album.cover_url) {
+            const img = document.createElement('img');
+            img.src = album.cover_url;
+            img.alt = displayName;
+            img.loading = 'lazy';
+            imageContainer.appendChild(img);
+        } else {
+            imageContainer.classList.add('no-cover');
+            imageContainer.innerHTML = `<span class="material-symbols-outlined">image</span>`;
+        }
+        const nameEl = document.createElement('div');
+        nameEl.className = 'name';
+        nameEl.textContent = displayName;
+        card.appendChild(imageContainer);
+        card.appendChild(nameEl);
+        card.addEventListener('click', async () => {
+            this.state.selectedCharacter = { hash: album.hash, name: displayName, isCustom: !!album.is_custom };
+            this.state.cachedComfyGlobalChoices = null;
+            this.state.allImageData = [];
+            this.state.viewMode = 'album';
+            await this.loadAndDisplayCharacterAlbum();
+            this._updateNav();
+        });
+        return card;
+    }
+
+    _createAddAlbumCard() {
+        const card = document.createElement('div');
+        card.className = 'character-card album-add-card';
+        card.dataset.hash = '';
+        const imageContainer = document.createElement('div');
+        imageContainer.className = 'image-container no-cover';
+        imageContainer.innerHTML = `<span class="material-symbols-outlined">add</span>`;
+        const nameEl = document.createElement('div');
+        nameEl.className = 'name';
+        nameEl.textContent = 'Add new';
+        card.appendChild(imageContainer);
+        card.appendChild(nameEl);
+        card.addEventListener('click', () => {
+            this._handleCreateNewAlbum();
+        });
+        return card;
+    }
+
+    _generateAlbumHash() {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return `album-custom-${window.crypto.randomUUID()}`;
+        }
+        const fallback = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        return `album-custom-${fallback}`;
+    }
+
+    async _handleCreateNewAlbum() {
+        const newHash = this._generateAlbumHash();
+        this.state.selectedCharacter = {
+            hash: newHash,
+            name: 'empty',
+            isCustom: true
+        };
+        this.state.allImageData = [];
+        this.state.cachedComfyGlobalChoices = null;
+        this.state.viewMode = 'album';
+        await this.loadAndDisplayCharacterAlbum();
+        this._updateNav();
+    }
+
     renderCharacterAlbumView() { 
         this.contentArea.innerHTML = `<div class="plugin-album__grid image-grid"></div>`;
         this._renderImageGrid();
@@ -365,12 +435,49 @@ class AlbumComponent {
         const grid = this.contentArea.querySelector('.plugin-album__grid');
         if (!grid) return;
         grid.innerHTML = '';
-        this.state.allImageData.forEach(imgData => grid.appendChild(this._createImageCard(imgData)));
-        if (this.state.allImageData.length === 0 && grid.children.length === 0) {
-             grid.innerHTML = `<p class="plugin-album__empty-msg">Album này chưa có ảnh.</p>`;
+
+        if (this.state.selectedCharacter) {
+            grid.appendChild(this._createAlbumSettingsCard());
         }
+
+        if (this.state.allImageData.length === 0) {
+            const emptyMsg = document.createElement('p');
+            emptyMsg.className = 'plugin-album__empty-msg';
+            emptyMsg.textContent = 'Album này chưa có ảnh nào, hãy ấn "+" để tạo ảnh mới.';
+            grid.appendChild(emptyMsg);
+            return;
+        }
+
+        this.state.allImageData.forEach(imgData => grid.appendChild(this._createImageCard(imgData)));
     }
+
     
+    _createAlbumSettingsCard() {
+        const card = document.createElement('div');
+        card.className = 'character-card album-add-card plugin-album__settings-card';
+        card.dataset.role = 'album-settings';
+
+        const imageContainer = document.createElement('div');
+        imageContainer.className = 'image-container no-cover';
+        imageContainer.innerHTML = `<span class="material-symbols-outlined">add</span>`;
+
+        card.appendChild(imageContainer);
+        card.setAttribute('role', 'button');
+        card.setAttribute('title', 'Album settings');
+        card.tabIndex = 0;
+
+        const triggerSettings = () => this.openSettings();
+        card.addEventListener('click', triggerSettings);
+        card.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                triggerSettings();
+            }
+        });
+
+        return card;
+    }
+
     _createImageCard(imgData) { const c=document.createElement('div');c.className='plugin-album__album-card plugin-album__image-card';c.dataset.id=imgData.id;c.innerHTML=`<img src="${imgData.pv_url}" alt="Art" loading="lazy">`;c.addEventListener('click',()=>this.renderImageViewer(imgData));return c;} // Yuuka: preview image fix v1.0
 
     _createPlaceholderCard(taskId) {
@@ -450,7 +557,22 @@ class AlbumComponent {
                 }
                 return finalInfo;
             },
-            onSave: (updatedConfig) => this.api.album.post(`/${this.state.selectedCharacter.hash}/config`, updatedConfig),
+            onSave: async (updatedConfig) => {
+                await this.api.album.post(`/${this.state.selectedCharacter.hash}/config`, updatedConfig);
+                const trimmedName = (updatedConfig.character || '').trim();
+                if (trimmedName) {
+                    updatedConfig.character = trimmedName;
+                    this.state.selectedCharacter.name = trimmedName;
+                } else if (this.state.selectedCharacter && this.state.selectedCharacter.isCustom) {
+                    this.state.selectedCharacter.name = 'Album moi';
+                    updatedConfig.character = this.state.selectedCharacter.name;
+                } else {
+                    updatedConfig.character = this.state.selectedCharacter?.name || '';
+                }
+            },
+            onGenerate: async (updatedConfig) => {
+                await this._startGeneration(updatedConfig);
+            },
             promptClipboard: this.state.promptClipboard,
             // Yuuka: comfyui fetch optimization v1.0
             onConnect: async (address, btn, close) => {
