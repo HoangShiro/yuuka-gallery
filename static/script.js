@@ -132,6 +132,9 @@ window.Yuuka = {
         async openSettingsModal(options) {
             const modal = document.createElement('div');
             modal.className = 'modal-backdrop settings-modal-backdrop';
+            if (options.modalClass) {
+                modal.classList.add(options.modalClass);
+            }
             document.body.appendChild(modal);
             modal.innerHTML = `<div class="modal-dialog"><h3>Đang tải...</h3></div>`;
             const close = () => modal.remove();

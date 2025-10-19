@@ -536,6 +536,7 @@ class AlbumComponent {
         if (!this.state.isComfyUIAvaidable) { showError("ComfyUI chưa kết nối."); return; }
         await Yuuka.ui.openSettingsModal({
             title: `Cấu hình cho ${this.state.selectedCharacter.name}`,
+            modalClass: 'plugin-album__settings-modal',
             // Yuuka: comfyui fetch optimization v1.0
             fetchInfo: async () => {
                 let finalInfo = {};
