@@ -3,7 +3,7 @@
     "inputs": {
       "text": "best quality,seducing,sunaookami shiroko,sitting,the garden of eden,wedding dress,happy,sitting\n",
       "clip": [
-        "25",
+        "32",
         1
       ]
     },
@@ -16,7 +16,7 @@
     "inputs": {
       "text": "(worst quality, low quality:1.4), (bad anatomy), lowres, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, jpeg artifacts, signature, watermark, username, blurry, deformed face, censored, x-ray\n",
       "clip": [
-        "25",
+        "32",
         1
       ]
     },
@@ -34,7 +34,7 @@
       "scheduler": "karras",
       "denoise": 0.5,
       "model": [
-        "25",
+        "32",
         0
       ],
       "positive": [
@@ -156,6 +156,25 @@
     "class_type": "ImageToBase64_Yuuka",
     "_meta": {
       "title": "Yuuka Image to Base64 (API)"
+    }
+  },
+  "32": {
+    "inputs": {
+      "lora_name": "AZKi_v10.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "25",
+        0
+      ],
+      "clip": [
+        "25",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
     }
   }
 }

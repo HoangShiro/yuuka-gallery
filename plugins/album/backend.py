@@ -3,6 +3,8 @@ import time
 import threading
 import websocket
 import json
+import os
+from copy import deepcopy
 
 from flask import Blueprint, jsonify, request, abort
 
@@ -21,9 +23,20 @@ class AlbumPlugin:
             "character": "", "expression": "smile", "action": "sitting", "outfits": "school uniform",
             "context": "1girl, classroom", "quality": "masterpiece, best quality, highres, amazing quality",
             "negative": "bad hands, bad quality, worst quality, worst detail, sketch, censor, x-ray, watermark",
-            "batch_size": 1, "height": 1216, "width": 832, "cfg": 2.5, "sampler_name": "euler_ancestral", 
-            "scheduler": "karras", "steps": 25, "lora_name": "None", "lora_strength_model": 1.0, 
+            "batch_size": 1, "height": 1216, "width": 832, "cfg": 2.2, "sampler_name": "dpmpp_sde",
+            "scheduler": "beta", "steps": 12, "lora_name": "None", "lora_strength_model": 1.0,
             "lora_strength_clip": 1.0,
+            "hires_enabled": False,
+            "hires_stage1_denoise": 1.0,
+            "hires_stage2_steps": 14,
+            "hires_stage2_cfg": 2.4,
+            "hires_stage2_sampler_name": "euler_ancestral",
+            "hires_stage2_scheduler": "karras",
+            "hires_stage2_denoise": 0.5,
+            "hires_upscale_model": "4x-UltraSharp.pth",
+            "hires_upscale_method": "bilinear",
+            "hires_base_width": 0,
+            "hires_base_height": 0,
             "lora_prompt_tags": [],
         }
         
@@ -49,6 +62,40 @@ class AlbumPlugin:
         self.core_api.data_manager.save_user_data(
             albums, self.ALBUM_CUSTOM_LIST_FILENAME, user_hash, obfuscated=True
         )
+
+    def _find_user_image(self, user_hash, image_id):
+        """Locate an image metadata entry by id for the given user."""
+        images_data = self.core_api.read_data(
+            self.core_api.image_service.IMAGE_DATA_FILENAME,
+            default_value={},
+            obfuscated=True
+        )
+        user_images = images_data.get(user_hash, {})
+        for character_hash, items in user_images.items():
+            for entry in items:
+                if entry.get("id") == image_id:
+                    return character_hash, entry
+        return None, None
+
+    def _safe_int(self, value, fallback):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    def _safe_float(self, value, fallback):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    def _normalize_lora_tags(self, tags):
+        if isinstance(tags, list):
+            return [str(tag).strip() for tag in tags if str(tag).strip()]
+        if tags is None:
+            return []
+        text = str(tags).strip()
+        return [text] if text else []
 
     def _update_custom_album_entry(self, user_hash, character_hash, display_name):
         """Thêm hoặc xóa entry album tùy thuộc vào việc tên có hợp lệ không."""
@@ -184,6 +231,26 @@ class AlbumPlugin:
                 **self._sanitize_config(global_comfy_config), 
                 **self._sanitize_config(char_specific_config) 
             }
+
+            if not final_config.get('hires_base_width'):
+                final_config['hires_base_width'] = final_config.get('width', 0)
+            if not final_config.get('hires_base_height'):
+                final_config['hires_base_height'] = final_config.get('height', 0)
+            if final_config.get('hires_enabled'):
+                try:
+                    base_w = int(final_config.get('hires_base_width') or 0)
+                    base_h = int(final_config.get('hires_base_height') or 0)
+                except (TypeError, ValueError):
+                    base_w = base_h = 0
+                if not base_w or not base_h:
+                    try:
+                        base_w = max(1, int(int(final_config.get('width', 0)) / 2))
+                        base_h = max(1, int(int(final_config.get('height', 0)) / 2))
+                    except (TypeError, ValueError):
+                        base_w, base_h = 0, 0
+                final_config['hires_base_width'] = base_w
+                final_config['hires_base_height'] = base_h
+
             target_address = (server_address or final_config.get('server_address', '127.0.0.1:8888')).strip()
 
             # Yuuka: comfyui fetch optimization v1.0
@@ -192,11 +259,53 @@ class AlbumPlugin:
 
             try:
                 all_choices = self.core_api.comfy_api_client.get_full_object_info(target_address)
-                all_choices['sizes'] = [{"name": "IL 832x1216 - Chân dung (Khuyến nghị)", "value": "832x1216"}, {"name": "IL 1216x832 - Phong cảnh", "value": "1216x832"}, {"name": "IL 1344x768", "value": "1344x768"}, {"name": "IL 1024x1024 - Vuông", "value": "1024x1024"}]
-                all_choices['checkpoints'] = [{"name": c, "value": c} for c in all_choices.get('checkpoints', [])]
-                all_choices['samplers'] = [{"name": s, "value": s} for s in all_choices.get('samplers', [])]
-                all_choices['schedulers'] = [{"name": s, "value": s} for s in all_choices.get('schedulers', [])]
-                lora_names = all_choices.get('loras', [])
+
+                base_size_options = [
+                    {"name": "IL 832x1216 - Chân dung (Khuyến nghị)", "value": "832x1216"},
+                    {"name": "IL 1216x832 - Phong cảnh", "value": "1216x832"},
+                    {"name": "IL 1344x768", "value": "1344x768"},
+                    {"name": "IL 1024x1024 - Vuông", "value": "1024x1024"}
+                ]
+                size_variants = []
+                for option in base_size_options:
+                    raw_value = option.get("value", "")
+                    try:
+                        base_width, base_height = map(int, raw_value.split("x"))
+                    except (ValueError, AttributeError):
+                        continue
+
+                    base_entry = {
+                        "name": option.get("name", f"{base_width}x{base_height}"),
+                        "value": f"{base_width}x{base_height}",
+                        "dataAttrs": {
+                            "mode": "standard",
+                            "baseWidth": str(base_width),
+                            "baseHeight": str(base_height)
+                        }
+                    }
+                    size_variants.append(base_entry)
+
+                    hires_width = base_width * 2
+                    hires_height = base_height * 2
+                    hires_entry = {
+                        "name": f"{option.get('name', f'{base_width}x{base_height}')} x2 ({hires_width}x{hires_height})",
+                        "value": f"{hires_width}x{hires_height}",
+                        "dataAttrs": {
+                            "mode": "hires",
+                            "baseWidth": str(base_width),
+                            "baseHeight": str(base_height)
+                        }
+                    }
+                    size_variants.append(hires_entry)
+
+                all_choices["sizes"] = size_variants
+                all_choices["checkpoints"] = [{"name": c, "value": c} for c in all_choices.get("checkpoints", [])]
+                all_choices["samplers"] = [{"name": s, "value": s} for s in all_choices.get("samplers", [])]
+                all_choices["schedulers"] = [{"name": s, "value": s} for s in all_choices.get("schedulers", [])]
+                all_choices["hires_upscale_models"] = [{"name": m, "value": m} for m in all_choices.get("upscale_models", [])]
+                hires_methods = all_choices.get("upscale_methods") or ["bilinear", "nearest", "nearest-exact", "bicubic", "lanczos", "area"]
+                all_choices["hires_upscale_methods"] = [{"name": method, "value": method} for method in hires_methods]
+                lora_names = all_choices.get("loras", [])
                 lora_options = [{"name": "None", "value": "None"}]
                 seen_loras = {"None"}
                 for name in lora_names:
@@ -204,10 +313,90 @@ class AlbumPlugin:
                         continue
                     lora_options.append({"name": name, "value": name})
                     seen_loras.add(name)
-                all_choices['loras'] = lora_options
+                all_choices["loras"] = lora_options
                 return jsonify({"global_choices": all_choices, "last_config": final_config})
             except Exception as e:
                 abort(500, description=f"Failed to get info from ComfyUI: {e}")
+
+        @self.blueprint.route('/images/<image_id>/hires', methods=['POST'])
+        def start_image_hires(image_id):
+            user_hash = self.core_api.verify_token_and_get_user_hash()
+            try:
+                character_hash, image_entry = self._find_user_image(user_hash, image_id)
+                if not image_entry:
+                    abort(404, description="Image not found.")
+                if not character_hash:
+                    abort(400, description="Unable to resolve character for image.")
+
+                generation_config = image_entry.get("generationConfig") or {}
+                if not isinstance(generation_config, dict):
+                    generation_config = {}
+                generation_config = deepcopy(generation_config)
+
+                hires_flag = generation_config.get("hires_enabled", False)
+                if isinstance(hires_flag, str):
+                    hires_flag = hires_flag.strip().lower() in ("1", "true", "yes")
+                if hires_flag:
+                    abort(400, description="Image is already a hires result.")
+
+                original_width = self._safe_int(generation_config.get("width"), self.DEFAULT_CONFIG["width"])
+                original_height = self._safe_int(generation_config.get("height"), self.DEFAULT_CONFIG["height"])
+                if original_width <= 0 or original_height <= 0:
+                    abort(400, description="Invalid base dimensions for source image.")
+
+                server_address = generation_config.get("server_address") or self.DEFAULT_CONFIG["server_address"]
+                image_url = image_entry.get("url", "")
+                filename = os.path.basename(image_url) if image_url else ""
+                if not filename:
+                    abort(400, description="Missing source image file reference.")
+
+                image_bytes, _ = self.core_api.get_user_image_data('imgs', filename)
+                if not image_bytes:
+                    abort(404, description="Source image file could not be loaded.")
+
+                upload_basename = f"album_hires_{image_id.replace('-', '')}.png"
+                try:
+                    stored_name = self.core_api.comfy_api_client.upload_image_bytes(
+                        image_bytes,
+                        upload_basename,
+                        server_address
+                    )
+                except ConnectionError as err:
+                    abort(503, description=str(err))
+
+                target_width = max(original_width * 2, original_width)
+                target_height = max(original_height * 2, original_height)
+
+                generation_config["_workflow_type"] = "hires_input_image"
+                generation_config["_input_image_name"] = stored_name
+                generation_config["_input_image_width"] = original_width
+                generation_config["_input_image_height"] = original_height
+                generation_config["hires_base_width"] = original_width
+                generation_config["hires_base_height"] = original_height
+                generation_config["hires_enabled"] = False
+                generation_config["width"] = target_width
+                generation_config["height"] = target_height
+                generation_config["server_address"] = server_address
+                generation_config["lora_prompt_tags"] = self._normalize_lora_tags(
+                    generation_config.get("lora_prompt_tags")
+                )
+                generation_config["seed"] = self._safe_int(generation_config.get("seed"), 0)
+
+                context = {"origin": "album.hires", "source_image_id": image_id}
+                task_id, message = self.core_api.generation_service.start_generation_task(
+                    user_hash,
+                    character_hash,
+                    generation_config,
+                    context
+                )
+                if task_id:
+                    return jsonify({"status": "started", "task_id": task_id, "message": message})
+                return jsonify({"error": message}), 429
+
+            except ConnectionError as err:
+                abort(503, description=str(err))
+            except Exception as e:
+                abort(500, description=f"Failed to start hires generation: {e}")
 
         @self.blueprint.route('/comfyui/config', methods=['POST'])
         def save_comfyui_config():

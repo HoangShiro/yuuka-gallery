@@ -1,4 +1,5 @@
 // --- MODIFIED FILE: plugins/float-viewer/static/float_viewer.js ---
+
 class FloatViewerComponent {
     constructor(container, api) {
         this.api = api;
@@ -258,48 +259,248 @@ class FloatViewerComponent {
         });
     }
     
+
     openInSimpleViewer(imageId) { // Yuuka: creation time patch v1.1
         if (!window.Yuuka.plugins.simpleViewer) return;
         const startIndex = this.state.images.findIndex(img => img.id === imageId);
         if (startIndex === -1) return;
-
-        const renderInfoPanel = (item) => { const c = item.generationConfig; if (!c) return "Không có thông tin."; const r = (l, v) => { if (!v || (typeof v === 'string' && v.trim() === '')) return ''; const s = document.createElement('span'); s.textContent = v; return `<div class="info-row"><strong>${l}:</strong> <span>${s.innerHTML}</span></div>`; }; const d = new Date(item.createdAt * 1000).toLocaleString('vi-VN'); const ct = item.creationTime ? `${item.creationTime.toFixed(2)} giây` : `~${(16 + Math.random() * 6).toFixed(2)} giây`; const m = ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative'].map(k => r(k.charAt(0).toUpperCase() + k.slice(1), c[k])).filter(Boolean).join(''); const t = `<div class="info-grid">${r('Model', c.ckpt_name?.split('.')[0])}${r('Sampler', `${c.sampler_name} (${c.scheduler})`)}${r('Cỡ ảnh', `${c.width}x${c.height}`)}${r('Steps', c.steps)}${r('CFG', c.cfg)}${r('LoRA', c.lora_name)}</div>`; return `${m}${m ? '<hr>' : ''}${t}<hr>${r('Ngày tạo', d)}${r('Thời gian tạo', ct)}`.trim(); };
-        const actionButtons = [
-            { // Yuuka: regen-fix v1.0
-                id: 'regen',
-                icon: 'auto_awesome',
-                title: 'Tạo lại',
-                onClick: (item, close) => {
-                    this.api.generation.start(item.character_hash, item.generationConfig)
-                        .then(() => {
-                            showError("Đã gửi yêu cầu tạo lại ảnh.");
-                            close(); // Đóng simple-viewer sau khi gửi thành công
-                        })
-                        .catch(err => {
-                            showError(`Lỗi tạo lại: ${err.message}`);
-                        });
+    
+        const viewerHelpers = window.Yuuka?.viewerHelpers;
+        const fallbackInfoPanel = (item) => {
+            const cfg = item?.generationConfig;
+            if (!cfg) return "No information available.";
+            const buildRow = (label, value) => {
+                if (!value || (typeof value === 'string' && value.trim() === '')) return '';
+                const span = document.createElement('span');
+                span.textContent = value;
+                return `<div class="info-row"><strong>${label}:</strong> <span>${span.innerHTML}</span></div>`;
+            };
+            const promptRows = ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative']
+                .map(key => buildRow(key.charAt(0).toUpperCase() + key.slice(1), cfg[key]))
+                .filter(Boolean)
+                .join('');
+            const createdText = item.createdAt ? new Date(item.createdAt * 1000).toLocaleString('vi-VN') : '';
+            const renderTime = item.creationTime ? `${Number(item.creationTime).toFixed(2)} giay` : '';
+            const infoGrid = `<div class="info-grid">${
+                buildRow('Model', cfg.ckpt_name?.split('.')[0])
+            }${
+                buildRow('Sampler', `${cfg.sampler_name} (${cfg.scheduler})`)
+            }${
+                buildRow('Image Size', `${cfg.width}x${cfg.height}`)
+            }${
+                buildRow('Steps', cfg.steps)
+            }${
+                buildRow('CFG', cfg.cfg)
+            }${
+                buildRow('LoRA', cfg.lora_name)
+            }</div>`;
+            const loraTags = Array.isArray(cfg.lora_prompt_tags)
+                ? cfg.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean).join(', ')
+                : '';
+            const loraBlock = loraTags ? buildRow('LoRA Tags', loraTags) : '';
+            const sections = [];
+            if (promptRows) sections.push(promptRows, '<hr>');
+            sections.push(infoGrid);
+            if (loraBlock) sections.push(loraBlock);
+            if (createdText || renderTime) sections.push('<hr>');
+            if (createdText) sections.push(buildRow('Created', createdText));
+            if (renderTime) sections.push(buildRow('Render Time', renderTime));
+            return sections.filter(Boolean).join('').trim();
+        };
+    
+        const renderInfoPanel = (item) => {
+            if (viewerHelpers?.buildInfoPanel) {
+                try {
+                    return viewerHelpers.buildInfoPanel(item);
+                } catch (err) {
+                    console.warn('[FloatViewer] viewerHelpers.buildInfoPanel error:', err);
                 }
-            },
-            { id: 'copy', icon: 'content_copy', title: 'Copy Prompt', onClick: (item) => { const c = item.generationConfig, k = ['outfits', 'expression', 'action', 'context', 'quality', 'negative']; const promptText = k.map(key => c[key] ? String(c[key]).trim() : '').filter(Boolean).join(', '); navigator.clipboard.writeText(promptText).then(() => showError("Prompt đã copy.")).catch(()=> showError("Lỗi copy.")); } },
-            { id: 'delete', icon: 'delete', title: 'Xóa', 
-              onClick: async (item, close, updateItems) => { 
-                if (await Yuuka.ui.confirm('Bạn có chắc muốn xoá ảnh này?')) { 
-                    try { 
-                        await api.images.delete(item.id);
-                        // Yuuka: ui-event-fix v1.0 - Phát sự kiện toàn cục
-                        Yuuka.events.emit('image:deleted', { imageId: item.id });
-                        
-                        // Cập nhật ngay lập tức cho viewer đang mở
-                        const updatedItems = this.state.images
-                            .filter(img => img.id !== item.id)
-                            .map(d => ({...d, imageUrl: d.url }));
-                        updateItems(updatedItems);
-                    } catch (err) { showError(`Lỗi xoá: ${err.message}`); } 
-                } 
-              } 
             }
-        ];
-        window.Yuuka.plugins.simpleViewer.open({ items: this.state.images.map(d => ({...d, imageUrl: d.url })), startIndex: startIndex, renderInfoPanel: renderInfoPanel, actionButtons: actionButtons });
+            return fallbackInfoPanel(item);
+        };
+    
+        const copyPrompt = (item) => {
+            const cfg = item.generationConfig;
+            const keys = ['outfits', 'expression', 'action', 'context', 'quality', 'negative'];
+            const promptText = keys
+                .map(key => cfg[key] ? String(cfg[key]).trim() : '')
+                .filter(Boolean)
+                .join(', ');
+            navigator.clipboard.writeText(promptText)
+                .then(() => showError('Prompt da copy.'))
+                .catch(() => showError('Loi copy.'));
+        };
+
+        const deleteHandler = async (item, close, updateItems) => {
+            if (await Yuuka.ui.confirm('Chắc chắn muốn xóa ảnh này?')) {
+                try {
+                    await this.api.images.delete(item.id);
+                    Yuuka.events.emit('image:deleted', { imageId: item.id });
+
+                    const updatedItems = this.state.images
+                        .filter(img => img.id !== item.id)
+                        .map(d => ({ ...d, imageUrl: d.url }));
+                    updateItems(updatedItems);
+                } catch (err) {
+                    showError(`Lỗi xóa: ${err.message}`);
+                }
+            }
+        };
+
+        const isImageHiresFn = (item) => {
+            if (viewerHelpers?.isImageHires) {
+                try {
+                    return viewerHelpers.isImageHires(item);
+                } catch (err) {
+                    console.warn('[FloatViewer] viewerHelpers.isImageHires error:', err);
+                }
+            }
+            const cfg = item?.generationConfig || {};
+            if (!cfg || Object.keys(cfg).length === 0) return true;
+            let hiresFlag = cfg.hires_enabled;
+            if (typeof hiresFlag === 'string') {
+                hiresFlag = hiresFlag.trim().toLowerCase() === 'true';
+            }
+            if (hiresFlag) return true;
+            const width = Number(cfg.width);
+            const baseWidth = Number(cfg.hires_base_width || cfg.width);
+            if (Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth) {
+                return true;
+            }
+            const height = Number(cfg.height);
+            const baseHeight = Number(cfg.hires_base_height || cfg.height);
+            if (Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight) {
+                return true;
+            }
+            return false;
+        };
+
+        const canHires = !!(this.api && this.api.album);
+
+        let actionButtons;
+        if (viewerHelpers?.createActionButtons) {
+            actionButtons = viewerHelpers.createActionButtons({
+                regen: {
+                    onClick: (item, close) => {
+                        this.api.generation.start(item.character_hash, item.generationConfig)
+                            .then(() => {
+                                showError('Đã gửi yêu cầu tạo lại ảnh.');
+                                close();
+                            })
+                            .catch(err => showError(`Lỗi tạo lại: ${err.message}`));
+                    }
+                },
+                hires: {
+                    disabled: (item) => !canHires || isImageHiresFn(item),
+                    onClick: (item) => this._startHiresUpscale(item)
+                },
+                copy: {
+                    onClick: copyPrompt
+                },
+                delete: {
+                    onClick: deleteHandler
+                }
+            });
+        } else {
+            actionButtons = [
+                {
+                    id: 'regen',
+                    icon: 'auto_awesome',
+                    title: 'Tao lai',
+                    onClick: (item, close) => {
+                        this.api.generation.start(item.character_hash, item.generationConfig)
+                            .then(() => {
+                                showError('Đã gửi yêu cầu tạo lại ảnh.');
+                                close();
+                            })
+                            .catch(err => showError(`Lỗi tạo lại: ${err.message}`));
+                    }
+                },
+                {
+                    id: 'hires',
+                    icon: 'wand_stars',
+                    title: 'Hires x2',
+                    disabled: (item) => !canHires || isImageHiresFn(item),
+                    onClick: (item) => this._startHiresUpscale(item)
+                },
+                {
+                    id: 'copy',
+                    icon: 'content_copy',
+                    title: 'Copy Prompt',
+                    onClick: copyPrompt
+                },
+                {
+                    id: 'delete',
+                    icon: 'delete',
+                    title: 'Remove Image',
+                    onClick: deleteHandler
+                }
+            ];
+        }
+    
+        window.Yuuka.plugins.simpleViewer.open({
+            items: this.state.images.map(d => ({ ...d, imageUrl: d.url })),
+            startIndex,
+            renderInfoPanel,
+            actionButtons
+        });
+    }
+
+    async _startHiresUpscale(item) {
+        const viewerHelpers = window.Yuuka?.viewerHelpers;
+        let isHires;
+        if (viewerHelpers?.isImageHires) {
+            try {
+                isHires = viewerHelpers.isImageHires(item);
+            } catch (err) {
+                console.warn('[FloatViewer] viewerHelpers.isImageHires error:', err);
+            }
+        }
+        if (isHires === undefined) {
+            const cfg = item?.generationConfig || {};
+            if (!cfg || Object.keys(cfg).length === 0) {
+                isHires = true;
+            } else {
+                let hiresFlag = cfg.hires_enabled;
+                if (typeof hiresFlag === 'string') {
+                    hiresFlag = hiresFlag.trim().toLowerCase() === 'true';
+                }
+                if (hiresFlag) {
+                    isHires = true;
+                } else {
+                    const width = Number(cfg.width);
+                    const baseWidth = Number(cfg.hires_base_width || cfg.width);
+                    const height = Number(cfg.height);
+                    const baseHeight = Number(cfg.hires_base_height || cfg.height);
+                    isHires = (
+                        (Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth) ||
+                        (Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight)
+                    );
+                }
+            }
+        }
+
+        if (isHires) {
+            showError("Đã là ảnh hires rồi.");
+            return;
+        }
+
+        if (!this.api?.album) {
+            showError("Album API chưa sẵn sàng.");
+            return;
+        }
+
+        try {
+            const response = await this.api.album.post(`/images/${item.id}/hires`, {
+                character_hash: item.character_hash
+            });
+            if (!response || !response.task_id) {
+                throw new Error(response?.error || 'Không thể bắt đầu hires.');
+            }
+            Yuuka.events.emit('generation:task_created_locally', response);
+        } catch (err) {
+            showError(`Hires thất bại: ${err.message || err}`);
+        }
     }
 
     updateLayout() { if (!this.gallery) return; const { w, h } = this.state.size; if (w > h) { this.gallery.classList.add('horizontal'); this.gallery.classList.remove('vertical'); } else { this.gallery.classList.add('vertical'); this.gallery.classList.remove('horizontal'); } }

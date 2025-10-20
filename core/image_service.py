@@ -16,8 +16,14 @@ class ImageService:
         self.PREVIEW_MAX_DIMENSION = 350 # Yuuka: new image paths v1.0
 
     def _sanitize_config(self, config_data):
-        if not isinstance(config_data, dict): return config_data
-        return {k: v.strip() if isinstance(v, str) else v for k, v in config_data.items()}
+        if not isinstance(config_data, dict):
+            return config_data
+        sanitized = {}
+        for key, value in config_data.items():
+            if isinstance(key, str) and key.startswith('_'):
+                continue
+            sanitized[key] = value.strip() if isinstance(value, str) else value
+        return sanitized
 
     def save_image_metadata(self, user_hash, character_hash, image_base64, generation_config, creation_time=None):
         """Lưu metadata ảnh, tự tạo preview và trả về object metadata mới."""

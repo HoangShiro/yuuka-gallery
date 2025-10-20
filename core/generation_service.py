@@ -95,6 +95,10 @@ class GenerationService:
             client_id = str(uuid.uuid4())
             seed = uuid.uuid4().int % (10**15) if int(cfg_data.get("seed", 0)) == 0 else int(cfg_data.get("seed", 0))
             target_address = cfg_data.get('server_address', '127.0.0.1:8888')
+            try:
+                original_lora_tags = list(cfg_data.get("lora_prompt_tags") or [])
+            except Exception:
+                original_lora_tags = []
 
             workflow, output_node_id = self.core_api.workflow_builder.build_workflow(cfg_data, seed)
             
@@ -140,13 +144,16 @@ class GenerationService:
 
             ws = websocket.WebSocket()
             ws.connect(f"ws://{target_address}/ws?clientId={client_id}", timeout=10)
+            websocket_closed_early = False
 
             while True:
                 with self._get_user_lock(user_hash):
                     task = self.user_states[user_hash]["tasks"].get(task_id)
                     if not task or task.get('cancel_requested'): raise InterruptedError("Cancelled by user.")
                 try: out = ws.recv()
-                except (websocket.WebSocketTimeoutException, websocket.WebSocketConnectionClosedException): break
+                except (websocket.WebSocketTimeoutException, websocket.WebSocketConnectionClosedException):
+                    websocket_closed_early = True
+                    break
                 if not isinstance(out, str): continue
                 try: message = json.loads(out)
                 except json.JSONDecodeError: continue
@@ -162,30 +169,58 @@ class GenerationService:
                             v, m = msg_data.get('value',0), msg_data.get('max',1)
                             p = int(v/m*100) if m>0 else 0
                             task['progress_percent'] = p; task['progress_message'] = f"Đang tạo... {p}%"
-                        elif msg_type == 'executing' and msg_data.get('node') is None:
+                        elif msg_type in ('executing', 'execution_done', 'execution_end') and msg_data.get('node') is None:
                             execution_successful = True
                             break
                         elif msg_type == 'execution_error': raise Exception(f"Node error: {msg_data.get('exception_message', 'Unknown')}")
             
-            if execution_successful:
-                with self._get_user_lock(user_hash): self.user_states[user_hash]["tasks"][task_id]['progress_message'] = "Đang xử lý kết quả..."
-                history = self.core_api.comfy_api_client.get_history(prompt_id, target_address)
-                outputs = history.get(prompt_id, {}).get('outputs', {})
-                if output_node_id in outputs and "images_base64" in outputs[output_node_id]:
-                    image_b64 = outputs[output_node_id]["images_base64"][0]
-                else:
-                    raise Exception(f"Không tìm thấy dữ liệu ảnh base64 trong node '{output_node_id}'")
+            history_outputs = {}
+            image_b64 = None
+            history_error = None
 
-                # Yuuka: creation time patch v1.0 - start_time giờ đây luôn được đảm bảo
-                creation_duration = (time.time() - start_time) - 0.3 # Trừ đi thời gian chờ WebSocket
+            max_history_attempts = 60
+            for attempt in range(max_history_attempts):
+                try:
+                    history = self.core_api.comfy_api_client.get_history(prompt_id, target_address)
+                except Exception as err:
+                    history_error = err
+                    time.sleep(1.0)
+                    continue
+
+                history_outputs = history.get(prompt_id, {}).get('outputs', {})
+                if not isinstance(history_outputs, dict):
+                    history_outputs = {}
+                node_output = history_outputs.get(output_node_id, {})
+                images_base64 = node_output.get("images_base64") if isinstance(node_output, dict) else None
+                if images_base64:
+                    image_b64 = images_base64[0]
+                    execution_successful = True
+                    break
+
+                time.sleep(1.0)
+
+            if execution_successful and image_b64:
+                with self._get_user_lock(user_hash):
+                    self.user_states[user_hash]["tasks"][task_id]['progress_message'] = "\u0110ang x\u1eed l\u00fd k\u1ebft qu\u1ea3..."
+
+                creation_duration = (time.time() - start_time) - 0.3 # tru do tre websocket
+                if original_lora_tags:
+                    cfg_data["lora_prompt_tags"] = original_lora_tags
+                elif "lora_prompt_tags" not in cfg_data:
+                    cfg_data["lora_prompt_tags"] = []
                 new_metadata = self.image_service.save_image_metadata(
                     user_hash, character_hash, image_b64, cfg_data, creation_duration
                 )
-                if not new_metadata: raise Exception("Lưu ảnh thất bại.")
-                
+                if not new_metadata:
+                    raise Exception("L\u01b0u \u1ea3nh th\u1ea5t b\u1ea1i.")
+
                 self._add_event(user_hash, "IMAGE_SAVED", {"task_id": task_id, "image_data": new_metadata, "context": task.get("context")})
             else:
-                 raise ConnectionAbortedError("WebSocket connection lost before prompt finished execution.")
+                if history_error and image_b64 is None:
+                    raise ConnectionAbortedError(f"WebSocket closed early and history unavailable: {history_error}")
+                if websocket_closed_early and not execution_successful:
+                    raise ConnectionAbortedError("WebSocket connection lost before prompt finished execution.")
+                raise Exception(f"Kh\u00f4ng t\u00ecm th\u1ea5y d\u1eef li\u1ec7u \u1ea3nh base64 trong node '{output_node_id}'")
 
         except InterruptedError as e:
              print(f"✅ [GenService Task {task_id}] Cancelled gracefully for user {user_hash}.")

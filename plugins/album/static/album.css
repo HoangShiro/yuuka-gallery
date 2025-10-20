@@ -498,3 +498,42 @@
 .plugin-album__settings-modal.is-mobile .album-settings-column.is-active {
     display: block;
 }
+.stage-config-grid {
+    display: grid;
+    gap: 12px;
+    margin-top: 12px;
+    margin-bottom: 12px;
+}
+
+.stage-config-grid.is-hires {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.stage-config-grid:not(.is-hires) {
+    grid-template-columns: 1fr;
+}
+
+.stage-config-column {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.stage-config-column h5 {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: inherit;
+}
+
+.stage-config-grid:not(.is-hires) .stage-config-column h5 {
+    display: none;
+}
+
+.stage-config-grid:not(.is-hires) .stage-config-column {
+    background: transparent;
+    padding: 0;
+}

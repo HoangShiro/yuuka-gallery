@@ -246,6 +246,29 @@ class AlbumComponent {
             const { last_config } = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}`);
             const payload = { ...last_config, ...configOverrides, character: this.state.selectedCharacter.name };
             if (configOverrides.seed === undefined) payload.seed = 0;
+            if (Array.isArray(payload.lora_prompt_tags)) {
+                payload.lora_prompt_tags = payload.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean);
+            } else if (payload.lora_prompt_tags) {
+                const tagText = String(payload.lora_prompt_tags).trim();
+                payload.lora_prompt_tags = tagText ? [tagText] : [];
+            } else {
+                payload.lora_prompt_tags = [];
+            }
+            if (typeof payload.hires_enabled === 'string') {
+                payload.hires_enabled = payload.hires_enabled.trim().toLowerCase() === 'true';
+            } else {
+                payload.hires_enabled = Boolean(payload.hires_enabled);
+            }
+            const hasLoRA = typeof payload.lora_name === 'string'
+                && payload.lora_name.trim()
+                && payload.lora_name.trim().toLowerCase() !== 'none';
+            if (payload.hires_enabled) {
+                delete payload._workflow_type;
+            } else if (hasLoRA) {
+                payload._workflow_type = 'sdxl_lora';
+            } else {
+                delete payload._workflow_type;
+            }
             const response = await this.api.generation.start(this.state.selectedCharacter.hash, payload);
             
             const tempPlaceholder = document.getElementById(tempTaskId);
@@ -269,6 +292,99 @@ class AlbumComponent {
      * Yuuka: image placeholder v2.0 - Hàm làm mới an toàn
      * Lấy trạng thái mới nhất của ảnh và các tác vụ đang chạy, sau đó render lại toàn bộ.
      */
+
+    async _startHiresUpscale(item) {
+        const viewerHelpers = window.Yuuka?.viewerHelpers;
+        let isHires;
+        if (viewerHelpers?.isImageHires) {
+            try {
+                isHires = viewerHelpers.isImageHires(item);
+            } catch (err) {
+                console.warn('[Album] viewerHelpers.isImageHires error:', err);
+            }
+        }
+        if (isHires === undefined) {
+            const cfg = item?.generationConfig || {};
+            if (!cfg || Object.keys(cfg).length === 0) {
+                isHires = true;
+            } else {
+                let hiresFlag = cfg.hires_enabled;
+                if (typeof hiresFlag === 'string') {
+                    hiresFlag = hiresFlag.trim().toLowerCase() === 'true';
+                }
+                if (hiresFlag) {
+                    isHires = true;
+                } else {
+                    const width = Number(cfg.width);
+                    const baseWidth = Number(cfg.hires_base_width || cfg.width);
+                    const height = Number(cfg.height);
+                    const baseHeight = Number(cfg.hires_base_height || cfg.height);
+                    isHires = (
+                        (Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth) ||
+                        (Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight)
+                    );
+                }
+            }
+        }
+
+        if (isHires) {
+            showError("Đã là ảnh hires rồi.");
+            return;
+        }
+        if (this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length >= 5) {
+            showError("Đã đạt giới hạn 5 tác vụ đồng thời.");
+            return;
+        }
+        if (!this.state.isComfyUIAvaidable) {
+            showError("ComfyUI chưa kết nối.");
+            return;
+        }
+        if (!item?.id) {
+            showError("Không thể xác định ảnh để hires.");
+            return;
+        }
+
+        const grid = this.contentArea.querySelector('.plugin-album__grid');
+        const tempTaskId = `temp_hires_${Date.now()}`;
+        let placeholder = null;
+
+        try {
+            if (grid) {
+                placeholder = this._createPlaceholderCard(tempTaskId);
+                grid.prepend(placeholder);
+                const emptyMsg = grid.querySelector('.plugin-album__empty-msg');
+                if (emptyMsg) emptyMsg.style.display = 'none';
+            }
+            this._updateNav();
+
+            const payload = {
+                character_hash: this.state.selectedCharacter?.hash || item.character_hash
+            };
+            const response = await this.api.album.post(`/images/${item.id}/hires`, payload);
+            if (!response || !response.task_id) {
+                throw new Error(response?.error || 'Không thể bắt đầu hires.');
+            }
+
+            Yuuka.events.emit('generation:task_created_locally', response);
+
+            if (placeholder) {
+                placeholder.id = response.task_id;
+                const cancelButton = placeholder.querySelector('.plugin-album__cancel-btn');
+                if (cancelButton) {
+                    cancelButton.dataset.taskId = response.task_id;
+                }
+            }
+        } catch (err) {
+            if (placeholder) {
+                placeholder.remove();
+            }
+            const message = err?.message || String(err);
+            showError(`Hires thất bại: ${message}`);
+        } finally {
+            this._updateNav();
+        }
+    }
+
     async _refreshAlbumAndPlaceholders() {
         if (!this.state.selectedCharacter) return;
     
@@ -322,7 +438,7 @@ class AlbumComponent {
         this._updateNav();
         this.state.selectedCharacter = null;
         this.state.cachedComfyGlobalChoices = null; // Yuuka: comfyui fetch optimization v1.0
-        this.updateUI('loading', 'Dang tai danh sach album...');
+        this.updateUI('loading', 'Đang tải danh sách album...');
         try {
             const albums = await this.api.album.get('/albums');
             this.contentArea.innerHTML = `<div class="plugin-album__grid"></div>`;
@@ -334,7 +450,7 @@ class AlbumComponent {
             if (!albums || albums.length === 0) {
                 const emptyMsg = document.createElement('p');
                 emptyMsg.className = 'plugin-album__empty-msg';
-                emptyMsg.textContent = 'Chua co album nao.';
+                emptyMsg.textContent = 'Chưa có album nào, hãy ấn "+" để tạo album mới.';
                 grid.appendChild(emptyMsg);
             } else {
                 albums.forEach(album => {
@@ -345,7 +461,7 @@ class AlbumComponent {
             const currentStatus = await this.api.generation.getStatus();
             this.handleGenerationUpdate(currentStatus.tasks || {});
         } catch (e) {
-            showError(`Loi tai album: ${e.message}`);
+            showError(`Lỗi tải danh sách album: ${e.message}`);
             this.updateUI('error', `Loi: ${e.message}`);
         }
     }
@@ -357,7 +473,7 @@ class AlbumComponent {
         if (album.is_custom) {
             card.dataset.isCustom = '1';
         }
-        const displayName = (album.name && album.name.trim()) ? album.name : 'Album chua dat ten';
+        const displayName = (album.name && album.name.trim()) ? album.name : 'Album chưa đặt tên';
         const imageContainer = document.createElement('div');
         imageContainer.className = 'image-container';
         if (album.cover_url) {
@@ -499,36 +615,182 @@ class AlbumComponent {
         return placeholder;
     }
     
+
     renderImageViewer(imgData) {
-        const i = this.state.allImageData.findIndex(img => img.id === imgData.id);
+        const startIndex = this.state.allImageData.findIndex(img => img.id === imgData.id);
         const tasksForThisChar = this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length;
         const isGenDisabled = tasksForThisChar >= 5 || !this.state.isComfyUIAvaidable;
+        const viewerHelpers = window.Yuuka?.viewerHelpers;
+
+        const fallbackInfoPanel = (item) => {
+            const cfg = item?.generationConfig;
+            if (!cfg) return "Không có thông tin.";
+            const buildRow = (label, value) => {
+                if (!value || (typeof value === 'string' && value.trim() === '')) return '';
+                const span = document.createElement('span');
+                span.textContent = value;
+                return `<div class="info-row"><strong>${label}:</strong> <span>${span.innerHTML}</span></div>`;
+            };
+            const promptRows = ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative']
+                .map(key => buildRow(key.charAt(0).toUpperCase() + key.slice(1), cfg[key]))
+                .filter(Boolean)
+                .join('');
+            const createdText = item.createdAt ? new Date(item.createdAt * 1000).toLocaleString('vi-VN') : '';
+            const renderTime = item.creationTime ? `${Number(item.creationTime).toFixed(2)} giây` : '';
+            const infoGrid = `<div class="info-grid">${
+                buildRow('Model', cfg.ckpt_name?.split('.')[0])
+            }${
+                buildRow('Sampler', `${cfg.sampler_name} (${cfg.scheduler})`)
+            }${
+                buildRow('Image Size', `${cfg.width}x${cfg.height}`)
+            }${
+                buildRow('Steps', cfg.steps)
+            }${
+                buildRow('CFG', cfg.cfg)
+            }${
+                buildRow('LoRA', cfg.lora_name)
+            }</div>`;
+            const loraTags = Array.isArray(cfg.lora_prompt_tags)
+                ? cfg.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean).join(', ')
+                : '';
+            const loraTagsBlock = loraTags ? buildRow('LoRA Tags', loraTags) : '';
+            const sections = [];
+            if (promptRows) sections.push(promptRows, '<hr>');
+            sections.push(infoGrid);
+            if (loraTagsBlock) sections.push(loraTagsBlock);
+            if (createdText || renderTime) sections.push('<hr>');
+            if (createdText) sections.push(buildRow('Created', createdText));
+            if (renderTime) sections.push(buildRow('Render time', renderTime));
+            return sections.filter(Boolean).join('').trim();
+        };
+
+        const renderInfoPanel = (item) => {
+            if (viewerHelpers?.buildInfoPanel) {
+                try {
+                    return viewerHelpers.buildInfoPanel(item);
+                } catch (err) {
+                    console.warn('[Album] viewerHelpers.buildInfoPanel error:', err);
+                }
+            }
+            return fallbackInfoPanel(item);
+        };
+
+        const isImageHiresFn = (item) => {
+            if (viewerHelpers?.isImageHires) {
+                try {
+                    return viewerHelpers.isImageHires(item);
+                } catch (err) {
+                    console.warn('[Album] viewerHelpers.isImageHires error:', err);
+                }
+            }
+            const cfg = item?.generationConfig || {};
+            if (!cfg || Object.keys(cfg).length === 0) return true;
+            let hiresFlag = cfg.hires_enabled;
+            if (typeof hiresFlag === 'string') {
+                hiresFlag = hiresFlag.trim().toLowerCase() === 'true';
+            }
+            if (hiresFlag) return true;
+
+            const width = Number(cfg.width);
+            const baseWidth = Number(cfg.hires_base_width || cfg.width);
+            if (Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth) {
+                return true;
+            }
+
+            const height = Number(cfg.height);
+            const baseHeight = Number(cfg.hires_base_height || cfg.height);
+            if (Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight) {
+                return true;
+            }
+
+            return false;
+        };
+
+        const copyPromptHandler = (item) => {
+            const cfg = item.generationConfig;
+            const keys = ['outfits', 'expression', 'action', 'context', 'quality', 'negative'];
+            this.state.promptClipboard = new Map(
+                keys.map(key => [key, cfg[key] ? String(cfg[key]).trim() : ''])
+            );
+            showError("Prompt đã copy.");
+        };
+
+        const deleteHandler = async (item, close, updateItems) => {
+            if (await Yuuka.ui.confirm('Có chắc chắn muốn xóa ảnh này?')) {
+                try {
+                    await this.api.images.delete(item.id);
+                    Yuuka.events.emit('image:deleted', { imageId: item.id });
+
+                    const updatedItems = this.state.allImageData
+                        .filter(img => img.id !== item.id)
+                        .map(d => ({ ...d, imageUrl: d.url }));
+                    updateItems(updatedItems);
+                } catch (err) {
+                    showError(`Lỗi xóa: ${err.message}`);
+                }
+            }
+        };
+
+        let actionButtons;
+        if (viewerHelpers?.createActionButtons) {
+            actionButtons = viewerHelpers.createActionButtons({
+                regen: {
+                    disabled: () => isGenDisabled,
+                    onClick: (item, close) => {
+                        close();
+                        this._startGeneration(item.generationConfig);
+                    }
+                },
+                hires: {
+                    disabled: (item) => isGenDisabled || isImageHiresFn(item),
+                    onClick: (item) => this._startHiresUpscale(item)
+                },
+                copy: {
+                    onClick: copyPromptHandler
+                },
+                delete: {
+                    onClick: deleteHandler
+                }
+            });
+        } else {
+            actionButtons = [
+                {
+                    id: 'regen',
+                    icon: 'auto_awesome',
+                    title: 'Re-generate',
+                    disabled: () => isGenDisabled,
+                    onClick: (item, close) => {
+                        close();
+                        this._startGeneration(item.generationConfig);
+                    }
+                },
+                {
+                    id: 'hires',
+                    icon: 'wand_stars',
+                    title: 'Hires x2',
+                    disabled: (item) => isGenDisabled || isImageHiresFn(item),
+                    onClick: (item) => this._startHiresUpscale(item)
+                },
+                {
+                    id: 'copy',
+                    icon: 'content_copy',
+                    title: 'Copy Prompt',
+                    onClick: copyPromptHandler
+                },
+                {
+                    id: 'delete',
+                    icon: 'delete',
+                    title: 'Remove Image',
+                    onClick: deleteHandler
+                }
+            ];
+        }
+
         this.viewer.open({
             items: this.state.allImageData.map(d => ({ ...d, imageUrl: d.url })),
-            startIndex: i,
-            renderInfoPanel: (item) => {const c=item.generationConfig;if(!c)return"Không có thông tin.";const r=(l,v)=>{if(!v||(typeof v==='string'&&v.trim()===''))return'';const s=document.createElement('span');s.textContent=v;return`<div class="info-row"><strong>${l}:</strong> <span>${s.innerHTML}</span></div>`;};const d=new Date(item.createdAt*1000).toLocaleString('vi-VN');const ct = item.creationTime ? `${item.creationTime.toFixed(2)} giây` : `~${(16 + Math.random() * 6).toFixed(2)} giây`;const m=['character','outfits','expression','action','context','quality','negative'].map(k=>r(k.charAt(0).toUpperCase()+k.slice(1),c[k])).filter(Boolean).join('');const t=`<div class="info-grid">${r('Model',c.ckpt_name?.split('.')[0])}${r('Sampler',`${c.sampler_name} (${c.scheduler})`)}${r('Cỡ ảnh',`${c.width}x${c.height}`)}${r('Steps',c.steps)}${r('CFG',c.cfg)}${r('LoRA',c.lora_name)}</div>`;return`${m}${m?'<hr>':''}${t}<hr>${r('Ngày tạo',d)}${r('Thời gian tạo',ct)}`.trim();}, // Yuuka: creation time patch v1.1
-            actionButtons: [
-                { id: 'regen', icon: 'auto_awesome', title: 'Tạo lại', disabled: isGenDisabled, onClick: (item, close) => { close(); this._startGeneration(item.generationConfig); } },
-                { id: 'copy', icon: 'content_copy', title: 'Copy Prompt', onClick: (item) => { const c = item.generationConfig, k = ['outfits', 'expression', 'action', 'context', 'quality', 'negative']; this.state.promptClipboard = new Map(k.map(key => [key, c[key] ? String(c[key]).trim() : ''])); showError("Prompt đã copy."); } },
-                { id: 'delete', icon: 'delete', title: 'Xóa',
-                    onClick: async (item, close, updateItems) => {
-                        if (await Yuuka.ui.confirm('Bạn có chắc muốn xoá ảnh này?')) {
-                            try {
-                                await api.images.delete(item.id);
-                                // Yuuka: ui-event-fix v1.0 - Phát sự kiện toàn cục
-                                Yuuka.events.emit('image:deleted', { imageId: item.id });
-                                
-                                // Cập nhật ngay lập tức cho viewer đang mở
-                                const updatedItems = this.state.allImageData
-                                    .filter(img => img.id !== item.id)
-                                    .map(d => ({ ...d, imageUrl: d.url }));
-                                updateItems(updatedItems);
-
-                            } catch (err) { showError(`Lỗi xoá: ${err.message}`); }
-                        }
-                    }
-                }
-            ]
+            startIndex,
+            renderInfoPanel,
+            actionButtons
         });
     }
 
@@ -570,7 +832,7 @@ class AlbumComponent {
                     updatedConfig.character = trimmedName;
                     this.state.selectedCharacter.name = trimmedName;
                 } else if (this.state.selectedCharacter && this.state.selectedCharacter.isCustom) {
-                    this.state.selectedCharacter.name = 'Album moi';
+                    this.state.selectedCharacter.name = 'Album mới';
                     updatedConfig.character = this.state.selectedCharacter.name;
                 } else {
                     updatedConfig.character = this.state.selectedCharacter?.name || '';

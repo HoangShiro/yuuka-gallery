@@ -8,7 +8,7 @@
       "scheduler": "beta",
       "denoise": 1,
       "model": [
-        "25",
+        "31",
         0
       ],
       "positive": [
@@ -44,7 +44,7 @@
     "inputs": {
       "text": "masterpiece,best quality,highres,hakurei reimu (touhou),futuristic city,hair bow,parted lips,hand on own leg\n",
       "clip": [
-        "25",
+        "31",
         1
       ]
     },
@@ -57,7 +57,7 @@
     "inputs": {
       "text": "lowres, bad hands",
       "clip": [
-        "25",
+        "31",
         1
       ]
     },
@@ -70,12 +70,12 @@
     "inputs": {
       "seed": 1046012759727402,
       "steps": 14,
-      "cfg": 2.4,
+      "cfg": 2.5,
       "sampler_name": "euler_ancestral",
       "scheduler": "karras",
       "denoise": 0.5,
       "model": [
-        "25",
+        "31",
         0
       ],
       "positive": [
@@ -204,6 +204,25 @@
     "class_type": "ImageToBase64_Yuuka",
     "_meta": {
       "title": "Image To Base64"
+    }
+  },
+  "31": {
+    "inputs": {
+      "lora_name": "AZKi_v10.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "25",
+        0
+      ],
+      "clip": [
+        "25",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
     }
   }
 }

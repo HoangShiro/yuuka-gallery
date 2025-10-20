@@ -4,6 +4,8 @@ import urllib.request
 import urllib.parse
 from typing import List, Dict, Any, Optional
 
+import requests
+
 def get_all_nodes_info_sync(server_address: str) -> Optional[Dict[str, Any]]:
     """
     Yuuka: Hàm mới hiệu quả hơn, lấy tất cả object_info một lần.
@@ -62,6 +64,8 @@ def get_full_object_info(server_address: str) -> Dict[str, List[str]]:
         "checkpoints": _extract_choices_from_info(all_nodes_info, "CheckpointLoaderSimple", "ckpt_name"),
         "samplers": _extract_choices_from_info(all_nodes_info, "KSampler", "sampler_name"),
         "schedulers": _extract_choices_from_info(all_nodes_info, "KSampler", "scheduler"),
+        "upscale_models": _extract_choices_from_info(all_nodes_info, "UpscaleModelLoader", "model_name"),
+        "upscale_methods": _extract_choices_from_info(all_nodes_info, "ImageScale", "upscale_method"),
     }
     
     # Loại bỏ các giá trị không hợp lệ nếu có
@@ -187,3 +191,24 @@ def delete_queued_item(prompt_id: str, server_address: str) -> bool:
     except Exception as e:
         print(f"Failed to delete queued item {prompt_id} from {server_address} (Exception): {e}")
     return False
+
+
+def upload_image_bytes(image_bytes: bytes, filename: str, server_address: str) -> str:
+    """
+    Uploads raw image bytes to the ComfyUI /upload/image endpoint and returns the stored filename.
+    """
+    files = {'image': (filename, image_bytes, 'image/png')}
+    data = {'overwrite': 'true'}
+    try:
+        response = requests.post(
+            f"http://{server_address}/upload/image",
+            files=files,
+            data=data,
+            timeout=10
+        )
+        response.raise_for_status()
+        payload = response.json()
+        stored_name = payload.get('name') or filename
+        return stored_name
+    except requests.RequestException as err:
+        raise ConnectionError(f"Failed to upload image to ComfyUI at {server_address}: {err}") from err

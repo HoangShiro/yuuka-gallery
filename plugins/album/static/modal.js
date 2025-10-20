@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
     const ensureNamespace = () => {
         window.Yuuka = window.Yuuka || {};
         window.Yuuka.plugins = window.Yuuka.plugins || {};
@@ -8,8 +8,24 @@
         `<div class="form-group"><label for="cfg-${key}">${label}</label><textarea id="cfg-${key}" name="${key}" rows="1">${value || ''}</textarea></div>`;
     const cs = (key, label, value, min, max, step) =>
         `<div class="form-group form-group-slider"><label for="cfg-${key}">${label}: <span id="val-${key}">${value}</span></label><input type="range" id="cfg-${key}" name="${key}" value="${value}" min="${min}" max="${max}" step="${step}" oninput="document.getElementById('val-${key}').textContent = this.value"></div>`;
-    const cse = (key, label, value, options) =>
-        `<div class="form-group"><label for="cfg-${key}">${label}</label><select id="cfg-${key}" name="${key}">${options.map(opt => `<option value="${opt.value}" ${opt.value == value ? 'selected' : ''}>${opt.name}</option>`).join('')}</select></div>`;
+    const cse = (key, label, value, options = []) => {
+        const optionsHTML = (options || []).map(opt => {
+            if (!opt) return '';
+            const optValue = opt.value ?? '';
+            const optName = opt.name ?? optValue;
+            const selected = String(optValue) === String(value) ? ' selected' : '';
+            const dataAttrs = (opt.dataAttrs && typeof opt.dataAttrs === 'object')
+                ? Object.entries(opt.dataAttrs)
+                    .map(([attr, attrValue]) => {
+                        const kebab = attr.replace(/[A-Z]/g, match => `-${match.toLowerCase()}`);
+                        return ` data-${kebab}="${String(attrValue)}"`;
+                    })
+                    .join('')
+                : '';
+            return `<option value="${optValue}"${selected}${dataAttrs}>${optName}</option>`;
+        }).join('');
+        return `<div class="form-group"><label for="cfg-${key}">${label}</label><select id="cfg-${key}" name="${key}">${optionsHTML}</select></div>`;
+    };
     const ciwb = (key, label, value) =>
         `<div class="form-group"><label for="cfg-${key}">${label}</label><div class="input-with-button"><input type="text" id="cfg-${key}" name="${key}" value="${value || ''}"><button type="button" class="connect-btn">Connect</button></div></div>`;
 
@@ -72,6 +88,110 @@
                 ? global_choices.loras
                 : [{ name: 'None', value: 'None' }];
             const selectedLora = last_config.lora_name || 'None';
+            const toNumber = (val, fallback) => {
+                const parsed = parseFloat(val);
+                return Number.isNaN(parsed) ? fallback : parsed;
+            };
+            const toInteger = (val, fallback) => {
+                const parsed = parseInt(val, 10);
+                return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+            };
+            const standardDefaults = {
+                steps: 25,
+                cfg: 2.5,
+                sampler: 'euler_ancestral',
+                scheduler: 'karras',
+                denoise: 1.0
+            };
+            const hiresDefaults = {
+                stage1Steps: 12,
+                stage1Cfg: 2.5,
+                stage1Sampler: 'euler_ancestral',
+                stage1Scheduler: 'karras',
+                stage1Denoise: 1.0,
+                stage2Steps: 14,
+                stage2Cfg: 2.5,
+                stage2Sampler: 'euler_ancestral',
+                stage2Scheduler: 'karras',
+                stage2Denoise: 0.5,
+                upscaleModel: '4x-UltraSharp.pth',
+                upscaleMethod: 'bilinear'
+            };
+
+            const finalWidth = toInteger(last_config.width, 0);
+            const finalHeight = toInteger(last_config.height, 0);
+            const savedIsHires = Boolean(last_config.hires_enabled) || (
+                toInteger(last_config.hires_base_width, 0) > 0 &&
+                toInteger(last_config.hires_base_height, 0) > 0 &&
+                finalWidth >= toInteger(last_config.hires_base_width, 0) * 2 &&
+                finalHeight >= toInteger(last_config.hires_base_height, 0) * 2
+            );
+
+            const hiresStage1Steps = toInteger(
+                last_config.steps,
+                savedIsHires ? hiresDefaults.stage1Steps : standardDefaults.steps
+            );
+            const hiresStage1Cfg = toNumber(
+                last_config.cfg,
+                savedIsHires ? hiresDefaults.stage1Cfg : standardDefaults.cfg
+            );
+            const hiresStage1Sampler = (last_config.sampler_name || (savedIsHires ? hiresDefaults.stage1Sampler : standardDefaults.sampler));
+            const hiresStage1Scheduler = (last_config.scheduler || (savedIsHires ? hiresDefaults.stage1Scheduler : standardDefaults.scheduler));
+            const hiresStage1Denoise = toNumber(last_config.hires_stage1_denoise, hiresDefaults.stage1Denoise);
+            const hiresStage2Steps = toInteger(last_config.hires_stage2_steps, hiresDefaults.stage2Steps);
+            const hiresStage2Cfg = toNumber(last_config.hires_stage2_cfg, hiresDefaults.stage2Cfg);
+            const hiresStage2Denoise = toNumber(last_config.hires_stage2_denoise, hiresDefaults.stage2Denoise);
+            const stage2SamplerValue = last_config.hires_stage2_sampler_name || hiresDefaults.stage2Sampler;
+            const stage2SchedulerValue = last_config.hires_stage2_scheduler || hiresDefaults.stage2Scheduler;
+            const hiresUpscaleModelValue = last_config.hires_upscale_model || hiresDefaults.upscaleModel;
+            const hiresUpscaleMethodValue = last_config.hires_upscale_method || hiresDefaults.upscaleMethod;
+            const hiresBaseWidth = toInteger(last_config.hires_base_width, finalWidth ? Math.round(finalWidth / 2) : 0);
+            const hiresBaseHeight = toInteger(last_config.hires_base_height, finalHeight ? Math.round(finalHeight / 2) : 0);
+
+            const sizeOptions = (global_choices && Array.isArray(global_choices.sizes)) ? global_choices.sizes : [];
+            const samplerOptions = (global_choices && Array.isArray(global_choices.samplers)) ? global_choices.samplers : [];
+            const schedulerOptions = (global_choices && Array.isArray(global_choices.schedulers)) ? global_choices.schedulers : [];
+            const checkpointOptions = (global_choices && Array.isArray(global_choices.checkpoints)) ? global_choices.checkpoints : [];
+
+            const hiresUpscaleModels = (global_choices && Array.isArray(global_choices.hires_upscale_models) && global_choices.hires_upscale_models.length > 0)
+                ? global_choices.hires_upscale_models
+                : [{ name: hiresUpscaleModelValue, value: hiresUpscaleModelValue }];
+            if (hiresUpscaleModelValue && !hiresUpscaleModels.some(opt => opt && opt.value === hiresUpscaleModelValue)) {
+                hiresUpscaleModels.unshift({ name: hiresUpscaleModelValue, value: hiresUpscaleModelValue });
+            }
+            const hiresUpscaleMethods = (global_choices && Array.isArray(global_choices.hires_upscale_methods) && global_choices.hires_upscale_methods.length > 0)
+                ? global_choices.hires_upscale_methods
+                : [{ name: hiresUpscaleMethodValue, value: hiresUpscaleMethodValue }];
+            if (hiresUpscaleMethodValue && !hiresUpscaleMethods.some(opt => opt && opt.value === hiresUpscaleMethodValue)) {
+                hiresUpscaleMethods.unshift({ name: hiresUpscaleMethodValue, value: hiresUpscaleMethodValue });
+            }
+
+            const hiresConfigHTML = `
+                        <div class="stage-config-grid" data-stage-config>
+                            <div class="stage-config-column" data-stage="stage1">
+                                <h5>Stage 1</h5>
+                                ${cs('steps', 'Steps', hiresStage1Steps, 5, 50, 1)}
+                                ${cs('cfg', 'CFG', hiresStage1Cfg, 1.0, 7.0, 0.1)}
+                                ${cse('sampler_name', 'Sampler', hiresStage1Sampler, samplerOptions)}
+                                ${cse('scheduler', 'Scheduler', hiresStage1Scheduler, schedulerOptions)}
+                                <div data-stage1-denoise>${cs('hires_stage1_denoise', 'Denoise', hiresStage1Denoise, 0, 1, 0.05)}</div>
+                            </div>
+                            <div class="stage-config-column" data-stage="stage2">
+                                <h5>Stage 2</h5>
+                                ${cs('hires_stage2_steps', 'Steps', hiresStage2Steps, 10, 60, 1)}
+                                ${cs('hires_stage2_cfg', 'CFG', hiresStage2Cfg, 1.0, 7.0, 0.1)}
+                                ${cse('hires_stage2_sampler_name', 'Sampler', stage2SamplerValue, samplerOptions)}
+                                ${cse('hires_stage2_scheduler', 'Scheduler', stage2SchedulerValue, schedulerOptions)}
+                                ${cs('hires_stage2_denoise', 'Denoise', hiresStage2Denoise, 0, 1, 0.05)}
+                            </div>
+                        </div>
+                        <div data-hires-only>
+                            ${cse('hires_upscale_model', 'Upscale Model', hiresUpscaleModelValue, hiresUpscaleModels)}
+                            ${cse('hires_upscale_method', 'Upscale Method', hiresUpscaleMethodValue, hiresUpscaleMethods)}
+                            <input type="hidden" name="hires_base_width" value="${hiresBaseWidth}">
+                            <input type="hidden" name="hires_base_height" value="${hiresBaseHeight}">
+                        </div>
+            `;
 
             const columnsHTML = `
                 <div class="album-settings-columns">
@@ -92,12 +212,9 @@
                     </div>
                     <div class="album-settings-column" data-column="configs">
                         <h4>Configs</h4>
-                        ${cs('steps', 'Steps', last_config.steps, 10, 50, 1)}
-                        ${cs('cfg', 'CFG', last_config.cfg, 1.0, 7.0, 0.1)}
-                        ${cse('size', 'W x H', `${last_config.width}x${last_config.height}`, global_choices.sizes)}
-                        ${cse('sampler_name', 'Sampler', last_config.sampler_name, global_choices.samplers)}
-                        ${cse('scheduler', 'Scheduler', last_config.scheduler, global_choices.schedulers)}
-                        ${cse('ckpt_name', 'Checkpoint', last_config.ckpt_name, global_choices.checkpoints)}
+                        ${cse('size', 'Size', `${last_config.width}x${last_config.height}`, sizeOptions)}
+                        ${hiresConfigHTML}
+                        ${cse('ckpt_name', 'Checkpoint', last_config.ckpt_name, checkpointOptions)}
                         ${ciwb('server_address', 'Server Address', last_config.server_address)}
                     </div>
                 </div>
@@ -109,10 +226,10 @@
                     <form id="album-settings-form">${columnsHTML}</form>
                 </div>
                 <div class="modal-actions">
-                    <button type="button" class="btn-paste" title="Dán"><span class="material-symbols-outlined">content_paste</span></button>
+                    <button type="button" class="btn-paste" title="Paste"><span class="material-symbols-outlined">content_paste</span></button>
                     <button type="button" class="btn-copy" title="Copy"><span class="material-symbols-outlined">content_copy</span></button>
-                    <button type="button" class="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button>
-                    <button type="submit" class="btn-save" title="Lưu" form="album-settings-form"><span class="material-symbols-outlined">save</span></button>
+                    <button type="button" class="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button>
+                    <button type="submit" class="btn-save" title="Save" form="album-settings-form"><span class="material-symbols-outlined">save</span></button>
                     <button type="button" class="btn-generate" title="Generate" style="display:none"><span class="material-symbols-outlined">auto_awesome</span></button>
                 </div>
             `;
@@ -141,6 +258,57 @@
                     column.appendChild(loraTagsWrapper);
                 }
             }
+            const sizeSelect = form?.elements?.['size'];
+            const stageConfigGrid = dialog.querySelector('[data-stage-config]');
+            const stage2Column = stageConfigGrid ? stageConfigGrid.querySelector('[data-stage="stage2"]') : null;
+            const stage1Denoise = stageConfigGrid ? stageConfigGrid.querySelector('[data-stage1-denoise]') : null;
+            const hiresBaseWidthInput = form?.elements?.['hires_base_width'];
+            const hiresBaseHeightInput = form?.elements?.['hires_base_height'];
+
+            const updateHiresConfigVisibility = () => {
+                if (!sizeSelect) return;
+                const selectedOption = sizeSelect.options[sizeSelect.selectedIndex];
+                const isHires = selectedOption?.dataset?.mode === "hires";
+                if (stageConfigGrid) {
+                    stageConfigGrid.classList.toggle('is-hires', !!isHires);
+                }
+                if (stage2Column) {
+                    stage2Column.style.display = isHires ? "" : "none";
+                }
+                if (stage1Denoise) {
+                    stage1Denoise.style.display = isHires ? "" : "none";
+                }
+                const hiresOnlyBlocks = dialog.querySelectorAll('[data-hires-only]');
+                hiresOnlyBlocks.forEach(block => {
+                    block.style.display = isHires ? "" : "none";
+                });
+                form.dataset.hiresEnabled = isHires ? "true" : "false";
+
+                const computeBase = (datasetValue, sizeValue, existingValue) => {
+                    const datasetParsed = parseInt(datasetValue, 10);
+                    if (Number.isFinite(datasetParsed) && datasetParsed > 0) return datasetParsed;
+                    const sizeParsed = parseInt(sizeValue, 10);
+                    if (Number.isFinite(sizeParsed) && sizeParsed > 0) return Math.round(sizeParsed / 2);
+                    const existingParsed = parseInt(existingValue, 10);
+                    return Number.isFinite(existingParsed) && existingParsed > 0 ? existingParsed : 0;
+                };
+
+                const sizeParts = (sizeSelect.value || "").split("x");
+                if (hiresBaseWidthInput) {
+                    const baseWidth = isHires ? computeBase(selectedOption?.dataset?.baseWidth, sizeParts[0], hiresBaseWidthInput.value) : 0;
+                    hiresBaseWidthInput.value = baseWidth > 0 ? String(baseWidth) : "0";
+                }
+                if (hiresBaseHeightInput) {
+                    const baseHeight = isHires ? computeBase(selectedOption?.dataset?.baseHeight, sizeParts[1], hiresBaseHeightInput.value) : 0;
+                    hiresBaseHeightInput.value = baseHeight > 0 ? String(baseHeight) : "0";
+                }
+            };
+
+            if (sizeSelect) {
+                sizeSelect.addEventListener('change', updateHiresConfigVisibility);
+            }
+            updateHiresConfigVisibility();
+
             const connectBtn = dialog.querySelector('.connect-btn');
 
             const columnsContainer = dialog.querySelector('.album-settings-columns');
@@ -335,7 +503,7 @@
                 showError("Prompt đã sao chép.");
             });
             dialog.querySelector('.btn-paste').addEventListener('click', () => {
-                if (!options.promptClipboard) { showError("Chưa có prompt."); return; }
+                if (!options.promptClipboard) { showError("Chưa sao chép prompt."); return; }
                 options.promptClipboard.forEach((v, k) => {
                     if (form.elements[k]) form.elements[k].value = v;
                 });
@@ -346,11 +514,55 @@
             const collectFormValues = () => {
                 const payload = {};
                 ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative', 'lora_name', 'server_address', 'sampler_name', 'scheduler', 'ckpt_name']
-                    .forEach(k => payload[k] = form.elements[k].value);
-                ['steps', 'cfg'].forEach(k => payload[k] = parseFloat(form.elements[k].value));
-                const [w, h] = form.elements['size'].value.split('x').map(Number);
-                payload.width = w;
-                payload.height = h;
+                    .forEach(k => {
+                        if (form.elements[k]) {
+                            payload[k] = form.elements[k].value;
+                        }
+                    });
+                ['steps', 'cfg'].forEach(k => {
+                    if (!form.elements[k]) return;
+                    const val = parseFloat(form.elements[k].value);
+                    payload[k] = Number.isNaN(val) ? last_config[k] : val;
+                });
+
+                const sizeField = form.elements['size'];
+                const sizeValue = sizeField ? sizeField.value : `${finalWidth}x${finalHeight}`;
+                const [sizeW, sizeH] = (sizeValue || '').split('x');
+                const parsedWidth = parseInt(sizeW, 10);
+                const parsedHeight = parseInt(sizeH, 10);
+                payload.width = Number.isFinite(parsedWidth) && parsedWidth > 0 ? parsedWidth : finalWidth;
+                payload.height = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : finalHeight;
+
+                const selectedOption = sizeField?.options?.[sizeField.selectedIndex];
+                const isHires = selectedOption?.dataset?.mode === 'hires';
+                payload.hires_enabled = !!isHires;
+
+                const baseWidthValue = parseInt(form.elements['hires_base_width']?.value ?? '0', 10);
+                payload.hires_base_width = Number.isFinite(baseWidthValue) && baseWidthValue > 0 ? baseWidthValue : 0;
+                const baseHeightValue = parseInt(form.elements['hires_base_height']?.value ?? '0', 10);
+                payload.hires_base_height = Number.isFinite(baseHeightValue) && baseHeightValue > 0 ? baseHeightValue : 0;
+
+                const stage1DenoiseInput = form.elements['hires_stage1_denoise'];
+                const stage1DenoiseValue = stage1DenoiseInput ? parseFloat(stage1DenoiseInput.value) : NaN;
+                payload.hires_stage1_denoise = Number.isNaN(stage1DenoiseValue) ? hiresDefaults.stage1Denoise : stage1DenoiseValue;
+
+                const stage2StepsInput = form.elements['hires_stage2_steps'];
+                const stage2StepsValue = stage2StepsInput ? parseInt(stage2StepsInput.value, 10) : NaN;
+                payload.hires_stage2_steps = Number.isFinite(stage2StepsValue) && stage2StepsValue > 0 ? stage2StepsValue : hiresDefaults.stage2Steps;
+
+                const stage2CfgInput = form.elements['hires_stage2_cfg'];
+                const stage2CfgValue = stage2CfgInput ? parseFloat(stage2CfgInput.value) : NaN;
+                payload.hires_stage2_cfg = Number.isNaN(stage2CfgValue) ? hiresDefaults.stage2Cfg : stage2CfgValue;
+
+                const stage2DenoiseInput = form.elements['hires_stage2_denoise'];
+                const stage2DenoiseValue = stage2DenoiseInput ? parseFloat(stage2DenoiseInput.value) : NaN;
+                payload.hires_stage2_denoise = Number.isNaN(stage2DenoiseValue) ? hiresDefaults.stage2Denoise : stage2DenoiseValue;
+
+                payload.hires_stage2_sampler_name = form.elements['hires_stage2_sampler_name']?.value || stage2SamplerValue;
+                payload.hires_stage2_scheduler = form.elements['hires_stage2_scheduler']?.value || stage2SchedulerValue;
+                payload.hires_upscale_model = form.elements['hires_upscale_model']?.value || hiresUpscaleModelValue;
+                payload.hires_upscale_method = form.elements['hires_upscale_method']?.value || hiresUpscaleMethodValue;
+
                 payload.lora_prompt_tags = getSelectedLoraPromptTags();
                 return payload;
             };
@@ -374,13 +586,13 @@
                         try {
                             await options.onGenerate(payload);
                         } catch (err) {
-                            showError(`Lỗi khi tạo: ${err.message}`);
+                            showError(`Lỗi khi generate: ${err.message}`);
                             return;
                         }
                     }
                         existingLoraSelections = Array.isArray(payload.lora_prompt_tags) ? payload.lora_prompt_tags.slice() : [];
                     const successMessage = shouldGenerate && typeof options.onGenerate === 'function'
-                        ? 'Đã lưu và bắt đầu tạo ảnh.'
+                        ? 'Đã lưu cấu hình và bắt đầu generate!'
                         : 'Lưu cấu hình thành công!';
                     showError(successMessage);
                     close();
@@ -393,7 +605,7 @@
                 const btn = e.currentTarget;
                 const address = form.elements['server_address'].value.trim();
                 if (!address) {
-                    showError("Vui lòng nhập địa chỉ ComfyUI.");
+                    showError("Vui lòng nhập địa chỉ server.");
                     return;
                 }
                 const originalText = btn.textContent;
@@ -429,9 +641,9 @@
             }
         } catch (e) {
             close();
-            let friendlyMessage = "Lỗi: Không thể tải cấu hình.";
+            let friendlyMessage = "Lỗi: Không thể mở modal cấu hình.";
             if (e?.message && (e.message.includes("10061") || e.message.toLowerCase().includes("connection refused"))) {
-                friendlyMessage = "Lỗi: Không thể kết nối tới ComfyUI để lấy cấu hình.";
+                friendlyMessage = "Lỗi: Không thể kết nối đến ComfyUI. Vui lòng kiểm tra xem ComfyUI đã được khởi động chưa.";
             } else if (e?.message) {
                 friendlyMessage = `Lỗi tải cấu hình: ${e.message}`;
             }
@@ -441,3 +653,4 @@
 
     window.Yuuka.plugins.albumModal = { openSettingsModal };
 })();
+
