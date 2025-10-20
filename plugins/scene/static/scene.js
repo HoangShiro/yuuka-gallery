@@ -414,7 +414,45 @@ class SceneComponent {
     async openSettings(sceneId) {
         const scene = this.state.scenes.find(s => s.id === sceneId);
         if (!scene) return;
-        this._openSceneSettingsModal(scene);
+        const modalApi = window.Yuuka?.plugins?.sceneModal;
+        if (!modalApi || typeof modalApi.openSettingsModal !== 'function') {
+            showError('Scene settings UI is not ready.');
+            return;
+        }
+
+        const cloneConfig = () => JSON.parse(JSON.stringify(scene.generationConfig || {}));
+
+        await modalApi.openSettingsModal({
+            title: 'Scene settings',
+            modalClass: 'plugin-scene__settings-modal',
+            fetchInfo: async () => {
+                const configClone = cloneConfig();
+                const address = (configClone.server_address || '127.0.0.1:8888').trim();
+                let globalChoices = {};
+                if (address) {
+                    try {
+                        const info = await this.api.scene.get(`/comfyui/info?server_address=${encodeURIComponent(address)}`);
+                        if (info?.global_choices) {
+                            globalChoices = info.global_choices;
+                        }
+                    } catch (err) {
+                        console.warn('[Plugin:Scene] Unable to preload ComfyUI choices:', err);
+                        showError(`Khong the tai lua chon tu ComfyUI: ${err?.message || err}`);
+                    }
+                }
+                return { config: configClone, global_choices: globalChoices };
+            },
+            fetchGlobalChoices: async (address) => {
+                const info = await this.api.scene.get(`/comfyui/info?server_address=${encodeURIComponent(address)}`);
+                return info?.global_choices || {};
+            },
+            checkServerStatus: (address) => this.api.server.checkComfyUIStatus(address),
+            onSave: async (updatedConfig) => {
+                scene.generationConfig = { ...(scene.generationConfig || {}), ...updatedConfig };
+                await this.saveScenes();
+            },
+            successMessage: 'Da luu cai dat Scene.'
+        });
     }
 
     toggleCollapse(type, id, parentId) {
@@ -787,107 +825,6 @@ class SceneComponent {
     }
     
     _createModal(contentHtml, isPersistent = false) { const modal = this._createUIElement('div', { className: 'modal-backdrop plugin-scene__modal' }); modal.innerHTML = `<div class="modal-dialog">${contentHtml}</div>`; const close = () => modal.remove(); if (!isPersistent) modal.addEventListener('click', (e) => e.target === modal && close()); document.body.appendChild(modal); return { modal, dialog: modal.querySelector('.modal-dialog'), close }; }
-    async _openSceneSettingsModal(scene) {
-        const defaults = {
-            quantity_per_stage: 1,
-            quality: '',
-            negative: '',
-            lora_name: 'None',
-            steps: 25,
-            cfg: 3.0,
-            seed: 0,
-            sampler_name: 'euler_ancestral',
-            scheduler: 'karras',
-            ckpt_name: 'waiNSFWIllustrious_v150.safetensors',
-            server_address: '127.0.0.1:8888',
-            width: 832,
-            height: 1216
-        };
-        const config = { ...defaults, ...(scene.generationConfig || {}) };
-        if (!config.ckpt_name) config.ckpt_name = defaults.ckpt_name;
-        if (!config.server_address) config.server_address = defaults.server_address;
-        if (!config.lora_name) config.lora_name = defaults.lora_name;
-        const currentSize = `${config.width}x${config.height}`;
-        const currentLora = config.lora_name || 'None';
-
-        const cNum = (k, l, v, min, max, step) => `<div class="form-group"><label>${l}</label><input type="number" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}"></div>`;
-        const cTxt = (k, l, v) => `<div class="form-group"><label>${l}</label><textarea name="${k}" rows="2">${v}</textarea></div>`;
-        const cSli = (k, l, v, min, max, step) => `<div class="form-group form-group-slider"><label>${l}: <span id="val-${k}">${v}</span></label><input type="range" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}" oninput="this.previousElementSibling.textContent = this.value"></div>`;
-        const cSel = (k, l, opts, v) => `<div class="form-group"><label>${l}</label><select name="${k}">${opts.map(o => `<option value="${o.value}" ${o.value == v ? 'selected' : ''}>${o.name}</option>`).join('')}</select></div>`;
-        const cInpBtn = (k, l, v) => `<div class="form-group"><label>${l}</label><div class="input-with-button"><input type="text" name="${k}" value="${v}"><button type="button" class="connect-btn">Connect</button></div></div>`;
-
-        const modalHtml = `<h3>Configure Scene</h3><div class="settings-form-container"><form id="scene-cfg-form">${cNum('quantity_per_stage', 'Images per Stage', config.quantity_per_stage, 1, 10, 1)}${cTxt('quality', 'Quality', config.quality)}${cTxt('negative', 'Negative', config.negative)}${cSel('lora_name', 'LoRA Name', [{ name: 'Loading...', value: currentLora }], currentLora)}${cSli('steps', 'Steps', config.steps, 10, 50, 1)}${cSli('cfg', 'CFG', config.cfg, 1.0, 7.0, 0.1)}${cNum('seed', 'Seed (0 = random)', config.seed, 0, Number.MAX_SAFE_INTEGER, 1)}${cSel('size', 'W x H', [{ name: 'Loading...', value: currentSize }], currentSize)}${cSel('sampler_name', 'Sampler', [{ name: 'Loading...', value: config.sampler_name }], config.sampler_name)}${cSel('scheduler', 'Scheduler', [{ name: 'Loading...', value: config.scheduler }], config.scheduler)}${cSel('ckpt_name', 'Checkpoint', [{ name: 'Loading...', value: config.ckpt_name }], config.ckpt_name)}${cInpBtn('server_address', 'Server Address', config.server_address)}</form></div><div class="modal-actions"><button id="btn-cancel" class="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button><button id="btn-save" class="btn-save" title="Save"><span class="material-symbols-outlined">save</span></button></div>`;
-
-        const { dialog, close } = this._createModal(modalHtml, true);
-        const form = dialog.querySelector('form');
-        dialog.querySelectorAll('textarea').forEach(textarea => {
-            const autoGrow = () => {
-                textarea.style.height = 'auto';
-                textarea.style.height = `${textarea.scrollHeight}px`;
-            };
-            textarea.addEventListener('input', autoGrow);
-            setTimeout(autoGrow, 0);
-        });
-        const connectBtn = dialog.querySelector('.connect-btn');
-        const serverAddressInput = form.elements['server_address'];
-
-        const loadAndPopulateOptions = async (address) => {
-            try {
-                const { global_choices } = await this.api.scene.get(`/comfyui/info?server_address=${encodeURIComponent(address)}`);
-                const populate = (key, choices, currentValue) => {
-                    const select = form.elements[key];
-                    select.innerHTML = choices.map(c => `<option value="${c.value}" ${c.value == currentValue ? 'selected' : ''}>${c.name}</option>`).join('');
-                };
-                populate('lora_name', global_choices.loras || [{ name: 'None', value: 'None' }], form.elements['lora_name'].value);
-                populate('size', global_choices.sizes, form.elements['size'].value);
-                populate('sampler_name', global_choices.samplers, form.elements['sampler_name'].value);
-                populate('scheduler', global_choices.schedulers, form.elements['scheduler'].value);
-                populate('ckpt_name', global_choices.checkpoints, form.elements['ckpt_name'].value);
-            } catch (err) {
-                showError(`Cannot load data from ComfyUI: ${err.message}`);
-            }
-        };
-
-        connectBtn.addEventListener('click', async () => {
-            const address = serverAddressInput.value.trim();
-            if (!address) {
-                showError('Please enter a server address.');
-                return;
-            }
-            connectBtn.textContent = '...';
-            connectBtn.disabled = true;
-            try {
-                await this.api.server.checkComfyUIStatus(address);
-                showError('Connection successful!');
-                await loadAndPopulateOptions(address);
-            } catch (e) {
-                showError('Connection failed.');
-            } finally {
-                connectBtn.textContent = 'Connect';
-                connectBtn.disabled = false;
-            }
-        });
-
-        dialog.querySelector('#btn-cancel').onclick = close;
-        dialog.querySelector('#btn-save').onclick = () => {
-            const updates = {};
-            ['quality', 'negative', 'lora_name', 'server_address', 'sampler_name', 'scheduler', 'ckpt_name'].forEach(k => updates[k] = form.elements[k].value);
-            ['steps', 'cfg'].forEach(k => updates[k] = parseFloat(form.elements[k].value));
-            ['quantity_per_stage', 'seed'].forEach(k => updates[k] = parseInt(form.elements[k].value, 10));
-            const [w, h] = form.elements['size'].value.split('x').map(Number);
-            updates.width = w;
-            updates.height = h;
-            scene.generationConfig = updates;
-            this.saveScenes();
-            showError('Scene settings saved.');
-            close();
-        };
-
-        loadAndPopulateOptions(serverAddressInput.value.trim());
-    }
-
-
-
     openTagSelector(category, sceneId, stageId) {
         const scene = this.state.scenes.find(s => s.id === sceneId);
         const stage = scene?.stages.find(st => st.id === stageId);

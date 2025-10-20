@@ -1,0 +1,33 @@
+{
+    "id": "lora-downloader",
+    "name": "LoRA Downloader",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Tải LoRA trực tiếp từ Civitai thông qua ComfyUI và quản lý metadata ngay trong Character Gallery.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:LoraDownloaderPlugin",
+        "frontend_component": "LoraDownloaderService"
+    },
+    "assets": {
+        "js": [
+            "lora_downloader.js"
+        ],
+        "css": [
+            "lora_downloader.css"
+        ]
+    },
+    "dependencies": {
+        "python": []
+    },
+    "ui": {
+        "is_singleton": true,
+        "tab": {
+            "id": "lora-downloader",
+            "icon": "cloud_download",
+            "label": "LoRA Downloader",
+            "is_service_launcher": true
+        },
+        "order": 40
+    }
+}

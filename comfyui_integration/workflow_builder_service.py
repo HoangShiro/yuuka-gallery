@@ -37,6 +37,7 @@ DEFAULT_CONFIG = {
     "lora_name": "None", 
     "lora_strength_model": 1.0, 
     "lora_strength_clip": 1.0,
+    "lora_prompt_tags": [],
 }
 
 # Yuuka: Tích hợp các hàm tiện ích nhỏ vào đây để file độc lập.
@@ -47,7 +48,7 @@ def normalize_tag_list(tags: str) -> List[str]:
     return [tag.strip() for tag in tags.split(',') if tag.strip()]
 
 def build_full_prompt_from_cfg(cfg_data: Dict[str, Any]) -> str:
-    """Xây dựng prompt đầy đủ từ các thành phần trong config."""
+    """Build prompt from config."""
     prompt_parts = [
         cfg_data.get('character_prompt') or cfg_data.get('character', ''),
         cfg_data.get('outfits', ''),
@@ -56,7 +57,9 @@ def build_full_prompt_from_cfg(cfg_data: Dict[str, Any]) -> str:
         cfg_data.get('context', ''),
         cfg_data.get('quality', 'masterpiece, best quality'),
     ]
-    # Nối các phần lại với nhau, chỉ giữ lại các phần có nội dung
+    lora_prompt_tags = cfg_data.get('lora_prompt_tags', [])
+    if isinstance(lora_prompt_tags, list):
+        prompt_parts.extend(str(item).strip() for item in lora_prompt_tags if str(item).strip())
     full_prompt = ", ".join(filter(None, [part.strip() for part in prompt_parts]))
     return full_prompt
 

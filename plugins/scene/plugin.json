@@ -10,7 +10,7 @@
         "frontend_component": "SceneComponent"
     },
     "assets": {
-        "js": ["scene.js"],
+        "js": ["modal.js", "scene.js"],
         "css": ["scene.css"]
     },
     "dependencies": {

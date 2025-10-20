@@ -210,7 +210,7 @@
     color: var(--color-primary-text);
     padding: var(--spacing-5);
     border-radius: var(--rounded-lg);
-    max-width: 600px;
+    max-width: 1920px;
     width: 90%;
     position: relative;
     padding-bottom: 90px; /* Thêm không gian cho thanh action nổi */
@@ -345,4 +345,156 @@
 /* Thêm để overlay tiến độ hiển thị đúng trong thẻ nhân vật */
 .character-card .image-container {
     position: relative;
+}
+.plugin-album__settings-modal .album-settings-container {
+    max-height: 65vh;
+    overflow-y: auto;
+}
+.plugin-album__settings-modal .album-settings-columns {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(320px, 1fr));
+    gap: var(--spacing-4);
+}
+.plugin-album__settings-modal .album-settings-column h4 {
+    margin-top: 0;
+    margin-bottom: var(--spacing-3);
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-primary-text);
+}
+.plugin-album__settings-modal .album-settings-column .form-group {
+    margin-bottom: var(--spacing-3);
+}
+.plugin-album__settings-modal .album-settings-column .form-group:last-child {
+    margin-bottom: 0;
+}
+.plugin-album__settings-modal .album-settings-columns .lora-tags-wrapper {
+    margin-top: var(--spacing-3);
+}
+.plugin-album__settings-modal .album-settings-column[data-column="lora"] {
+    display: flex;
+    flex-direction: column;
+}
+
+.plugin-album__settings-modal .album-settings-tabs {
+    display: none;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-3);
+}
+
+.plugin-album__settings-modal .album-settings-tabs button {
+    flex: 1;
+    padding: var(--spacing-2) var(--spacing-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-full);
+    background: var(--color-primary-bg);
+    color: var(--color-secondary-text);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.plugin-album__settings-modal .album-settings-tabs button.is-active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: #fff;
+    box-shadow: 0 10px 18px -12px rgba(0, 0, 0, 0.35);
+}
+.plugin-album__settings-modal .album-settings-column[data-column="lora"] .lora-tags-wrapper {
+    flex-grow: 1;
+}
+@media (max-width: 1200px) {
+    .plugin-album__settings-modal .album-settings-columns {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 768px) {
+    .plugin-album__settings-modal .album-settings-columns {
+        grid-template-columns: 1fr;
+    }
+}
+
+.plugin-album__settings-modal .lora-tags-wrapper {
+    margin-top: var(--spacing-3);
+    display: none;
+    flex-direction: column;
+    gap: var(--spacing-3);
+}
+
+.plugin-album__settings-modal .lora-tag-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    padding: var(--spacing-3);
+    box-shadow: 0 8px 18px -10px var(--color-shadow);
+}
+
+.plugin-album__settings-modal .lora-tag-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-2);
+    color: var(--color-primary-text);
+    font-weight: var(--font-weight-medium);
+}
+
+.plugin-album__settings-modal .lora-tag-card__body {
+    color: var(--color-secondary-text);
+    font-size: var(--font-size-sm);
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.plugin-album__settings-modal .lora-tag-toggle {
+    position: relative;
+    width: 42px;
+    height: 22px;
+    border: none;
+    border-radius: var(--rounded-full);
+    background: var(--color-border);
+    cursor: pointer;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.plugin-album__settings-modal .lora-tag-toggle::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease;
+}
+
+.plugin-album__settings-modal .lora-tag-toggle.is-active {
+    background: var(--color-accent);
+}
+
+.plugin-album__settings-modal .lora-tag-toggle.is-active::after {
+    transform: translateX(20px);
+}
+
+.plugin-album__settings-modal .lora-tag-toggle:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+.plugin-album__settings-modal.is-mobile .modal-dialog > h3 {
+    display: none;
+}
+
+.plugin-album__settings-modal.is-mobile .album-settings-tabs {
+    display: flex;
+}
+
+.plugin-album__settings-modal.is-mobile .album-settings-column {
+    display: none;
+}
+
+.plugin-album__settings-modal.is-mobile .album-settings-column.is-active {
+    display: block;
 }

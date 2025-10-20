@@ -42,11 +42,6 @@ window.Yuuka = {
             switchTab(tabId);
         },
 
-        /**
-         * YUUKA: HÀM MỚI ĐỂ HIỂN THỊ MODAL XÁC NHẬN
-         * @param {string} message - Nội dung cần xác nhận.
-         * @returns {Promise<boolean>} - Trả về true nếu người dùng nhấn OK, false nếu nhấn Cancel.
-         */
         confirm(message) {
             return new Promise(resolve => {
                 if (document.querySelector('.confirm-modal-backdrop')) {
@@ -60,8 +55,8 @@ window.Yuuka = {
                     <div class="confirm-modal-dialog">
                         <p>${message}</p>
                         <div class="modal-actions">
-                            <button class="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button>
-                            <button class="btn-confirm" title="Xác nhận"><span class="material-symbols-outlined">check</span></button>
+                            <button class="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button>
+                            <button class="btn-confirm" title="Confirm"><span class="material-symbols-outlined">check</span></button>
                         </div>
                     </div>
                 `;
@@ -86,20 +81,14 @@ window.Yuuka = {
             });
         },
 
-        /**
-         * YUUKA: HÀM MỚI ĐỂ SAO CHÉP VĂN BẢN VÀO CLIPBOARD
-         * @param {string} text - Nội dung cần sao chép.
-         * @returns {Promise<void>}
-         */
         copyToClipboard(text) {
             return new Promise((resolve, reject) => {
                 if (navigator.clipboard && window.isSecureContext) {
                     navigator.clipboard.writeText(text).then(resolve).catch(reject);
                 } else {
-                    // Fallback for older browsers or non-secure contexts
-                    const textArea = document.createElement("textarea");
+                    const textArea = document.createElement('textarea');
                     textArea.value = text;
-                    textArea.style.position = 'fixed'; 
+                    textArea.style.position = 'fixed';
                     textArea.style.left = '-9999px';
                     document.body.appendChild(textArea);
                     textArea.focus();
@@ -120,162 +109,97 @@ window.Yuuka = {
             });
         },
 
-        /**
-         * YUUKA: SERVICE MỚI ĐỂ MỞ MODAL CẤU HÌNH
-         * @param {object} options
-         * @param {string} options.title - Tiêu đề của modal.
-         * @param {function} options.fetchInfo - Hàm async để lấy thông tin cấu hình và các lựa chọn. Phải trả về { last_config, global_choices }.
-         * @param {function} options.onSave - Hàm async được gọi khi lưu, nhận vào (updatedConfig).
-         * @param {Map} [options.promptClipboard] - (Tùy chọn) Clipboard nội bộ cho prompt.
-         * @returns {Promise<void>}
-         */
-        async openSettingsModal(options) {
-            const modal = document.createElement('div');
-            modal.className = 'modal-backdrop settings-modal-backdrop';
-            if (options.modalClass) {
-                modal.classList.add(options.modalClass);
-            }
-            document.body.appendChild(modal);
-            modal.innerHTML = `<div class="modal-dialog"><h3>Đang tải...</h3></div>`;
-            const close = () => modal.remove();
-            // Yuuka: comfyui fetch optimization v1.0 - Xóa event listener đóng modal khi click ra ngoài
-
-            try {
-                const { last_config, global_choices } = await options.fetchInfo();
-                const tagPredictions = await api.getTags().catch(() => []);
-
-                const dialog = modal.querySelector('.modal-dialog');
-                const ct = (k,l,v)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><textarea id="cfg-${k}" name="${k}" rows="1">${v||''}</textarea></div>`;
-                const cs = (k,l,v,min,max,step)=>`<div class="form-group form-group-slider"><label for="cfg-${k}">${l}: <span id="val-${k}">${v}</span></label><input type="range" id="cfg-${k}" name="${k}" value="${v}" min="${min}" max="${max}" step="${step}" oninput="document.getElementById('val-${k}').textContent = this.value"></div>`;
-                const cse = (k,l,v,o)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><select id="cfg-${k}" name="${k}">${o.map(opt=>`<option value="${opt.value}" ${opt.value==v?'selected':''}>${opt.name}</option>`).join('')}</select></div>`;
-                const cti = (k,l,v)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><input type="text" id="cfg-${k}" name="${k}" value="${v||''}"></div>`;
-                const ciwb = (k,l,v)=>`<div class="form-group"><label for="cfg-${k}">${l}</label><div class="input-with-button"><input type="text" id="cfg-${k}" name="${k}" value="${v||''}"><button type="button" class="connect-btn">Connect</button></div></div>`;
-                const loraOptions = (global_choices && Array.isArray(global_choices.loras) && global_choices.loras.length > 0) ? global_choices.loras : [{ name: 'None', value: 'None' }];
-                const selectedLora = last_config.lora_name || 'None';
-                
-                dialog.innerHTML = `<h3>${options.title}</h3><div class="settings-form-container"><form id="core-settings-form">${ct('character','Character',last_config.character)}${ct('outfits','Outfits',last_config.outfits)}${ct('expression','Expression',last_config.expression)}${ct('action','Action',last_config.action)}${ct('context','Context',last_config.context)}${ct('quality','Quality',last_config.quality)}${ct('negative','Negative',last_config.negative)}${cse('lora_name','LoRA Name',selectedLora,loraOptions)}${cs('steps','Steps',last_config.steps,10,50,1)}${cs('cfg','CFG',last_config.cfg,1.0,7.0,0.1)}${cse('size','W x H',`${last_config.width}x${last_config.height}`,global_choices.sizes)}${cse('sampler_name','Sampler',last_config.sampler_name,global_choices.samplers)}${cse('scheduler','Scheduler',last_config.scheduler,global_choices.schedulers)}${cse('ckpt_name','Checkpoint',last_config.ckpt_name,global_choices.checkpoints)}${ciwb('server_address','Server Address',last_config.server_address)}</form></div><div class="modal-actions"><button type="button" class="btn-paste" title="Dán"><span class="material-symbols-outlined">content_paste</span></button><button type="button" class="btn-copy" title="Copy"><span class="material-symbols-outlined">content_copy</span></button><button type="button" class="btn-cancel" title="Hủy"><span class="material-symbols-outlined">close</span></button><button type="submit" class="btn-save" title="Lưu" form="core-settings-form"><span class="material-symbols-outlined">save</span></button><button type="button" class="btn-generate" title="Generate" style="display:none"><span class="material-symbols-outlined">auto_awesome</span></button></div>`;
-
-                const form = dialog.querySelector('form');
-                const saveBtn = dialog.querySelector('.btn-save');
-                const generateBtn = dialog.querySelector('.btn-generate');
-                
-                // --- Logic autocomplete, copy, paste, etc. (đã được tối ưu hóa)
-                this._initTagAutocomplete(dialog, tagPredictions);
-                dialog.querySelectorAll('textarea').forEach(t=>{const a=()=>{t.style.height='auto';t.style.height=`${t.scrollHeight}px`;};t.addEventListener('input',a);setTimeout(a,0);});
-                dialog.querySelector('.btn-cancel').addEventListener('click', close);
-                dialog.querySelector('.btn-copy').addEventListener('click',()=>{const p=['outfits','expression','action','context','quality','negative'];options.promptClipboard=new Map(p.map(k=>[k,form.elements[k]?form.elements[k].value.trim():'']));showError("Prompt đã sao chép.");});
-                dialog.querySelector('.btn-paste').addEventListener('click',()=>{if(!options.promptClipboard){showError("Chưa có prompt.");return;}options.promptClipboard.forEach((v,k)=>{if(form.elements[k])form.elements[k].value=v;});dialog.querySelectorAll('textarea').forEach(t=>t.dispatchEvent(new Event('input',{bubbles:true})));showError("Đã dán prompt.");});
-
-                const collectFormValues = () => {
-                    const payload = {};
-                    ['character','outfits','expression','action','context','quality','negative','lora_name','server_address','sampler_name','scheduler','ckpt_name'].forEach(k=>payload[k]=form.elements[k].value);
-                    ['steps','cfg'].forEach(k=>payload[k]=parseFloat(form.elements[k].value));
-                    const [w,h] = form.elements['size'].value.split('x').map(Number);
-                    payload.width = w;
-                    payload.height = h;
-                    return payload;
-                };
-
-                const setActionButtonsDisabled = (disabled) => {
-                    if (saveBtn) saveBtn.disabled = disabled;
-                    if (generateBtn) generateBtn.disabled = disabled;
-                };
-
-                const handleSave = async (shouldGenerate = false) => {
-                    const payload = collectFormValues();
-                    setActionButtonsDisabled(true);
-                    try {
-                        try {
-                            await options.onSave(payload);
-                        } catch (err) {
-                            showError(`Lỗi khi lưu: ${err.message}`);
-                            return;
-                        }
-                        if (shouldGenerate && typeof options.onGenerate === 'function') {
-                            try {
-                                await options.onGenerate(payload);
-                            } catch (err) {
-                                showError(`Lỗi khi tạo: ${err.message}`);
-                                return;
-                            }
-                        }
-                        const successMessage = shouldGenerate && typeof options.onGenerate === 'function' ? 'Đã lưu và bắt đầu tạo ảnh.' : 'Lưu cấu hình thành công!';
-                        showError(successMessage);
-                        close();
-                    } finally {
-                        setActionButtonsDisabled(false);
-                    }
-                };
-
-                // Yuuka: comfyui fetch optimization v1.0 - Nâng cấp logic nút Connect
-                const connectBtn = dialog.querySelector('.connect-btn');
-                connectBtn.addEventListener('click', async (e) => {
-                    const btn = e.currentTarget;
-                    const address = dialog.querySelector('[name="server_address"]').value.trim();
-
-                    if (options.onConnect) {
-                        await options.onConnect(address, btn, close);
-                    } else {
-                        // Logic mặc định nếu plugin không cung cấp onConnect
-                        const originalText = 'Connect';
-                        btn.textContent = '...';
-                        btn.disabled = true;
-                        try {
-                            await api.server.checkComfyUIStatus(address);
-                            showError("Kết nối thành công!");
-                        } catch (err) {
-                            showError("Kết nối thất bại.");
-                        } finally {
-                            btn.textContent = originalText;
-                            btn.disabled = false;
-                        }
-                    }
-                });
-                
-                form.addEventListener('submit', async(e) => {
-                    e.preventDefault();
-                    await handleSave(false);
-                });
-
-                if (generateBtn) {
-                    if (typeof options.onGenerate === 'function') {
-                        generateBtn.style.display = '';
-                        generateBtn.addEventListener('click', () => { handleSave(true); });
-                    } else {
-                        generateBtn.style.display = 'none';
-                    }
-                }
-
-            } catch (e) {
-                 // Yuuka: ComfyUI connection error handling v1.0
-                 close(); // Đóng modal "Đang tải..."
-                 let friendlyMessage = "Lỗi: Không thể tải cấu hình.";
-                 if (e.message && (e.message.includes("10061") || e.message.toLowerCase().includes("connection refused"))) {
-                     friendlyMessage = "Lỗi: Không thể kết nối tới ComfyUI để lấy cấu hình.";
-                 } else if (e.message) {
-                     friendlyMessage = `Lỗi tải cấu hình: ${e.message}`;
-                 }
-                 showError(friendlyMessage);
-            }
-        },
-
         _initTagAutocomplete(formContainer, tagPredictions) {
-            if(!tagPredictions || tagPredictions.length === 0) return;
-            formContainer.querySelectorAll('textarea, input[type="text"]').forEach(input=>{
-                if(input.parentElement.classList.contains('tag-autocomplete-container')) return;
-                const w=document.createElement('div'); w.className='tag-autocomplete-container'; input.parentElement.insertBefore(w,input); w.appendChild(input);
-                const l=document.createElement('ul'); l.className='tag-autocomplete-list'; w.appendChild(l);
-                let a=-1; const h=()=>{l.style.display='none';l.innerHTML='';a=-1;};
-                input.addEventListener('input',()=>{const t=input.value,c=input.selectionStart;const b=t.substring(0,c),last=b.lastIndexOf(',');const cur=b.substring(last+1).trim();if(cur.length<1){h();return;}const s=cur.replace(/\s+/g,'_').toLowerCase();const m=tagPredictions.filter(t=>t.startsWith(s)).slice(0,7);if(m.length>0){l.innerHTML=m.map(match=>`<li class="tag-autocomplete-item" data-tag="${match}">${match.replace(/_/g,' ')}</li>`).join('');l.style.display='block';a=-1;}else{h();}});
-                const apply=(s)=>{const t=input.value,c=input.selectionStart;const textB=t.substring(0,c),last=textB.lastIndexOf(',');const before=t.substring(0,last+1);const after=t.substring(c),end=after.indexOf(',')===-1?after.length:after.indexOf(',');const finalA=t.substring(c+end);const n=`${before.trim()?`${before.trim()} `:''}${s.replace(/_/g,' ')}, ${finalA.trim()}`;input.value=n.trim();const nC=`${before.trim()?`${before.trim()} `:''}${s}`.length+2;input.focus();input.setSelectionRange(nC,nC);h();input.dispatchEvent(new Event('input',{bubbles:true}));};
-                l.addEventListener('mousedown',e=>{e.preventDefault();if(e.target.matches('.tag-autocomplete-item'))apply(e.target.dataset.tag);});
-                input.addEventListener('keydown',e=>{const i=l.querySelectorAll('.tag-autocomplete-item');if(i.length===0)return;if(e.key==='ArrowDown'){e.preventDefault();a=(a+1)%i.length;}else if(e.key==='ArrowUp'){e.preventDefault();a=(a-1+i.length)%i.length;}else if((e.key==='Enter'||e.key==='Tab')&&a>-1){e.preventDefault();apply(i[a].dataset.tag);}else if(e.key==='Escape')h();i.forEach((item,idx)=>item.classList.toggle('active',idx===a));});
-                input.addEventListener('blur',()=>setTimeout(h,150));
+            if (!tagPredictions || tagPredictions.length === 0) return;
+            formContainer.querySelectorAll('textarea, input[type="text"]').forEach(input => {
+                if (input.parentElement.classList.contains('tag-autocomplete-container')) return;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'tag-autocomplete-container';
+                input.parentElement.insertBefore(wrapper, input);
+                wrapper.appendChild(input);
+
+                const list = document.createElement('ul');
+                list.className = 'tag-autocomplete-list';
+                wrapper.appendChild(list);
+
+                let activeIndex = -1;
+                const hideList = () => {
+                    list.style.display = 'none';
+                    list.innerHTML = '';
+                    activeIndex = -1;
+                };
+
+                input.addEventListener('input', () => {
+                    const textValue = input.value;
+                    const cursor = input.selectionStart;
+                    const beforeCursor = textValue.substring(0, cursor);
+                    const lastComma = beforeCursor.lastIndexOf(',');
+                    const currentToken = beforeCursor.substring(lastComma + 1).trim();
+                    if (currentToken.length < 1) {
+                        hideList();
+                        return;
+                    }
+                    const searchToken = currentToken.replace(/\s+/g, '_').toLowerCase();
+                    const matches = tagPredictions.filter(tag => tag.startsWith(searchToken)).slice(0, 7);
+                    if (matches.length > 0) {
+                        list.innerHTML = matches.map(match => `
+                            <li class="tag-autocomplete-item" data-tag="${match}">${match.replace(/_/g, ' ')}</li>
+                        `).join('');
+                        list.style.display = 'block';
+                        activeIndex = -1;
+                    } else {
+                        hideList();
+                    }
+                });
+
+                const applyTag = (tag) => {
+                    const textValue = input.value;
+                    const cursor = input.selectionStart;
+                    const beforeCursor = textValue.substring(0, cursor);
+                    const lastComma = beforeCursor.lastIndexOf(',');
+                    const before = textValue.substring(0, lastComma + 1);
+                    const after = textValue.substring(cursor);
+                    const nextComma = after.indexOf(',');
+                    const remaining = nextComma == -1 ? '' : after.substring(nextComma);
+                    const result = `${before.trim() ? `${before.trim()} ` : ''}${tag.replace(/_/g, ' ')}, ${remaining.trim()}`.trim();
+                    input.value = result;
+                    const newCursor = (`${before.trim() ? `${before.trim()} ` : ''}${tag}`).length + 2;
+                    input.focus();
+                    input.setSelectionRange(newCursor, newCursor);
+                    hideList();
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                };
+
+                list.addEventListener('mousedown', (event) => {
+                    event.preventDefault();
+                    if (event.target.matches('.tag-autocomplete-item')) {
+                        applyTag(event.target.dataset.tag);
+                    }
+                });
+
+                input.addEventListener('keydown', (event) => {
+                    const items = list.querySelectorAll('.tag-autocomplete-item');
+                    if (items.length === 0) return;
+                    if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        activeIndex = (activeIndex + 1) % items.length;
+                    } else if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        activeIndex = (activeIndex - 1 + items.length) % items.length;
+                    } else if ((event.key === 'Enter' || event.key === 'Tab') && activeIndex > -1) {
+                        event.preventDefault();
+                        applyTag(items[activeIndex].dataset.tag);
+                    } else if (event.key === 'Escape') {
+                        hideList();
+                    }
+                    items.forEach((item, idx) => item.classList.toggle('active', idx === activeIndex));
+                });
+
+                input.addEventListener('blur', () => setTimeout(hideList, 150));
             });
         }
-    }
+    },
 };
-
 // --- DOM Elements ---
 const tabsContainer = document.getElementById('tabs');
 const mainContainer = document.querySelector('.container');

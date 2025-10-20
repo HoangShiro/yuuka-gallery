@@ -534,7 +534,12 @@ class AlbumComponent {
 
     async openSettings() {
         if (!this.state.isComfyUIAvaidable) { showError("ComfyUI chưa kết nối."); return; }
-        await Yuuka.ui.openSettingsModal({
+        const modalApi = window.Yuuka?.plugins?.albumModal;
+        if (!modalApi || typeof modalApi.openSettingsModal !== 'function') {
+            showError('Album settings UI is not ready.');
+            return;
+        }
+        await modalApi.openSettingsModal({
             title: `Cấu hình cho ${this.state.selectedCharacter.name}`,
             modalClass: 'plugin-album__settings-modal',
             // Yuuka: comfyui fetch optimization v1.0

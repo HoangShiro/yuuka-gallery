@@ -1,0 +1,350 @@
+.lora-downloader-open {
+    overflow: hidden;
+}
+
+.lora-downloader-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.lora-downloader-backdrop {
+    position: absolute;
+    inset: 0;
+    background: var(--color-modal-bg, rgba(0, 0, 0, 0.85));
+    backdrop-filter: blur(8px);
+}
+
+.lora-downloader-panel {
+    position: relative;
+    width: min(920px, 94vw);
+    max-height: 90vh;
+    background: var(--color-card-bg);
+    color: var(--color-primary-text);
+    border-radius: var(--rounded-lg);
+    box-shadow: 0 24px 60px var(--color-shadow);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.lora-downloader-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: var(--spacing-5) var(--spacing-6);
+    background: var(--color-primary-bg);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.lora-downloader-header h2 {
+    margin: 0;
+    font-size: 1.6rem;
+    font-weight: var(--font-weight-bold);
+}
+
+.lora-downloader-header p {
+    margin: var(--spacing-2) 0 0;
+    color: var(--color-secondary-text);
+    font-size: 0.95rem;
+}
+
+.lora-downloader-close {
+    background: transparent;
+    color: inherit;
+    border: none;
+    cursor: pointer;
+    padding: var(--spacing-2);
+    border-radius: 50%;
+    transition: background 0.2s ease;
+}
+
+.lora-downloader-close:hover {
+    background: var(--color-border);
+}
+
+.lora-downloader-section {
+    padding: var(--spacing-5) var(--spacing-6);
+    overflow-y: auto;
+}
+
+.lora-downloader-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+}
+
+.lora-downloader-form label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+}
+
+.lora-downloader-form span {
+    font-size: 0.9rem;
+    font-weight: var(--font-weight-medium);
+    color: #742f08;
+}
+
+.lora-downloader-form input {
+    background: var(--color-primary-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    padding: 10px 12px;
+    color: var(--color-primary-text);
+    font-size: 0.95rem;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.lora-downloader-form input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    background: var(--color-card-bg);
+}
+
+.lora-downloader-field-grid {
+    display: grid;
+    gap: var(--spacing-4);
+}
+
+@media (min-width: 720px) {
+    .lora-downloader-field-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.lora-downloader-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.lora-downloader-actions .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    background: var(--color-accent);
+    border: none;
+    border-radius: var(--rounded-full);
+    color: #fff;
+    padding: 10px 20px;
+    font-size: 0.95rem;
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    box-shadow: 0 5px 15px rgba(255, 138, 117, 0.28);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.lora-downloader-actions .btn-primary:hover {
+    background: var(--color-accent-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 15px 30px rgba(255, 138, 117, 0.32);
+}
+
+.lora-downloader-actions .btn-primary.is-loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.lora-downloader-subheader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-3);
+}
+
+.lora-downloader-subheader h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: var(--font-weight-medium);
+}
+
+.lora-downloader-subheader .btn-refresh,
+.lora-downloader-subheader .btn-refresh-models {
+    background: var(--color-border);
+    border: none;
+    color: var(--color-primary-text);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--rounded-md);
+    padding: var(--spacing-2);
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.lora-downloader-subheader button:hover {
+    background: var(--color-accent);
+    color: #fff;
+}
+
+.lora-downloader-tasks,
+.lora-downloader-models {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+}
+
+.lora-downloader-empty {
+    padding: var(--spacing-4);
+    text-align: center;
+    background: var(--color-primary-bg);
+    border-radius: var(--rounded-lg);
+    font-size: 0.95rem;
+    color: var(--color-secondary-text);
+    border: 1px solid var(--color-border);
+}
+
+.lora-task {
+    background: var(--color-card-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-lg);
+    padding: var(--spacing-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.lora-task--running {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px rgba(255, 138, 117, 0.25);
+}
+
+.lora-task--completed {
+    border-color: var(--color-accent-hover);
+}
+
+.lora-task--error {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px rgba(255, 138, 117, 0.28);
+}
+
+.lora-task-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.lora-task-title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    font-size: 1rem;
+    font-weight: var(--font-weight-medium);
+}
+
+.lora-task-status {
+    font-size: 0.85rem;
+    padding: 2px 8px;
+    border-radius: var(--rounded-full);
+    background: var(--color-primary-bg);
+    color: var(--color-secondary-text);
+}
+
+.lora-task-body p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--color-secondary-text);
+}
+
+.lora-task-meta {
+    display: flex;
+    gap: var(--spacing-4);
+    font-size: 0.78rem;
+    color: var(--color-secondary-text);
+}
+
+.lora-task-progress {
+    position: relative;
+    height: 8px;
+    border-radius: var(--rounded-full);
+    background: var(--color-border);
+    margin-top: var(--spacing-2);
+}
+
+.lora-task-progress-bar {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--color-accent);
+}
+
+.lora-task-progress-value {
+    display: block;
+    margin-top: var(--spacing-2);
+    font-size: 0.8rem;
+    color: var(--color-secondary-text);
+}
+
+.lora-model-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--spacing-3);
+    padding: var(--spacing-4);
+    border-radius: var(--rounded-lg);
+    background: var(--color-card-bg);
+    border: 1px solid var(--color-border);
+}
+
+.lora-model-main {
+    display: flex;
+    gap: var(--spacing-3);
+    align-items: center;
+}
+
+.lora-model-main strong {
+    display: block;
+    font-size: 1rem;
+    font-weight: var(--font-weight-medium);
+}
+
+.lora-model-main p {
+    margin: var(--spacing-1) 0 0;
+    color: var(--color-secondary-text);
+    font-size: 0.85rem;
+}
+
+.lora-model-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    font-size: 0.85rem;
+    color: var(--color-secondary-text);
+}
+
+.lora-model-meta a {
+    color: var(--color-accent);
+    text-decoration: none;
+    font-weight: var(--font-weight-medium);
+}
+
+.lora-model-meta a:hover {
+    color: var(--color-accent-hover);
+    text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+    .lora-downloader-panel {
+        width: 96vw;
+        max-height: 92vh;
+    }
+
+    .lora-downloader-models {
+        gap: var(--spacing-3);
+    }
+
+    .lora-model-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .lora-model-meta {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--spacing-2);
+    }
+}

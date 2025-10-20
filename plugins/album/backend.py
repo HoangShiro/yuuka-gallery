@@ -24,6 +24,7 @@ class AlbumPlugin:
             "batch_size": 1, "height": 1216, "width": 832, "cfg": 2.5, "sampler_name": "euler_ancestral", 
             "scheduler": "karras", "steps": 25, "lora_name": "None", "lora_strength_model": 1.0, 
             "lora_strength_clip": 1.0,
+            "lora_prompt_tags": [],
         }
         
         self.register_routes()
