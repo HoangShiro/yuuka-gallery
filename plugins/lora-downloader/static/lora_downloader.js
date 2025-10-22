@@ -87,25 +87,36 @@ class LoraDownloaderService {
                 <div class="lora-downloader-body">
                     <section class="lora-downloader-section lora-downloader-form-section">
                         <form class="lora-downloader-form">
-                            <label>
-                                <span>URL Civitai</span>
-                                <input type="text" name="civitai_url" placeholder="https://civitai.com/models/... hoặc dán danh sách ID" required>
-                            </label>
-                            <div class="lora-downloader-field-grid">
-                                <label>
-                                    <span>Máy chủ ComfyUI</span>
-                                    <input type="text" name="server_address" placeholder="127.0.0.1:8888" required>
-                                </label>
-                                <label>
-                                    <span>API Key (tùy chọn)</span>
-                                    <input type="password" name="api_key" placeholder="Để trống nếu dùng mặc định">
-                                </label>
-                            </div>
-                            <div class="lora-downloader-actions">
-                                <button type="submit" class="btn-primary">
-                                    <span class="material-symbols-outlined">cloud_download</span>
-                                    <span>Tải LoRA</span>
-                                </button>
+                            <div class="lora-downloader-form-card">
+                                <div class="lora-downloader-form-row lora-downloader-form-row--primary">
+                                    <label class="lora-form-field lora-form-field--url">
+                                        <span>URL Civitai</span>
+                                        <input type="text" name="civitai_url" placeholder="https://civitai.com/models/... hoặc dán danh sách ID" required>
+                                    </label>
+                                    <div class="lora-downloader-form-actions">
+                                        <button type="submit" class="lora-form-action lora-form-action--download" title="Tải LoRA" aria-label="Tải LoRA">
+                                            <span class="material-symbols-outlined">cloud_download</span>
+                                        </button>
+                                        <button type="button" class="lora-form-action lora-form-action--exit" title="Thoát" aria-label="Thoát">
+                                            <span class="material-symbols-outlined">logout</span>
+                                        </button>
+                                        <button type="button" class="lora-form-action lora-form-action--toggle" title="Thu gọn" aria-label="Thu gọn" aria-expanded="true">
+                                            <span class="material-symbols-outlined">unfold_less</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="lora-downloader-form-collapsible">
+                                    <div class="lora-downloader-field-grid">
+                                        <label>
+                                            <span>Máy chủ ComfyUI</span>
+                                            <input type="text" name="server_address" placeholder="127.0.0.1:8888" required>
+                                        </label>
+                                        <label>
+                                            <span>API Key (tùy chọn)</span>
+                                            <input type="password" name="api_key" placeholder="Để trống nếu dùng mặc định">
+                                        </label>
+                                    </div>
+                                </div>
                             </div>
                         </form>
                     </section>
@@ -134,15 +145,53 @@ class LoraDownloaderService {
         this.overlay = overlay;
         this.form = overlay.querySelector('.lora-downloader-form');
         this.activityContainer = overlay.querySelector('.lora-downloader-activity-list');
-        this.submitButton = overlay.querySelector('.lora-downloader-actions button');
+        this.submitButton = overlay.querySelector('.lora-form-action--download');
         this.serverInput = overlay.querySelector('input[name="server_address"]');
         this.urlInput = overlay.querySelector('input[name="civitai_url"]');
         this.apiKeyInput = overlay.querySelector('input[name="api_key"]');
 
         const closeBtn = overlay.querySelector('.lora-downloader-close');
-        closeBtn.addEventListener('click', () => this.close());
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => this.close());
+        }
         overlay.addEventListener('click', this.handleBackdropClick);
         document.addEventListener('keydown', this.handleKeydown);
+
+        const exitBtn = overlay.querySelector('.lora-form-action--exit');
+        if (exitBtn) {
+            exitBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                this.close();
+            });
+        }
+
+        const toggleBtn = overlay.querySelector('.lora-form-action--toggle');
+        const collapsible = overlay.querySelector('.lora-downloader-form-collapsible');
+        const formCard = overlay.querySelector('.lora-downloader-form-card');
+        if (toggleBtn && collapsible && formCard) {
+            const icon = toggleBtn.querySelector('.material-symbols-outlined');
+            const updateToggleState = (collapsed) => {
+                formCard.classList.toggle('is-collapsed', collapsed);
+                if (collapsed) {
+                    collapsible.setAttribute('hidden', 'hidden');
+                } else {
+                    collapsible.removeAttribute('hidden');
+                }
+                if (icon) {
+                    icon.textContent = collapsed ? 'expand_all' : 'unfold_less';
+                }
+                toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                const label = collapsed ? 'Mở rộng' : 'Thu gọn';
+                toggleBtn.setAttribute('title', label);
+                toggleBtn.setAttribute('aria-label', label);
+            };
+            updateToggleState(false);
+            toggleBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                const collapsed = !formCard.classList.contains('is-collapsed');
+                updateToggleState(collapsed);
+            });
+        }
 
         const refreshBtn = overlay.querySelector('.btn-refresh');
         if (refreshBtn) {
@@ -158,10 +207,12 @@ class LoraDownloaderService {
             this.activityContainer.addEventListener('click', this.handleActivityClick);
         }
 
-        this.form.addEventListener('submit', (event) => {
-            event.preventDefault();
-            this._submitDownloadForm();
-        });
+        if (this.form) {
+            this.form.addEventListener('submit', (event) => {
+                event.preventDefault();
+                this._submitDownloadForm();
+            });
+        }
 
         this._userPrefKey = this._resolveUserPrefKey();
         this._restoreFormState();
@@ -558,7 +609,13 @@ class LoraDownloaderService {
         const tasks = Array.isArray(this.state.tasks) ? this.state.tasks.filter(Boolean) : [];
         const models = Array.isArray(this.state.models) ? this.state.models.filter(Boolean) : [];
 
-        if (!tasks.length && !models.length) {
+        const hasTasks = tasks.length > 0;
+        const hasModels = models.length > 0;
+
+        this.activityContainer.classList.toggle('has-models', hasModels);
+        this.activityContainer.classList.toggle('has-tasks', hasTasks);
+
+        if (!hasTasks && !hasModels) {
             this.activityContainer.innerHTML = `<div class="lora-downloader-empty">Chưa có LoRA nào được tải hoặc lưu.</div>`;
             return;
         }
@@ -647,13 +704,27 @@ class LoraDownloaderService {
         item.className = 'lora-entry lora-entry--model';
 
         const name = model?.name || '(Không tên)';
-        const filename = model?.filename || 'Không rõ';
         const updated = model?.updated_at ? this._formatTime(model.updated_at) : 'Không rõ';
         const url = model?.civitai_url || '';
+        const modelData = this._getModelData(model);
+        const version = Array.isArray(modelData?.modelVersions) && modelData.modelVersions.length
+            ? modelData.modelVersions[0]
+            : null;
+        let baseModel = version?.baseModel || version?.base_model || model?.base_model || '';
+        if (typeof baseModel !== 'string') {
+            baseModel = '';
+        }
+        baseModel = baseModel.trim();
         const thumbUrl = this._getModelThumbnailUrl(model);
-        const thumbHtml = thumbUrl
+        const thumbInner = thumbUrl
             ? `<img class="lora-model-thumb" src="${this._escapeAttr(thumbUrl)}" alt="${this._escapeAttr(name)}" loading="lazy">`
             : `<span class="material-symbols-outlined">description</span>`;
+        const thumbHtml = `
+            <div class="lora-model-thumb-wrapper">
+                ${thumbInner}
+                ${baseModel ? `<span class="lora-model-base-mobile">${this._escapeHtml(baseModel)}</span>` : ''}
+            </div>
+        `;
         const actions = [];
         if (url) {
             actions.push(`
@@ -670,23 +741,28 @@ class LoraDownloaderService {
             `);
         }
         const actionsHtml = actions.length ? `<div class="lora-model-actions">${actions.join('')}</div>` : '';
+        const safeName = this._escapeHtml(name);
+        const safeUpdated = this._escapeHtml(updated);
+        const baseModelHtml = baseModel ? `<span class="lora-model-base">${this._escapeHtml(baseModel)}</span>` : '';
+        const controlsHtml = baseModelHtml || actionsHtml
+            ? `<div class="lora-model-controls">${baseModelHtml}${actionsHtml}</div>`
+            : '';
 
         item.innerHTML = `
             <div class="lora-model-row">
                 <div class="lora-model-main">
                     ${thumbHtml}
-                    <div>
-                        <strong>${this._escapeHtml(name)}</strong>
-                        <p>${this._escapeHtml(filename)}</p>
+                    <div class="lora-model-text">
+                        <strong title="${this._escapeAttr(name)}">${safeName}</strong>
+                        <p class="lora-model-updated-inline">Cập nhật: ${safeUpdated}</p>
                     </div>
                 </div>
+                ${controlsHtml}
                 <div class="lora-model-meta">
-                    <span>Cập nhật: ${this._escapeHtml(updated)}</span>
-                    ${actionsHtml}
+                    <span class="lora-model-meta-updated">Cập nhật: ${safeUpdated}</span>
                 </div>
             </div>
         `;
-
         const previewTarget = item.querySelector('.lora-model-thumb') || item.querySelector('.lora-model-main > span.material-symbols-outlined');
         if (previewTarget) {
             previewTarget.classList.add('lora-model-preview-trigger');
