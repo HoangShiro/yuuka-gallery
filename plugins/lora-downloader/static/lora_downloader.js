@@ -89,7 +89,7 @@ class LoraDownloaderService {
                         <form class="lora-downloader-form">
                             <label>
                                 <span>URL Civitai</span>
-                                <input type="url" name="civitai_url" placeholder="https://civitai.com/models/..." required>
+                                <input type="text" name="civitai_url" placeholder="https://civitai.com/models/... hoặc dán danh sách ID" required>
                             </label>
                             <div class="lora-downloader-field-grid">
                                 <label>
