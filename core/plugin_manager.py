@@ -59,8 +59,16 @@ class PluginManager:
             plugin_class = getattr(module, class_name)
             backend_instance = plugin_class(self.core_api)
 
+            # Provide plugin with identifying info and task service access
+            if not hasattr(backend_instance, 'plugin_id'):
+                backend_instance.plugin_id = plugin_id
+            backend_instance.background_task_service = self.core_api.task_service
+
             if hasattr(backend_instance, 'register_services') and callable(getattr(backend_instance, 'register_services')):
                 backend_instance.register_services()
+
+            if hasattr(backend_instance, 'register_background_tasks') and callable(getattr(backend_instance, 'register_background_tasks')):
+                backend_instance.register_background_tasks(self.core_api.task_service)
             
             if hasattr(backend_instance, 'get_blueprint'):
                 blueprint, url_prefix = backend_instance.get_blueprint()
@@ -104,3 +112,27 @@ class PluginManager:
                     'entry_points': plugin.metadata.get('entry_points', {})
                 })
         return ui_data
+
+    def get_background_task_status(self, plugin_id=None):
+        return self.core_api.get_background_task_status(plugin_id)
+
+    def shutdown_all(self):
+        print("[PluginManager] Shutting down plugins and background tasks...")
+        for plugin in self._plugins.values():
+            try:
+                self.core_api.stop_background_tasks_for_plugin(plugin.id)
+            except Exception as task_err:
+                print(f"[PluginManager] Warning: failed to stop tasks for '{plugin.id}': {task_err}")
+
+            backend = plugin.backend
+            if hasattr(backend, 'shutdown') and callable(getattr(backend, 'shutdown')):
+                try:
+                    backend.shutdown()
+                except Exception as e:
+                    print(f"[PluginManager] Warning: plugin '{plugin.id}' failed during shutdown: {e}")
+
+        # Final sweep in case any background task remains registered without plugin metadata
+        try:
+            self.core_api.stop_all_background_tasks()
+        except Exception as e:
+            print(f"[PluginManager] Warning: residual background tasks detected during shutdown: {e}")

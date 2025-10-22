@@ -4,6 +4,7 @@ import signal
 import threading
 import time # Yuuka: Thêm time để tạo version cho cache
 import datetime # Yuuka: uptime tracking v1.0
+import atexit
 from flask import Flask, render_template, jsonify, send_from_directory, abort, Response, request
 from flask_sock import Sock # Yuuka: PvP game feature v1.0 - Thư viện cho WebSocket
 
@@ -19,10 +20,38 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 # --- Core Services Initialization ---
 data_manager = DataManager('data_cache')
 plugin_manager = PluginManager('plugins', app, data_manager)
+atexit.register(lambda: _perform_graceful_shutdown('atexit'))
+
+def _handle_termination_signal(signum, frame):
+    label_map = {}
+    if hasattr(signal, 'SIGINT'):
+        label_map[signal.SIGINT] = 'SIGINT'
+    if hasattr(signal, 'SIGTERM'):
+        label_map[signal.SIGTERM] = 'SIGTERM'
+    if hasattr(signal, 'SIGBREAK'):
+        label_map[signal.SIGBREAK] = 'SIGBREAK'
+
+    label = label_map.get(signum, f'signal {signum}')
+    _perform_graceful_shutdown(label)
+    try:
+        signal.signal(signum, signal.SIG_DFL)
+    except Exception:
+        pass
+    os.kill(os.getpid(), signum)
+
+signal.signal(signal.SIGINT, _handle_termination_signal)
+if hasattr(signal, 'SIGTERM'):
+    signal.signal(signal.SIGTERM, _handle_termination_signal)
+if hasattr(signal, 'SIGBREAK'):
+    try:
+        signal.signal(signal.SIGBREAK, _handle_termination_signal)
+    except Exception:
+        pass
 
 # === Yuuka: Uptime Tracking v1.0 ===
 server_start_time = time.time()
 uptime_thread_stop_event = threading.Event()
+_shutdown_executed = False
 
 def _save_current_uptime(is_final_save=False):
     """Hàm nội bộ để đọc, tính toán và lưu thời gian hoạt động của server."""
@@ -295,20 +324,55 @@ def game_websocket(ws):
         game_service.handle_disconnect(ws)
 
 
+def _perform_graceful_shutdown(reason: str = None):
+    global _shutdown_executed
+    if _shutdown_executed:
+        return
+
+    _shutdown_executed = True
+    if reason:
+        print(f"[Server] Graceful shutdown requested ({reason}).")
+    else:
+        print("[Server] Graceful shutdown requested.")
+
+    try:
+        uptime_thread_stop_event.set()
+    except Exception:
+        pass
+
+    try:
+        _save_current_uptime(is_final_save=True)
+    except Exception as uptime_err:
+        print(f"[Server] Warning while saving uptime during shutdown: {uptime_err}")
+
+    try:
+        plugin_manager.shutdown_all()
+    except Exception as plugin_err:
+        print(f"[Server] Warning while shutting down plugins: {plugin_err}")
+
+@app.route('/api/server/background_tasks', methods=['GET'])
+def get_background_task_status_endpoint():
+    """Return background task status for debugging (requires authentication)."""
+    try:
+        plugin_manager.core_api.verify_token_and_get_user_hash()
+    except Exception as auth_error:
+        abort(401, description=str(auth_error))
+
+    plugin_id = request.args.get('plugin_id')
+    return jsonify(plugin_manager.get_background_task_status(plugin_id))
 # === Server Control ===
 def _shutdown_server():
-    print("Yuuka: Nhận được lệnh tắt server. Tạm biệt senpai!")
+    print('Yuuka: Nhan duoc lenh tat server. Tam biet senpai!')
+    _perform_graceful_shutdown('timer')
     os.kill(os.getpid(), signal.SIGINT)
 
 @app.route('/api/server/shutdown', methods=['POST'])
 def server_shutdown():
-    """API để tắt server một cách an toàn."""
+    """API to stop the server safely."""
     try:
         plugin_manager.core_api.verify_token_and_get_user_hash()
-        print("[Server] Lệnh tắt server đã được nhận từ client.")
-        # Yuuka: uptime tracking v1.0 - Lưu lần cuối trước khi tắt
-        uptime_thread_stop_event.set()
-        _save_current_uptime(is_final_save=True)
+        print('[Server] Shutdown command received from client.')
+        _perform_graceful_shutdown('api')
         threading.Timer(0.5, _shutdown_server).start()
         return jsonify({"status": "success", "message": "Server is shutting down."})
     except Exception as e:
@@ -338,3 +402,8 @@ if __name__ == '__main__':
     # Senpai nên cân nhắc dùng một server WSGI như Gunicorn với gevent.
     # Ví dụ: gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 app:app
     app.run(host='127.0.0.1', debug=False, port=5000)
+
+
+
+
+

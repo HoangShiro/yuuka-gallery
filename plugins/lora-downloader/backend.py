@@ -23,6 +23,7 @@ class LoraDownloaderPlugin:
         self.blueprint = Blueprint("lora_downloader", __name__)
         self._tasks: Dict[str, dict] = {}
         self._task_lock = threading.Lock()
+        self._task_controls: Dict[str, dict] = {}
         self._data_lock = threading.Lock()
 
         self._register_routes()
@@ -71,6 +72,17 @@ class LoraDownloaderPlugin:
             default_address = self._get_default_server_address()
             return jsonify({"tasks": tasks, "default_server_address": default_address})
 
+        @self.blueprint.route("/tasks/<task_id>/cancel", methods=["POST"])
+        def cancel_task(task_id: str):
+            try:
+                user_hash = self.core_api.verify_token_and_get_user_hash()
+            except Exception as exc:  # noqa: BLE001
+                return jsonify({"error": str(exc)}), 401
+
+            success, message, status_code = self._cancel_task(user_hash, task_id)
+            payload = {"status": "success" if success else "failed", "message": message}
+            return jsonify(payload), status_code
+
         @self.blueprint.route("/lora-data", methods=["GET"])
         def get_lora_data():
             try:
@@ -94,6 +106,7 @@ class LoraDownloaderPlugin:
 
     def _start_download_task(self, user_hash: str, civitai_url: str, server_address: str, api_key: str):
         task_id = str(uuid.uuid4())
+        cancel_event = threading.Event()
         task_state = {
             "task_id": task_id,
             "user_hash": user_hash,
@@ -107,10 +120,16 @@ class LoraDownloaderPlugin:
             "api_key_present": bool(api_key),
             "created_at": time.time(),
             "updated_at": time.time(),
+            "cancel_requested": False,
         }
 
         with self._task_lock:
             self._tasks[task_id] = task_state
+            self._task_controls[task_id] = {
+                "cancel_event": cancel_event,
+                "server_address": server_address,
+                "prompt_id": None,
+            }
 
         thread = threading.Thread(
             target=self._run_download_task,
@@ -139,6 +158,26 @@ class LoraDownloaderPlugin:
             task.update(updates)
             task["updated_at"] = time.time()
 
+    def _update_task_control(self, task_id: str, **updates):
+        with self._task_lock:
+            control = self._task_controls.get(task_id)
+            if not control:
+                return
+            control.update(updates)
+
+    def _clear_task_control(self, task_id: str):
+        with self._task_lock:
+            self._task_controls.pop(task_id, None)
+
+    def _get_cancel_event(self, task_id: str) -> Optional[threading.Event]:
+        with self._task_lock:
+            control = self._task_controls.get(task_id)
+            if control:
+                event = control.get("cancel_event")
+                if isinstance(event, threading.Event):
+                    return event
+        return None
+
     # ------------------------------------------------------------------ #
     # Worker logic
     # ------------------------------------------------------------------ #
@@ -157,17 +196,25 @@ class LoraDownloaderPlugin:
         if api_key:
             prompt["1"]["inputs"]["api_key"] = api_key
 
+        cancel_event = self._get_cancel_event(task_id) or threading.Event()
         prompt_id = None
         ws = None
         model_payload = None
         filename = None
         was_cached = False
+        cancelled = False
 
         try:
             self._update_task(task_id, status="queued", message="Đang gửi yêu cầu tới ComfyUI...")
             queue_response = self.core_api.comfy_api_client.queue_prompt(prompt, client_id, server_address)
             prompt_id = queue_response.get("prompt_id")
             self._update_task(task_id, prompt_id=prompt_id, status="queued", message="Đang chờ ComfyUI bắt đầu tải...")
+            if prompt_id:
+                self._update_task_control(task_id, prompt_id=prompt_id)
+            if cancel_event.is_set():
+                cancelled = True
+                self._update_task(task_id, status="cancelled", message="Đã hủy theo yêu cầu.")
+                return
 
             ws = websocket.WebSocket()
             ws.connect(f"ws://{server_address}/ws?clientId={client_id}", timeout=10)
@@ -178,6 +225,10 @@ class LoraDownloaderPlugin:
             last_queue_check = 0.0
 
             while not done:
+                if cancel_event.is_set():
+                    cancelled = True
+                    self._update_task(task_id, status="cancelled", message="Đã hủy theo yêu cầu.")
+                    break
                 now = time.time()
                 if not is_running and now - last_queue_check > 2.0:
                     last_queue_check = now
@@ -276,11 +327,15 @@ class LoraDownloaderPlugin:
             self._update_task(task_id, status="error", message=f"Lỗi: {exc}")
             return
         finally:
+            self._clear_task_control(task_id)
             if ws:
                 try:
                     ws.close()
                 except Exception:
                     pass
+
+        if cancelled:
+            return
 
         if self._tasks.get(task_id, {}).get("status") == "error":
             return
@@ -325,3 +380,46 @@ class LoraDownloaderPlugin:
     def _get_default_server_address(self) -> Optional[str]:
         comfy_cfg = self.core_api.read_data("comfyui_config.json", default_value={})
         return comfy_cfg.get("server_address")
+
+    def _cancel_task(self, user_hash: str, task_id: str):
+        with self._task_lock:
+            task = self._tasks.get(task_id)
+            control = self._task_controls.get(task_id)
+            if not task:
+                return False, "Task không tồn tại.", 404
+            if task.get("user_hash") != user_hash:
+                return False, "Không có quyền thực hiện hành động này.", 403
+            status = task.get("status")
+            prompt_id = task.get("prompt_id")
+            server_address = task.get("server_address")
+            if status in {"completed", "error", "cancelled"}:
+                return False, "Task đã hoàn tất hoặc bị hủy.", 409
+            if control:
+                cancel_event = control.get("cancel_event")
+                if isinstance(cancel_event, threading.Event):
+                    cancel_event.set()
+            task["cancel_requested"] = True
+
+        delete_ok = False
+        interrupt_ok = False
+        if prompt_id and server_address:
+            try:
+                delete_ok = self.core_api.comfy_api_client.delete_queued_item(prompt_id, server_address)
+            except Exception:
+                delete_ok = False
+            try:
+                interrupt_ok = self.core_api.comfy_api_client.interrupt_execution(server_address)
+            except Exception:
+                interrupt_ok = False
+
+        self._update_task(
+            task_id,
+            status="cancelled",
+            message="Đã hủy theo yêu cầu.",
+            progress_percent=None,
+        )
+
+        action_taken = delete_ok or interrupt_ok
+        if action_taken:
+            return True, "Đã hủy theo yêu cầu.", 200
+        return True, "Đã gửi yêu cầu hủy tới ComfyUI.", 200

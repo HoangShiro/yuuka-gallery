@@ -5,7 +5,7 @@
 .lora-downloader-overlay {
     position: fixed;
     inset: 0;
-    z-index: 1200;
+    z-index: 1750;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -68,7 +68,32 @@
 
 .lora-downloader-section {
     padding: var(--spacing-5) var(--spacing-6);
+}
+
+.lora-downloader-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    overflow: hidden;
+}
+
+.lora-downloader-form-section {
+    flex: 0 0 auto;
+    padding-bottom: var(--spacing-4);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.lora-downloader-activity-section {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
+}
+
+.lora-downloader-activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
 }
 
 .lora-downloader-form {
@@ -150,9 +175,28 @@
 
 .lora-downloader-subheader {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
+    gap: var(--spacing-3);
     margin-bottom: var(--spacing-3);
+    flex-wrap: wrap;
+}
+
+.lora-downloader-subheader > div:first-child {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+}
+
+.lora-downloader-subheader > div:first-child p {
+    margin: 0;
+    color: var(--color-secondary-text);
+    font-size: 0.9rem;
+}
+
+.lora-downloader-subheader-actions {
+    display: inline-flex;
+    gap: var(--spacing-2);
 }
 
 .lora-downloader-subheader h3 {
@@ -162,7 +206,7 @@
 }
 
 .lora-downloader-subheader .btn-refresh,
-.lora-downloader-subheader .btn-refresh-models {
+.lora-downloader-subheader .btn-copy-ids {
     background: var(--color-border);
     border: none;
     color: var(--color-primary-text);
@@ -180,6 +224,7 @@
     color: #fff;
 }
 
+.lora-downloader-activity-list,
 .lora-downloader-tasks,
 .lora-downloader-models {
     display: flex;
@@ -226,6 +271,41 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+.lora-task-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+}
+
+.lora-task-cancel {
+    background: transparent;
+    border: none;
+    color: var(--color-secondary-text);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: var(--rounded-full);
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+
+.lora-task-cancel:hover {
+    background: var(--color-border);
+    color: var(--color-primary-text);
+}
+
+.lora-task-cancel.is-busy,
+.lora-task-cancel:disabled {
+    opacity: 0.4;
+    cursor: default;
+    pointer-events: none;
+}
+
+.lora-task--cancel-requested {
+    opacity: 0.7;
 }
 
 .lora-task-title {
@@ -296,6 +376,21 @@
     align-items: center;
 }
 
+.lora-model-thumb {
+    width: 52px;
+    height: 52px;
+    border-radius: var(--rounded-md);
+    object-fit: cover;
+    background: var(--color-border);
+    flex-shrink: 0;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.lora-model-preview-trigger {
+    cursor: pointer;
+}
+
 .lora-model-main strong {
     display: block;
     font-size: 1rem;
@@ -311,20 +406,45 @@
 .lora-model-meta {
     display: flex;
     align-items: center;
-    gap: var(--spacing-3);
+    gap: var(--spacing-2) var(--spacing-3);
+    flex-wrap: wrap;
     font-size: 0.85rem;
     color: var(--color-secondary-text);
 }
 
-.lora-model-meta a {
-    color: var(--color-accent);
-    text-decoration: none;
-    font-weight: var(--font-weight-medium);
+.lora-model-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    margin-left: auto;
 }
 
-.lora-model-meta a:hover {
-    color: var(--color-accent-hover);
-    text-decoration: underline;
+.lora-model-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-card-bg);
+    color: var(--color-secondary-text);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.lora-model-action:hover {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: #fff;
+}
+
+.lora-model-action.is-busy,
+.lora-model-action:disabled {
+    opacity: 0.45;
+    cursor: default;
+    pointer-events: none;
 }
 
 @media (max-width: 640px) {
@@ -346,5 +466,9 @@
         flex-direction: column;
         align-items: flex-start;
         gap: var(--spacing-2);
+    }
+
+    .lora-model-actions {
+        margin-left: 0;
     }
 }

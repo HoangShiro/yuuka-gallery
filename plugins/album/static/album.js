@@ -40,11 +40,23 @@ class AlbumComponent {
 
         const initialState = window.Yuuka.initialPluginState.album;
         if (initialState) {
-            this.state.selectedCharacter = initialState.character;
+            const initialCharacter = initialState.character;
+            const shouldOpenSettings = Boolean(initialState.openSettings);
+            const regenConfig = initialState.regenConfig;
+
+            this.state.selectedCharacter = initialCharacter;
             delete window.Yuuka.initialPluginState.album;
             this.state.viewMode = 'album';
             await this.loadAndDisplayCharacterAlbum();
-            if (initialState.regenConfig) this._startGeneration(initialState.regenConfig);
+            if (regenConfig) this._startGeneration(regenConfig);
+            if (shouldOpenSettings) {
+                try {
+                    await this.openSettings();
+                } catch (err) {
+                    console.error('[Album] Failed to open settings modal:', err);
+                    showError('Không thể mở cài đặt Album.');
+                }
+            }
         } else {
             this.state.viewMode = 'grid';
             await this.showCharacterSelectionGrid();
@@ -795,6 +807,13 @@ class AlbumComponent {
     }
 
     async openSettings() {
+        if (!this.state.isComfyUIAvaidable) {
+            try {
+                await this.checkComfyUIStatus();
+            } catch (err) {
+                console.warn('[Album] Failed to refresh ComfyUI status before opening settings:', err);
+            }
+        }
         if (!this.state.isComfyUIAvaidable) { showError("ComfyUI chưa kết nối."); return; }
         const modalApi = window.Yuuka?.plugins?.albumModal;
         if (!modalApi || typeof modalApi.openSettingsModal !== 'function') {
@@ -855,6 +874,20 @@ class AlbumComponent {
                     showError(`Lỗi kết nối hoặc làm mới: ${e.message}`);
                     // Nút sẽ tự reset khi người dùng mở lại modal
                 }
+            },
+            onDelete: async () => {
+                const current = this.state.selectedCharacter;
+                if (!current?.hash) {
+                    throw new Error('Không xác định được album đang mở.');
+                }
+                await this.api.album.delete(`/${current.hash}`);
+                showError('Album đã được xóa.');
+                this.state.selectedCharacter = null;
+                this.state.allImageData = [];
+                this.state.cachedComfyGlobalChoices = null;
+                this.state.viewMode = 'grid';
+                await this.showCharacterSelectionGrid();
+                this._updateNav();
             }
         });
     }

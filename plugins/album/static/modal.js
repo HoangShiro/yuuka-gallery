@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
     const ensureNamespace = () => {
         window.Yuuka = window.Yuuka || {};
         window.Yuuka.plugins = window.Yuuka.plugins || {};
@@ -47,6 +47,215 @@
         if (typeof group !== 'string') return '';
         const cleaned = group.replace(/^\(|\)$/g, '');
         return parseWordGroup(cleaned).map(normalizeTag).join(',');
+    };
+
+    const escapeHtml = (value) => {
+        if (value === null || value === undefined) return '';
+        return String(value).replace(/[&<>"']/g, (char) => {
+            switch (char) {
+                case '&': return '&amp;';
+                case '<': return '&lt;';
+                case '>': return '&gt;';
+                case '"': return '&quot;';
+                case "'": return '&#39;';
+                default: return char;
+            }
+        });
+    };
+    const escapeAttr = (value) => escapeHtml(value).replace(/`/g, '&#96;');
+
+    const getModelData = (metadata) => {
+        if (!metadata) return null;
+        const raw = metadata.model_data;
+        if (!raw) return null;
+        if (typeof raw === 'object') return raw;
+        if (typeof raw === 'string') {
+            try {
+                return JSON.parse(raw);
+            } catch (err) {
+                console.warn('[AlbumModal] Unable to parse LoRA metadata:', err);
+            }
+        }
+        return null;
+    };
+    const getPrimaryModelTag = (metadata) => {
+        const modelData = getModelData(metadata);
+        const versions = modelData?.modelVersions;
+        if (Array.isArray(versions) && versions.length) {
+            for (const version of versions) {
+                const words = version?.trainedWords;
+                if (Array.isArray(words)) {
+                    for (const entry of words) {
+                        if (Array.isArray(entry)) {
+                            const cleaned = entry.map(part => String(part).trim()).filter(Boolean);
+                            if (cleaned.length) return cleaned[0];
+                            continue;
+                        }
+                        if (typeof entry === 'string') {
+                            const parts = entry.split(',').map(part => part.trim()).filter(Boolean);
+                            if (parts.length) return parts[0];
+                            if (entry.trim()) return entry.trim();
+                        }
+                    }
+                } else if (typeof words === 'string') {
+                    const parts = words.split(',').map(part => part.trim()).filter(Boolean);
+                    if (parts.length) return parts[0];
+                    if (words.trim()) return words.trim();
+                }
+            }
+        }
+        return null;
+    };
+    const normalizeTagValue = (value) => {
+        if (typeof value !== 'string') return '';
+        return value.replace(/[_\s]+/g, ' ').trim().toLowerCase();
+    };
+    const extractModelTags = (metadata) => {
+        const tags = [];
+        const seen = new Set();
+        const addTag = (raw) => {
+            if (typeof raw !== 'string') return;
+            const trimmed = raw.trim();
+            if (!trimmed) return;
+            const normalized = normalizeTagValue(trimmed);
+            if (!normalized || seen.has(normalized)) return;
+            seen.add(normalized);
+            tags.push(trimmed);
+        };
+
+        const modelData = getModelData(metadata);
+        const trainedWords = modelData?.trainedWords;
+        if (Array.isArray(trainedWords)) {
+            trainedWords.forEach(entry => {
+                if (typeof entry !== 'string') return;
+                entry.split(',').forEach(addTag);
+            });
+        } else if (typeof trainedWords === 'string') {
+            trainedWords.split(',').forEach(addTag);
+        }
+
+        const versions = modelData?.modelVersions;
+        if (Array.isArray(versions)) {
+            versions.forEach(version => {
+                const words = version?.trainedWords;
+                if (!Array.isArray(words)) return;
+                words.forEach(entry => {
+                    if (typeof entry !== 'string') return;
+                    entry.split(',').forEach(addTag);
+                });
+            });
+        }
+
+        const dataTags = modelData?.tags;
+        if (Array.isArray(dataTags)) {
+            dataTags.forEach(addTag);
+        }
+
+        const rootTags = metadata?.tags;
+        if (Array.isArray(rootTags)) {
+            rootTags.forEach(addTag);
+        }
+
+        return tags;
+    };
+    const prettifyLabel = (value) => {
+        if (typeof value !== 'string') return '';
+        return value
+            .replace(/[_-]+/g, ' ')
+            .split(/\s+/)
+            .filter(Boolean)
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+    };
+    const resolveLoraCharacterName = (metadata, fallback = '') => {
+        if (!metadata) return fallback || 'LoRA';
+        const primary = getPrimaryModelTag(metadata);
+        if (primary) return prettifyLabel(primary);
+        const tags = extractModelTags(metadata);
+        if (tags.length) return prettifyLabel(tags[0]);
+        const base = (metadata.name || metadata.filename || fallback || '').trim();
+        if (!base) return fallback || 'LoRA';
+        const words = base.split(/\s+/).filter(Boolean).slice(0, 2);
+        return prettifyLabel(words.length ? words.join(' ') : base);
+    };
+    const getLoraThumbnailUrl = (metadata) => {
+        if (!metadata) return null;
+        const directUrl = metadata.preview_url || metadata.thumbnail || metadata.cover_image;
+        if (typeof directUrl === 'string' && directUrl.trim()) {
+            return directUrl.trim();
+        }
+        const modelData = getModelData(metadata);
+        const versions = modelData?.modelVersions;
+        if (Array.isArray(versions)) {
+            for (const version of versions) {
+                const images = version?.images;
+                if (!Array.isArray(images)) continue;
+                for (const image of images) {
+                    const url = image?.url || image?.imageUrl || image?.meta?.url;
+                    if (typeof url === 'string' && url.trim()) {
+                        return url.trim();
+                    }
+                }
+            }
+        }
+        return null;
+    };
+    const collectModelImages = (metadata) => {
+        if (!metadata) return [];
+        const results = [];
+        const seen = new Set();
+        const addUrl = (url) => {
+            if (typeof url !== 'string') return;
+            const trimmed = url.trim();
+            if (!trimmed || seen.has(trimmed)) return;
+            seen.add(trimmed);
+            results.push({
+                imageUrl: trimmed,
+                title: metadata?.name || metadata?.filename || 'Preview',
+            });
+        };
+        addUrl(metadata?.preview_url);
+        addUrl(metadata?.thumbnail);
+        addUrl(metadata?.cover_image);
+        const modelData = getModelData(metadata);
+        const versions = modelData?.modelVersions;
+        if (Array.isArray(versions)) {
+            versions.forEach((version) => {
+                const images = version?.images;
+                if (!Array.isArray(images)) return;
+                images.forEach((image) => {
+                    addUrl(image?.url || image?.imageUrl || image?.meta?.url);
+                });
+            });
+        }
+        const galleries = modelData?.galleries;
+        if (Array.isArray(galleries)) {
+            galleries.forEach((entry) => addUrl(entry?.url));
+        }
+        return results;
+    };
+    const openSimpleViewer = (metadata, initialUrl = null) => {
+        if (!metadata) {
+            showError('Không tìm thấy dữ liệu LoRA để hiện preview.');
+            return;
+        }
+        const viewer = window?.Yuuka?.plugins?.simpleViewer;
+        if (!viewer || typeof viewer.open !== 'function') {
+            showError('Simple viewer chưa sẵn sàng.');
+            return;
+        }
+        const items = collectModelImages(metadata);
+        if (!items.length) {
+            showError('LoRA này không có ảnh preview.');
+            return;
+        }
+        const startIndex = initialUrl
+            ? items.findIndex(item => item.imageUrl === initialUrl)
+            : 0;
+        viewer.open({
+            items,
+            startIndex: startIndex >= 0 ? startIndex : 0,
+        });
     };
 
     ensureNamespace();
@@ -207,7 +416,21 @@
                     </div>
                     <div class="album-settings-column" data-column="lora">
                         <h4>LoRA</h4>
-                        ${cse('lora_name', 'LoRA Name', selectedLora, loraOptions)}
+                        <div class="form-group lora-select-group">
+                            <label for="cfg-lora_name">LoRA Name</label>
+                            <button type="button" class="lora-select-toggle" aria-haspopup="listbox" aria-expanded="false">
+                                <div class="lora-select-toggle__thumb"></div>
+                                <div class="lora-select-toggle__meta">
+                                    <span class="lora-select-toggle__title">None</span>
+                                    <span class="lora-select-toggle__subtitle">Không dùng LoRA</span>
+                                </div>
+                                <span class="material-symbols-outlined lora-select-toggle__icon">expand_more</span>
+                            </button>
+                            <div class="lora-card-panel" role="listbox">
+                                <div class="lora-card-grid"></div>
+                            </div>
+                            <input type="hidden" id="cfg-lora_name" name="lora_name" value="${escapeAttr(selectedLora)}">
+                        </div>
                         <div class="lora-tags-wrapper"></div>
                     </div>
                     <div class="album-settings-column" data-column="configs">
@@ -228,6 +451,7 @@
                 <div class="modal-actions">
                     <button type="button" class="btn-paste" title="Paste"><span class="material-symbols-outlined">content_paste</span></button>
                     <button type="button" class="btn-copy" title="Copy"><span class="material-symbols-outlined">content_copy</span></button>
+                    <button type="button" class="btn-delete" title="Delete"><span class="material-symbols-outlined">delete_forever</span></button>
                     <button type="button" class="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button>
                     <button type="submit" class="btn-save" title="Save" form="album-settings-form"><span class="material-symbols-outlined">save</span></button>
                     <button type="button" class="btn-generate" title="Generate" style="display:none"><span class="material-symbols-outlined">auto_awesome</span></button>
@@ -237,8 +461,16 @@
             const form = dialog.querySelector('#album-settings-form');
             const saveBtn = dialog.querySelector('.btn-save');
             const generateBtn = dialog.querySelector('.btn-generate');
-            const loraSelect = form?.elements?.['lora_name'];
-            const loraFieldGroup = loraSelect ? loraSelect.closest('.form-group') : null;
+            const loraInput = form?.elements?.['lora_name'];
+            const loraFieldGroup = loraInput ? loraInput.closest('.form-group') : null;
+            const loraSelectGroup = loraFieldGroup;
+            const loraCardPanel = loraSelectGroup ? loraSelectGroup.querySelector('.lora-card-panel') : null;
+            const loraCardGrid = loraCardPanel ? loraCardPanel.querySelector('.lora-card-grid') : null;
+            const loraToggle = loraSelectGroup ? loraSelectGroup.querySelector('.lora-select-toggle') : null;
+            const loraToggleThumb = loraToggle ? loraToggle.querySelector('.lora-select-toggle__thumb') : null;
+            const loraToggleTitle = loraToggle ? loraToggle.querySelector('.lora-select-toggle__title') : null;
+            const loraToggleSubtitle = loraToggle ? loraToggle.querySelector('.lora-select-toggle__subtitle') : null;
+            const loraToggleIcon = loraToggle ? loraToggle.querySelector('.lora-select-toggle__icon') : null;
             let loraTagsWrapper = null;
             if (loraFieldGroup) {
                 loraTagsWrapper = loraFieldGroup.querySelector('.lora-tags-wrapper');
@@ -258,6 +490,63 @@
                     column.appendChild(loraTagsWrapper);
                 }
             }
+
+            let isLoraPanelOpen = false;
+            let hasPanelListeners = false;
+            const outsideClickListener = (event) => {
+                if (!loraSelectGroup?.contains(event.target)) {
+                    setLoraPanelOpen(false);
+                }
+            };
+            const escapeListener = (event) => {
+                if (event.key === 'Escape') {
+                    setLoraPanelOpen(false);
+                }
+            };
+            const setLoraPanelOpen = (open) => {
+                if (!loraSelectGroup) return;
+                if (isLoraPanelOpen === open) return;
+                isLoraPanelOpen = open;
+                loraSelectGroup.classList.toggle('is-open', open);
+                if (loraCardPanel) {
+                    loraCardPanel.style.display = open ? '' : 'none';
+                }
+                if (loraToggle) {
+                    loraToggle.classList.toggle('is-open', open);
+                    loraToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                }
+                if (loraToggleIcon) {
+                    loraToggleIcon.textContent = open ? 'expand_less' : 'expand_more';
+                }
+                if (open) {
+                    if (!hasPanelListeners) {
+                        document.addEventListener('mousedown', outsideClickListener);
+                        document.addEventListener('keydown', escapeListener);
+                        hasPanelListeners = true;
+                    }
+                } else if (hasPanelListeners) {
+                    document.removeEventListener('mousedown', outsideClickListener);
+                    document.removeEventListener('keydown', escapeListener);
+                    hasPanelListeners = false;
+                }
+            };
+            if (loraCardPanel) {
+                loraCardPanel.style.display = 'none';
+            }
+            if (loraToggle) {
+                loraToggle.addEventListener('click', () => {
+                    setLoraPanelOpen(!isLoraPanelOpen);
+                });
+            }
+            cleanupFns.push(() => {
+                if (hasPanelListeners) {
+                    document.removeEventListener('mousedown', outsideClickListener);
+                    document.removeEventListener('keydown', escapeListener);
+                    hasPanelListeners = false;
+                }
+                isLoraPanelOpen = false;
+            });
+
             const sizeSelect = form?.elements?.['size'];
             const stageConfigGrid = dialog.querySelector('[data-stage-config]');
             const stage2Column = stageConfigGrid ? stageConfigGrid.querySelector('[data-stage="stage2"]') : null;
@@ -477,11 +766,117 @@
                 });
             };
 
-            if (loraSelect && loraTagsWrapper) {
-                loraSelect.addEventListener('change', (event) => {
-                    renderLoraTags(event.target.value);
+            const loraCardElements = new Map();
+            const loraOptionMeta = new Map();
+            const updateToggleSummary = (value) => {
+                if (!loraToggle) return;
+                const meta = loraOptionMeta.get(value) || {};
+                const displayName = meta.displayName || value || 'None';
+                const subtitle = (value === 'None')
+                    ? 'Không dùng LoRA'
+                    : (meta.subtitle || value || '');
+                if (loraToggleTitle) {
+                    loraToggleTitle.textContent = displayName;
+                }
+                if (loraToggleSubtitle) {
+                    loraToggleSubtitle.textContent = subtitle;
+                }
+                if (loraToggleThumb) {
+                    if (meta.thumbUrl) {
+                        loraToggleThumb.innerHTML = `<img src="${escapeAttr(meta.thumbUrl)}" alt="${escapeAttr(displayName)}" loading="lazy">`;
+                    } else {
+                        loraToggleThumb.innerHTML = `<span class="material-symbols-outlined">${value === 'None' ? 'block' : 'image'}</span>`;
+                    }
+                }
+            };
+            const setLoraSelection = (value, { dispatchEvent = false } = {}) => {
+                if (!loraInput) return;
+                const normalized = value || 'None';
+                const previousValue = loraInput.value;
+                loraInput.value = normalized;
+                loraCardElements.forEach((card, key) => {
+                    const isActive = key === normalized;
+                    card.classList.toggle('is-selected', isActive);
+                    card.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                    card.setAttribute('aria-selected', isActive ? 'true' : 'false');
                 });
-                renderLoraTags(loraSelect.value);
+                updateToggleSummary(normalized);
+                if (dispatchEvent && previousValue !== normalized) {
+                    loraInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                renderLoraTags(normalized);
+            };
+
+            if (loraCardGrid && loraInput) {
+                loraCardGrid.innerHTML = '';
+                loraCardElements.clear();
+                loraOptionMeta.clear();
+                const cardOptions = Array.isArray(loraOptions) && loraOptions.length
+                    ? loraOptions
+                    : [{ name: 'None', value: 'None' }];
+                cardOptions.forEach((option) => {
+                    if (!option) return;
+                    const value = option.value ?? option.name ?? '';
+                    if (typeof value !== 'string') return;
+                    const metadata = value === 'None' ? null : findLoraMetadata(value);
+                    const displayName = value === 'None'
+                        ? (option.name || 'None')
+                        : resolveLoraCharacterName(metadata, option.name || value);
+                    const subtitle = value === 'None'
+                        ? 'Không dùng LoRA'
+                        : (metadata?.filename || metadata?.name || option.name || value);
+                    const thumbUrl = value === 'None' ? null : getLoraThumbnailUrl(metadata);
+                    const card = document.createElement('button');
+                    card.type = 'button';
+                    card.className = 'lora-card';
+                    card.dataset.value = value;
+                    card.setAttribute('role', 'option');
+                    card.setAttribute('aria-pressed', 'false');
+                    card.setAttribute('aria-selected', 'false');
+                    card.innerHTML = `
+                        <div class="lora-card__thumb">
+                            ${thumbUrl
+                                ? `<img src="${escapeAttr(thumbUrl)}" alt="${escapeAttr(displayName)}" loading="lazy">`
+                                : `<span class="material-symbols-outlined">${value === 'None' ? 'block' : 'image'}</span>`}
+                        </div>
+                        <div class="lora-card__meta">
+                            <span class="lora-card__title">${escapeHtml(displayName)}</span>
+                            <span class="lora-card__subtitle">${escapeHtml(subtitle || '')}</span>
+                        </div>
+                    `;
+                    loraOptionMeta.set(value, { displayName, subtitle, thumbUrl, metadata });
+                    card.addEventListener('click', () => {
+                        if (loraInput.value === value) {
+                            renderLoraTags(value);
+                            setLoraPanelOpen(false);
+                            return;
+                        }
+                        setLoraSelection(value, { dispatchEvent: true });
+                        setLoraPanelOpen(false);
+                    });
+                    const thumbElement = card.querySelector('.lora-card__thumb');
+                    if (thumbElement && metadata) {
+                        thumbElement.classList.add('is-clickable');
+                        thumbElement.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            openSimpleViewer(metadata, thumbUrl);
+                        });
+                    }
+                    loraCardGrid.appendChild(card);
+                    loraCardElements.set(value, card);
+                });
+                const initialValue = loraInput.value || 'None';
+                setLoraSelection(initialValue, { dispatchEvent: false });
+            } else if (loraInput) {
+                loraInput.addEventListener('change', (event) => {
+                    renderLoraTags(event.target.value);
+                    updateToggleSummary(event.target.value);
+                });
+                renderLoraTags(loraInput.value);
+                updateToggleSummary(loraInput.value);
+            } else {
+                renderLoraTags('None');
+                updateToggleSummary('None');
             }
 
             if (window.Yuuka?.ui?._initTagAutocomplete) {
@@ -510,6 +905,29 @@
                 dialog.querySelectorAll('textarea').forEach(t => t.dispatchEvent(new Event('input', { bubbles: true })));
                 showError("Đã dán prompt.");
             });
+
+            const deleteBtn = dialog.querySelector('.btn-delete');
+            if (deleteBtn) {
+                deleteBtn.addEventListener('click', async () => {
+                    if (typeof options.onDelete !== 'function') {
+                        showError("Chưa có hàm xóa album.");
+                        return;
+                    }
+                    const confirmDelete = typeof window.Yuuka?.ui?.confirm === 'function'
+                        ? await window.Yuuka.ui.confirm('Bạn có chắc muốn xóa album này và tất cả config liên quan?')
+                        : window.confirm('Bạn có chắc muốn xóa album này và tất cả config liên quan?');
+                    if (!confirmDelete) return;
+                    deleteBtn.disabled = true;
+                    try {
+                        await options.onDelete();
+                        close();
+                    } catch (err) {
+                        showError(`Không thể xóa album: ${err?.message || err}`);
+                    } finally {
+                        deleteBtn.disabled = false;
+                    }
+                });
+            }
 
             const collectFormValues = () => {
                 const payload = {};
@@ -653,4 +1071,3 @@
 
     window.Yuuka.plugins.albumModal = { openSettingsModal };
 })();
-

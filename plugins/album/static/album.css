@@ -304,6 +304,14 @@
     margin-left: auto; /* Đẩy nhóm nút này sang phải */
 }
 
+.plugin-album__settings-modal .modal-actions .btn-delete {
+    background: transparent;
+    color: #d14343;
+}
+.plugin-album__settings-modal .modal-actions .btn-delete:hover {
+    background: #d14343;
+    color: #fff;
+}
 /* Style chung cho nút Paste và Copy bên trái */
 .plugin-album__settings-modal .modal-actions .btn-paste,
 .plugin-album__settings-modal .modal-actions .btn-copy {
@@ -497,6 +505,218 @@
 
 .plugin-album__settings-modal.is-mobile .album-settings-column.is-active {
     display: block;
+}
+
+/* Yuuka: album LoRA selector card view */
+.plugin-album__settings-modal .modal-actions .btn-generate {
+    background: var(--color-border);
+    color: var(--color-primary-text);
+}
+.plugin-album__settings-modal .modal-actions .btn-generate:hover {
+    filter: brightness(1.05);
+}
+.plugin-album__settings-modal .modal-actions .btn-delete {
+    background: transparent;
+    color: #d14343;
+}
+.plugin-album__settings-modal .modal-actions .btn-delete:hover {
+    background: #d14343;
+    color: #fff;
+}
+
+.plugin-album__settings-modal .lora-select-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+}
+
+.plugin-album__settings-modal .lora-select-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-3);
+    padding: var(--spacing-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.plugin-album__settings-modal .lora-select-toggle:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+.plugin-album__settings-modal .lora-select-toggle.is-open {
+    border-color: var(--color-accent);
+    box-shadow: 0 12px 20px -14px var(--color-shadow);
+}
+
+.plugin-album__settings-modal .lora-select-toggle__thumb {
+    width: 56px;
+    height: 56px;
+    border-radius: var(--rounded-md);
+    overflow: hidden;
+    background: var(--color-secondary-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.plugin-album__settings-modal .lora-select-toggle__thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.plugin-album__settings-modal .lora-select-toggle__meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.plugin-album__settings-modal .lora-select-toggle__title {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-primary-text);
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.plugin-album__settings-modal .lora-select-toggle__subtitle {
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.plugin-album__settings-modal .lora-select-toggle__icon {
+    font-size: 24px;
+    color: var(--color-secondary-text);
+    transition: transform 0.2s ease;
+}
+
+.plugin-album__settings-modal .lora-select-toggle.is-open .lora-select-toggle__icon {
+    transform: rotate(180deg);
+}
+
+.plugin-album__settings-modal .lora-card-panel {
+    display: none;
+    padding: var(--spacing-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    box-shadow: 0 16px 32px -24px var(--color-shadow);
+    max-height: 380px;
+    overflow: auto;
+}
+
+.plugin-album__settings-modal .lora-select-group.is-open .lora-card-panel {
+    display: block;
+}
+
+.plugin-album__settings-modal .lora-card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-3);
+    justify-items: center;
+}
+
+.plugin-album__settings-modal .lora-card {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    padding: var(--spacing-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    box-shadow: 0 10px 18px -12px var(--color-shadow);
+    cursor: pointer;
+    appearance: none;
+    text-align: left;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+    width: 100%;
+    max-width: 260px;
+}
+
+.plugin-album__settings-modal .lora-card:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+.plugin-album__settings-modal .lora-card__thumb {
+    width: 72px;
+    height: 72px;
+    border-radius: var(--rounded-md);
+    overflow: hidden;
+    background: var(--color-secondary-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.plugin-album__settings-modal .lora-card__thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.plugin-album__settings-modal .lora-card__thumb.is-clickable {
+    cursor: zoom-in;
+}
+
+.plugin-album__settings-modal .lora-card__meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    max-width: 100%;
+}
+
+.plugin-album__settings-modal .lora-card__title {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-primary-text);
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.plugin-album__settings-modal .lora-card__subtitle {
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.plugin-album__settings-modal .lora-card .material-symbols-outlined {
+    font-size: 32px;
+    color: var(--color-secondary-text);
+}
+
+.plugin-album__settings-modal .lora-card.is-selected {
+    border-color: var(--color-accent);
+    box-shadow: 0 16px 26px -16px rgba(0, 0, 0, 0.4);
+    transform: translateY(-2px);
+}
+
+.plugin-album__settings-modal .lora-card.is-selected .lora-card__title {
+    color: var(--color-accent);
+}
+
+@media (max-width: 768px) {
+    .plugin-album__settings-modal .lora-select-toggle {
+        gap: var(--spacing-2);
+    }
+    .plugin-album__settings-modal .lora-card-grid {
+        grid-template-columns: 1fr;
+    }
 }
 .stage-config-grid {
     display: grid;

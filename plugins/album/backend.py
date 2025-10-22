@@ -63,6 +63,59 @@ class AlbumPlugin:
             albums, self.ALBUM_CUSTOM_LIST_FILENAME, user_hash, obfuscated=True
         )
 
+    def _delete_custom_album_entry(self, user_hash, character_hash):
+        current_albums = self._load_custom_albums(user_hash)
+        if not current_albums:
+            return False
+        filtered = [entry for entry in current_albums if entry.get("hash") != character_hash]
+        if len(filtered) != len(current_albums):
+            self._save_custom_albums(user_hash, filtered)
+            return True
+        return False
+
+    def _delete_character_config_entry(self, character_hash):
+        configs = self.core_api.read_data(self.ALBUM_CHAR_CONFIG_FILENAME)
+        if character_hash in configs:
+            del configs[character_hash]
+            self.core_api.save_data(configs, self.ALBUM_CHAR_CONFIG_FILENAME)
+            return True
+        return False
+
+    def _delete_character_images(self, user_hash, character_hash):
+        """Remove all images and files associated with a character album."""
+        images_data = self.core_api.read_data(
+            self.core_api.image_service.IMAGE_DATA_FILENAME,
+            default_value={},
+            obfuscated=True
+        )
+        user_images = images_data.get(user_hash, {})
+        character_images = user_images.get(character_hash, [])
+        if not character_images:
+            return 0
+
+        image_ids = [img.get("id") for img in character_images if img.get("id")]
+        deleted_count = 0
+        for image_id in image_ids:
+            try:
+                if self.core_api.image_service.delete_image_by_id(user_hash, image_id):
+                    deleted_count += 1
+            except Exception as err:  # noqa: BLE001
+                print(f"[AlbumPlugin] Failed to delete image '{image_id}': {err}")
+        return deleted_count
+
+    def _delete_character_album(self, user_hash, character_hash):
+        if not character_hash:
+            return {"images_removed": 0, "config_removed": False, "custom_removed": False}
+        images_removed = self._delete_character_images(user_hash, character_hash)
+        config_removed = self._delete_character_config_entry(character_hash)
+        custom_removed = self._delete_custom_album_entry(user_hash, character_hash)
+        return {
+            "images_removed": images_removed,
+            "config_removed": config_removed,
+            "custom_removed": custom_removed,
+        }
+
+
     def _find_user_image(self, user_hash, image_id):
         """Locate an image metadata entry by id for the given user."""
         images_data = self.core_api.read_data(
@@ -428,6 +481,29 @@ class AlbumPlugin:
 
             return jsonify({"status": "success", "message": "Character-specific config saved."})
         
+
+        @self.blueprint.route('/<character_hash>', methods=['DELETE'])
+        def delete_character_album(character_hash):
+            user_hash = self.core_api.verify_token_and_get_user_hash()
+            if not character_hash:
+                abort(400, "Missing character hash.")
+
+            result = self._delete_character_album(user_hash, character_hash)
+            status = "success"
+            if (
+                not result["images_removed"]
+                and not result["config_removed"]
+                and not result["custom_removed"]
+            ):
+                status = "not_found"
+            return jsonify({
+                "status": status,
+                "images_removed": result["images_removed"],
+                "config_removed": result["config_removed"],
+                "custom_entry_removed": result["custom_removed"],
+            })
+
+
         # --- Yuuka: TOÀN BỘ CÁC ROUTE VỀ GENERATE VÀ QUẢN LÝ ẢNH ĐÃ ĐƯỢC CHUYỂN SANG LÕI ---
 
     def get_blueprint(self):

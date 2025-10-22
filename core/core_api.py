@@ -18,6 +18,7 @@ from comfyui_integration.workflow_builder_service import WorkflowBuilderService
 from .image_service import ImageService
 from .generation_service import GenerationService
 from .game_service import GameService # Yuuka: PvP game feature v1.0
+from .task_service import BackgroundTaskService
 
 
 class CoreAPI:
@@ -48,6 +49,7 @@ class CoreAPI:
         self.image_service = ImageService(self)
         self.generation_service = GenerationService(self)
         self.game_service = GameService(self) # Yuuka: PvP game feature v1.0
+        self.task_service = BackgroundTaskService()
         
         # Yuuka: Thêm các hằng số URL từ phiên bản cũ
         self.CSV_CHARACTERS_URL = "https://raw.githubusercontent.com/mirabarukaso/character_select_stand_alone_app/refs/heads/main/data/wai_characters.csv"
@@ -514,3 +516,43 @@ class CoreAPI:
                 print(f"💥 [CoreAPI] Error calling service '{service_name}': {e}")
                 return None
         else: return None
+
+    # --- 5.1 Background task helpers ---
+    def register_background_task(
+        self,
+        plugin_id: str,
+        task_name: str,
+        target,
+        *,
+        args=None,
+        kwargs=None,
+        pass_stop_event: bool = True,
+        stop_callback=None,
+        auto_start: bool = True,
+        auto_restart: bool = False,
+        restart_delay: float = 5.0,
+        daemon: bool = True,
+    ):
+        """Convenience wrapper so plugins can register managed background tasks."""
+        return self.task_service.register_thread_task(
+            plugin_id,
+            task_name,
+            target,
+            args=args or (),
+            kwargs=kwargs or {},
+            pass_stop_event=pass_stop_event,
+            stop_callback=stop_callback,
+            auto_start=auto_start,
+            auto_restart=auto_restart,
+            restart_delay=restart_delay,
+            daemon=daemon,
+        )
+
+    def stop_background_tasks_for_plugin(self, plugin_id: str, timeout: float = 10.0):
+        self.task_service.stop_all_for_plugin(plugin_id, timeout=timeout)
+
+    def stop_all_background_tasks(self, timeout: float = 10.0):
+        self.task_service.stop_all(timeout=timeout)
+
+    def get_background_task_status(self, plugin_id: str = None):
+        return self.task_service.get_status(plugin_id)
