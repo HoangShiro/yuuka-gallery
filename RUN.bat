@@ -16,6 +16,13 @@ if "%EXIT_CODE%"=="0" (
     goto restart
 )
 
+if "%EXIT_CODE%"=="2" (
+    set "FAIL_COUNT=0"
+    echo Application requested graceful restart. Restarting...
+    timeout /t 1 /nobreak >nul
+    goto restart
+)
+
 set /a FAIL_COUNT+=1
 echo Application exited with error level %EXIT_CODE% (attempt !FAIL_COUNT! of !MAX_FAILURES!).
 if !FAIL_COUNT! GEQ !MAX_FAILURES! (
