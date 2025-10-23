@@ -72,6 +72,53 @@
     cursor: grabbing;
 }
 
+.sv-viewer-placeholder {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 80px;
+    height: 80px;
+    border-radius: 8px;
+    background: rgba(20, 20, 30, 0.7);
+    color: #f0f0f0;
+    font-size: 0.85em;
+    z-index: 4;
+    opacity: 1;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.sv-viewer-placeholder.hidden {
+    opacity: 0;
+}
+
+.sv-viewer-placeholder.error {
+    width: auto;
+    min-width: 140px;
+    padding: 12px 18px;
+    background: rgba(120, 40, 40, 0.85);
+    text-align: center;
+}
+
+.sv-placeholder-spinner {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.25);
+    border-top-color: #ffffff;
+    animation: svPlaceholderSpin 0.8s linear infinite;
+}
+
+@keyframes svPlaceholderSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 
 .sv-viewer-nav {
     position: absolute;

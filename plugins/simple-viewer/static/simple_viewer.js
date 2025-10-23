@@ -10,6 +10,113 @@ window.Yuuka.plugins.simpleViewer = (() => {
     let currentIndex = -1;
     let options = {};
     let navHideTimeout;
+    const imageCache = new Map();
+    const MAX_PRELOAD_FORWARD = 5;
+    const MAX_PRELOAD_BACKWARD = 3;
+
+    /**
+     * Preload an image and keep its state cached.
+     * @param {string} url
+     * @returns {Promise<void>|undefined}
+     */
+    function preloadImage(url) {
+        if (!url) return;
+        const existing = imageCache.get(url);
+        if (existing) {
+            return existing.promise;
+        }
+
+        const entry = {
+            status: 'loading',
+            promise: null,
+        };
+
+        entry.promise = new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                entry.status = 'loaded';
+                entry.image = img;
+                resolve();
+            };
+            img.onerror = (err) => {
+                entry.status = 'error';
+                entry.error = err;
+                imageCache.delete(url);
+                reject(err);
+            };
+            img.src = url;
+        });
+
+        imageCache.set(url, entry);
+        return entry.promise;
+    }
+
+    /**
+     * Queue preload for images around the current index to keep navigation smooth.
+     * @param {number} index
+     */
+    function preloadAroundIndex(index) {
+        if (!Array.isArray(items) || items.length === 0) return;
+        const allowedUrls = new Set();
+        const currentItem = items[index];
+        if (currentItem?.imageUrl) {
+            allowedUrls.add(currentItem.imageUrl);
+        }
+        for (let offset = 1; offset <= MAX_PRELOAD_FORWARD && offset < items.length; offset++) {
+            const nextIndex = (index + offset) % items.length;
+            const nextItem = items[nextIndex];
+            if (nextItem?.imageUrl) {
+                allowedUrls.add(nextItem.imageUrl);
+                const preloadPromise = preloadImage(nextItem.imageUrl);
+                if (preloadPromise) {
+                    preloadPromise.catch(() => {});
+                }
+            }
+        }
+        for (let offset = 1; offset <= MAX_PRELOAD_BACKWARD && offset < items.length; offset++) {
+            const prevIndex = (index - offset + items.length) % items.length;
+            const prevItem = items[prevIndex];
+            if (prevItem?.imageUrl) {
+                allowedUrls.add(prevItem.imageUrl);
+                const preloadPromise = preloadImage(prevItem.imageUrl);
+                if (preloadPromise) {
+                    preloadPromise.catch(() => {});
+                }
+            }
+        }
+        imageCache.forEach((_, url) => {
+            if (!allowedUrls.has(url)) {
+                imageCache.delete(url);
+            }
+        });
+    }
+
+    /**
+     * Create a loading placeholder element.
+     * @returns {HTMLDivElement}
+     */
+    function createPlaceholder() {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'sv-viewer-placeholder';
+        placeholder.innerHTML = '<span class="sv-placeholder-spinner"></span>';
+        return placeholder;
+    }
+
+    /**
+     * Wait for an image element to finish loading.
+     * @param {HTMLImageElement} imgElement
+     * @returns {Promise<void>}
+     */
+    function waitForImageElement(imgElement) {
+        if (imgElement.complete && imgElement.naturalWidth !== 0) {
+            return Promise.resolve();
+        }
+
+        return new Promise((resolve, reject) => {
+            imgElement.addEventListener('load', resolve, { once: true });
+            imgElement.addEventListener('error', reject, { once: true });
+        });
+    }
 
     // --- Private Methods ---
 
@@ -67,8 +174,11 @@ window.Yuuka.plugins.simpleViewer = (() => {
         
         const oldActiveImages = slider.querySelectorAll('img.active');
 
+        slider.querySelectorAll('.sv-viewer-placeholder').forEach(el => el.remove());
+        const placeholder = createPlaceholder();
+        slider.appendChild(placeholder);
+
         const newImgElement = document.createElement('img');
-        newImgElement.src = newItem.imageUrl;
         slider.appendChild(newImgElement);
         initZoomAndPan(newImgElement);
 
@@ -84,9 +194,46 @@ window.Yuuka.plugins.simpleViewer = (() => {
 
         }, { once: true });
 
-        setTimeout(() => {
-            newImgElement.classList.add('active');
-        }, 10);
+        const activateImage = () => {
+            requestAnimationFrame(() => {
+                newImgElement.classList.add('active');
+            });
+            placeholder.classList.add('hidden');
+            const removePlaceholder = () => {
+                if (placeholder.isConnected) {
+                    placeholder.remove();
+                }
+            };
+            placeholder.addEventListener('transitionend', removePlaceholder, { once: true });
+            setTimeout(removePlaceholder, 400);
+            const resolvedPromise = Promise.resolve();
+            const cacheEntry = imageCache.get(newItem.imageUrl);
+            if (cacheEntry) {
+                cacheEntry.status = 'loaded';
+                cacheEntry.image = newImgElement;
+                cacheEntry.promise = resolvedPromise;
+            } else {
+                imageCache.set(newItem.imageUrl, {
+                    status: 'loaded',
+                    promise: resolvedPromise,
+                    image: newImgElement,
+                });
+            }
+        };
+
+        const handleImageError = () => {
+            placeholder.classList.add('error');
+            placeholder.textContent = 'Failed to load image';
+            imageCache.delete(newItem.imageUrl);
+        };
+
+        newImgElement.src = newItem.imageUrl;
+
+        waitForImageElement(newImgElement)
+            .then(activateImage)
+            .catch(handleImageError);
+        
+        preloadAroundIndex(currentIndex);
         
         renderActionButtons(newItem);
 
