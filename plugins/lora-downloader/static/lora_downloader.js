@@ -321,13 +321,13 @@ class LoraDownloaderService {
         const button = triggerButton || null;
         try {
             await this.api['lora-downloader'].post(`/tasks/${taskId}/cancel`, {});
-            showError('Đã gửi yêu cầu huỷ tải.');
+            showError('Đã gửi yêu cầu hủy tải.');
         } catch (err) {
             if (button) {
                 button.disabled = false;
                 button.classList.remove('is-busy');
             }
-            showError(`Không thể huỷ tải: ${err.message}`);
+            showError(`Không thể hủy tải: ${err.message}`);
             return;
         }
 
@@ -572,6 +572,7 @@ class LoraDownloaderService {
             const response = await this.api['lora-downloader'].get('/lora-data');
             const modelsMap = response.models || {};
             this.state.models = Object.values(modelsMap);
+            this.state.defaultServer = response.default_server_address || this.state.defaultServer;
             this._renderActivity();
             if (forceToast) {
                 showError('Đã làm mới danh sách LoRA.');
@@ -703,37 +704,74 @@ class LoraDownloaderService {
         const item = document.createElement('article');
         item.className = 'lora-entry lora-entry--model';
 
-        const name = model?.name || '(Không tên)';
+        const fileMissing = model?.available === false;
+        const metadataMissing = Boolean(model?.missing_metadata);
+        if (fileMissing) {
+            item.classList.add('lora-entry--missing');
+        }
+        if (metadataMissing) {
+            item.classList.add('lora-entry--no-metadata');
+        }
+
+        const displayName = metadataMissing
+            ? (model?.filename || '(Không tên)')
+            : (model?.name || '(Không tên)');
         const updated = model?.updated_at ? this._formatTime(model.updated_at) : 'Không rõ';
-        const url = model?.civitai_url || '';
-        const modelData = this._getModelData(model);
+        const url = metadataMissing ? '' : (model?.civitai_url || '');
+
+        const modelData = metadataMissing ? null : this._getModelData(model);
         const version = Array.isArray(modelData?.modelVersions) && modelData.modelVersions.length
             ? modelData.modelVersions[0]
             : null;
-        let baseModel = version?.baseModel || version?.base_model || model?.base_model || '';
+        let baseModel = metadataMissing ? '' : (version?.baseModel || version?.base_model || model?.base_model || '');
         if (typeof baseModel !== 'string') {
             baseModel = '';
         }
         baseModel = baseModel.trim();
-        const thumbUrl = this._getModelThumbnailUrl(model);
-        const thumbInner = thumbUrl
-            ? `<img class="lora-model-thumb" src="${this._escapeAttr(thumbUrl)}" alt="${this._escapeAttr(name)}" loading="lazy">`
-            : `<span class="material-symbols-outlined">description</span>`;
+
+        let thumbUrl = metadataMissing ? null : this._getModelThumbnailUrl(model);
+        let thumbInner;
+        if (thumbUrl) {
+            thumbInner = `<img class="lora-model-thumb" src="${this._escapeAttr(thumbUrl)}" alt="${this._escapeAttr(displayName)}" loading="lazy">`;
+        } else if (metadataMissing) {
+            thumbInner = `<span class="lora-model-thumb-placeholder"></span>`;
+        } else {
+            thumbInner = `<span class="material-symbols-outlined">description</span>`;
+        }
+
+        const thumbWrapperClasses = ['lora-model-thumb-wrapper'];
+        if (fileMissing) {
+            thumbWrapperClasses.push('is-missing');
+        }
+        if (metadataMissing) {
+            thumbWrapperClasses.push('is-no-metadata');
+        }
         const thumbHtml = `
-            <div class="lora-model-thumb-wrapper">
+            <div class="${thumbWrapperClasses.join(' ')}">
                 ${thumbInner}
-                ${baseModel ? `<span class="lora-model-base-mobile">${this._escapeHtml(baseModel)}</span>` : ''}
+                ${baseModel && !metadataMissing ? `<span class="lora-model-base-mobile">${this._escapeHtml(baseModel)}</span>` : ''}
+                ${fileMissing ? `
+                    <button type="button" class="lora-model-thumb-overlay-button" title="Tải lại LoRA" aria-label="Tải lại LoRA">
+                        <span class="material-symbols-outlined">cloud_download</span>
+                    </button>
+                ` : ''}
             </div>
         `;
+
         const actions = [];
-        if (url) {
+        actions.push(`
+            <button type="button" class="lora-model-action lora-model-action--delete" title="Xóa LoRA" aria-label="Xóa LoRA">
+                <span class="material-symbols-outlined">delete_forever</span>
+            </button>
+        `);
+        if (!metadataMissing && url) {
             actions.push(`
                 <a class="lora-model-action lora-model-action--link" href="${this._escapeAttr(url)}" target="_blank" rel="noopener" title="Mở Civitai" aria-label="Mở Civitai">
                     <span class="material-symbols-outlined">link</span>
                 </a>
             `);
         }
-        if (this._hasAlbumPlugin()) {
+        if (!metadataMissing && this._hasAlbumPlugin()) {
             actions.push(`
                 <button type="button" class="lora-model-action lora-model-action--album" title="Tạo album từ LoRA" aria-label="Tạo album từ LoRA">
                     <span class="material-symbols-outlined">photo_album</span>
@@ -741,45 +779,80 @@ class LoraDownloaderService {
             `);
         }
         const actionsHtml = actions.length ? `<div class="lora-model-actions">${actions.join('')}</div>` : '';
-        const safeName = this._escapeHtml(name);
+        const safeName = this._escapeHtml(displayName);
         const safeUpdated = this._escapeHtml(updated);
-        const baseModelHtml = baseModel ? `<span class="lora-model-base">${this._escapeHtml(baseModel)}</span>` : '';
+        const baseModelHtml = (!metadataMissing && baseModel)
+            ? `<span class="lora-model-base">${this._escapeHtml(baseModel)}</span>`
+            : '';
         const controlsHtml = baseModelHtml || actionsHtml
             ? `<div class="lora-model-controls">${baseModelHtml}${actionsHtml}</div>`
             : '';
+        const textClasses = ['lora-model-text'];
+        if (fileMissing) {
+            textClasses.push('is-missing');
+        }
+        if (metadataMissing) {
+            textClasses.push('is-no-metadata');
+        }
 
         item.innerHTML = `
             <div class="lora-model-row">
                 <div class="lora-model-main">
                     ${thumbHtml}
-                    <div class="lora-model-text">
-                        <strong title="${this._escapeAttr(name)}">${safeName}</strong>
-                        <p class="lora-model-updated-inline">Cập nhật: ${safeUpdated}</p>
+                    <div class="${textClasses.join(' ')}">
+                        <strong title="${this._escapeAttr(displayName)}">${safeName}</strong>
+                        <p class="lora-model-updated-inline">${safeUpdated}</p>
                     </div>
                 </div>
                 ${controlsHtml}
                 <div class="lora-model-meta">
-                    <span class="lora-model-meta-updated">Cập nhật: ${safeUpdated}</span>
+                    <span class="lora-model-meta-updated">${safeUpdated}</span>
+                    ${metadataMissing ? '<span class="lora-model-meta-warning">Chưa có metadata</span>' : ''}
                 </div>
             </div>
         `;
-        const previewTarget = item.querySelector('.lora-model-thumb') || item.querySelector('.lora-model-main > span.material-symbols-outlined');
-        if (previewTarget) {
-            previewTarget.classList.add('lora-model-preview-trigger');
-            previewTarget.addEventListener('click', (event) => {
+
+        if (!metadataMissing) {
+            const previewTarget = item.querySelector('.lora-model-thumb') || item.querySelector('.lora-model-main > span.material-symbols-outlined');
+            if (previewTarget) {
+                previewTarget.classList.add('lora-model-preview-trigger');
+                previewTarget.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this._openModelPreview(model, thumbUrl);
+                });
+            }
+        }
+
+        if (!metadataMissing) {
+            const albumButton = item.querySelector('.lora-model-action--album');
+            if (albumButton) {
+                albumButton.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this._createAlbumFromModel(model, albumButton);
+                });
+            }
+        }
+
+        const deleteButton = item.querySelector('.lora-model-action--delete');
+        if (deleteButton) {
+            deleteButton.addEventListener('click', async (event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                this._openModelPreview(model, thumbUrl);
+                await this._deleteModel(model, deleteButton);
             });
         }
 
-        const albumButton = item.querySelector('.lora-model-action--album');
-        if (albumButton) {
-            albumButton.addEventListener('click', (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                this._createAlbumFromModel(model, albumButton);
-            });
+        if (fileMissing) {
+            const reDownloadButton = item.querySelector('.lora-model-thumb-overlay-button');
+            if (reDownloadButton) {
+                reDownloadButton.addEventListener('click', async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    await this._redownloadModel(model, reDownloadButton);
+                });
+            }
         }
 
         return item;
@@ -790,7 +863,7 @@ class LoraDownloaderService {
             case 'queued': return 'Đang chờ';
             case 'running': return 'Đang tải';
             case 'completed': return 'Hoàn tất';
-            case 'cancelled': return 'Đã huỷ';
+            case 'cancelled': return 'Đã hủy';
             case 'error': return 'Lỗi';
             default: return status || 'Không rõ';
         }
@@ -1208,6 +1281,77 @@ class LoraDownloaderService {
             return '';
         }
         return date.toLocaleString();
+    }
+
+    async _deleteModel(model, triggerElement) {
+        const filename = (model?.filename || '').trim();
+        if (!filename) {
+            showError('Không xác định tên file LoRA.');
+            return;
+        }
+        const ok = window.confirm(`Xóa LoRA '${filename}'?`);
+        if (!ok) return;
+
+        const btn = triggerElement;
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.add('is-busy');
+        }
+        try {
+            await this.api['lora-downloader'].post('/delete', { filename });
+            await this.refreshModelData(false);
+        } catch (err) {
+            console.error('[LoraDownloader] Delete failed:', err);
+            showError(`Không thể xóa LoRA: ${err?.message || err}`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.classList.remove('is-busy');
+            }
+        }
+    }
+
+    async _redownloadModel(model, triggerElement) {
+        const civitaiUrl = (model?.civitai_url || '').trim();
+        if (!civitaiUrl) {
+            showError('Không tìm thấy URL Civitai để tải lại.');
+            return;
+        }
+
+        const serverAddress = (this.serverInput?.value || this.state.defaultServer || '').trim();
+        if (!serverAddress) {
+            showError('Chưa cấu hình địa chỉ ComfyUI.');
+            return;
+        }
+
+        const payload = {
+            civitai_url: civitaiUrl,
+            server_address: serverAddress,
+        };
+        const apiKeyValue = (this.apiKeyInput?.value || '').trim();
+        if (apiKeyValue) {
+            payload.api_key = apiKeyValue;
+        }
+
+        const btn = triggerElement;
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.add('is-busy');
+        }
+
+        try {
+            await this.api['lora-downloader'].post('/download', payload);
+            showError('Đã gửi yêu cầu tải lại LoRA.');
+            await this.refreshTasks(false);
+        } catch (err) {
+            console.error('[LoraDownloader] Redownload failed:', err);
+            showError(`Không thể tải lại LoRA: ${err?.message || err}`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.classList.remove('is-busy');
+            }
+        }
     }
 }
 

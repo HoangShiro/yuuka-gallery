@@ -442,6 +442,85 @@
     flex-shrink: 0;
 }
 
+.lora-entry--missing .lora-model-thumb-wrapper {
+    filter: grayscale(0.85);
+    opacity: 0.45;
+}
+
+.lora-entry--missing .lora-model-text strong,
+.lora-entry--missing .lora-model-text p {
+    opacity: 0.6;
+}
+
+.lora-model-thumb-wrapper.is-missing .lora-model-thumb,
+.lora-model-thumb-wrapper.is-missing .material-symbols-outlined {
+    filter: grayscale(1);
+    opacity: 0.5;
+}
+
+.lora-entry--no-metadata .lora-model-text {
+    opacity: 0.85;
+}
+
+.lora-entry--no-metadata .lora-model-text strong {
+    color: var(--color-primary-text);
+}
+
+.lora-model-thumb-placeholder {
+    width: 52px;
+    height: 52px;
+    border-radius: var(--rounded-md);
+    border: 1px dashed var(--color-border);
+    background: rgba(255, 255, 255, 0.04);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.lora-model-thumb-wrapper.is-no-metadata .lora-model-thumb-placeholder {
+    opacity: 0.75;
+}
+
+.lora-model-thumb-overlay-button {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 36px;
+    height: 36px;
+    border-radius: var(--rounded-full);
+    border: none;
+    background: rgba(30, 30, 30, 0.85);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    transition: background 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+    padding: 0;
+    z-index: 2;
+}
+
+.lora-model-thumb-overlay-button:hover {
+    background: var(--color-accent);
+    transform: translate(-50%, -50%) scale(1.05);
+}
+
+.lora-model-thumb-overlay-button.is-busy,
+.lora-model-thumb-overlay-button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.lora-model-meta-warning {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    font-size: 0.78rem;
+    color: var(--color-accent);
+}
+
 .lora-model-thumb-wrapper .material-symbols-outlined {
     width: 52px;
     height: 52px;

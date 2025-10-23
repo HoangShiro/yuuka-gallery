@@ -1,11 +1,13 @@
 import json
+import os
 import threading
 import time
 import uuid
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 from flask import Blueprint, jsonify, request
 import websocket
+import requests
 
 
 class LoraDownloaderPlugin:
@@ -91,7 +93,107 @@ class LoraDownloaderPlugin:
                 return jsonify({"error": str(exc)}), 401
 
             data = self.core_api.read_data(self.DATA_FILENAME, default_value={})
-            return jsonify({"models": data})
+            if not isinstance(data, dict):
+                data = {}
+
+            default_address = self._get_default_server_address()
+            filenames = [
+                str(entry.get("filename"))
+                for entry in data.values()
+                if isinstance(entry, dict) and entry.get("filename")
+            ]
+            remote_files = set(self._fetch_remote_lora_list(default_address))
+            availability_map = self._fetch_remote_lora_status(filenames, default_address)
+
+            enriched = {}
+            metadata_basenames = set()
+            for key, entry in data.items():
+                if not isinstance(entry, dict):
+                    continue
+                record = entry.copy()
+                filename = record.get("filename")
+                if filename:
+                    lookup_key = os.path.basename(str(filename))
+                    record["available"] = availability_map.get(lookup_key, True)
+                    metadata_basenames.add(lookup_key)
+                else:
+                    record["available"] = False
+                record["missing_metadata"] = False
+                enriched[key] = record
+
+            for remote_name in remote_files:
+                base_remote = os.path.basename(remote_name)
+                if base_remote in metadata_basenames:
+                    continue
+                key = f"file::{base_remote}"
+                enriched[key] = {
+                    "filename": base_remote,
+                    "name": base_remote,
+                    "available": True,
+                    "missing_metadata": True,
+                    "updated_at": None,
+                    "created_at": None,
+                }
+
+            return jsonify({"models": enriched, "default_server_address": default_address})
+
+        @self.blueprint.route("/delete", methods=["POST"])
+        def delete_lora():
+            """Delete a LoRA file on ComfyUI and remove its metadata locally.
+
+            Expected payload: { filename: str, server_address?: str }
+            """
+            try:
+                self.core_api.verify_token_and_get_user_hash()
+            except Exception as exc:  # noqa: BLE001
+                return jsonify({"error": str(exc)}), 401
+
+            payload = request.json or {}
+            filename = (payload.get("filename") or "").strip()
+            server_address = (payload.get("server_address") or "").strip() or self._get_default_server_address()
+
+            if not filename:
+                return jsonify({"error": "Missing filename"}), 400
+            if not server_address:
+                return jsonify({"error": "Server address is required."}), 400
+
+            safe_name = os.path.basename(filename)
+
+            # 1) Ask ComfyUI (custom node route) to delete the LoRA file + sidecar json
+            ok_remote = False
+            err_detail = None
+            try:
+                resp = requests.post(
+                    f"http://{server_address}/yuuka/lora/delete",
+                    json={"filename": safe_name},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    body = {}
+                    try:
+                        body = resp.json() or {}
+                    except Exception:  # noqa: BLE001
+                        body = {}
+                    ok_remote = bool(body.get("deleted"))
+                    if not ok_remote:
+                        err_detail = body.get("error") or f"Remote responded with {resp.status_code}"
+                else:
+                    err_detail = f"HTTP {resp.status_code}"
+            except Exception as exc:  # noqa: BLE001
+                err_detail = str(exc)
+
+            if not ok_remote:
+                return jsonify({"status": "failed", "message": f"Failed to delete on ComfyUI: {err_detail}"}), 502
+
+            # 2) Remove local metadata entries that reference this filename
+            removed_keys = self._delete_local_lora_metadata_by_filename(safe_name)
+
+            return jsonify({
+                "status": "success",
+                "deleted": True,
+                "filename": safe_name,
+                "removed_keys": removed_keys,
+            })
 
     def get_blueprint(self):
         return self.blueprint, "/api/plugin/lora-downloader"
@@ -376,6 +478,70 @@ class LoraDownloaderPlugin:
             data[primary_key] = record
             success = self.core_api.save_data(data, self.DATA_FILENAME)
         return success
+
+    def _delete_local_lora_metadata_by_filename(self, filename: str):
+        removed = []
+        with self._data_lock:
+            data = self.core_api.read_data(self.DATA_FILENAME, default_value={})
+            if not isinstance(data, dict):
+                data = {}
+            keys_to_remove = [k for k, v in data.items() if isinstance(v, dict) and (v.get("filename") == filename)]
+            for k in keys_to_remove:
+                removed.append(k)
+                data.pop(k, None)
+            self.core_api.save_data(data, self.DATA_FILENAME)
+        return removed
+
+    def _fetch_remote_lora_status(self, filenames: List[str], server_address: Optional[str]) -> Dict[str, bool]:
+        if not filenames or not server_address:
+            return {}
+
+        unique = sorted({os.path.basename(name) for name in filenames if isinstance(name, str) and name.strip()})
+        if not unique:
+            return {}
+
+        try:
+            response = requests.post(
+                f"http://{server_address}/yuuka/lora/status",
+                json={"filenames": unique},
+                timeout=10,
+            )
+            if response.status_code != 200:
+                return {}
+            payload = response.json() or {}
+        except Exception:
+            return {}
+
+        status_map = payload.get("status")
+        if not isinstance(status_map, dict):
+            return {}
+
+        normalized = {}
+        for name, value in status_map.items():
+            key = os.path.basename(str(name))
+            normalized[key] = bool(value)
+        return normalized
+
+    def _fetch_remote_lora_list(self, server_address: Optional[str]) -> List[str]:
+        if not server_address:
+            return []
+
+        try:
+            response = requests.get(
+                f"http://{server_address}/yuuka/lora/list",
+                timeout=10,
+            )
+            if response.status_code != 200:
+                return []
+            payload = response.json() or {}
+        except Exception:
+            return []
+
+        files = payload.get("files")
+        if not isinstance(files, list):
+            return []
+
+        return [os.path.basename(str(name)) for name in files if isinstance(name, str) and name.strip()]
 
     def _get_default_server_address(self) -> Optional[str]:
         comfy_cfg = self.core_api.read_data("comfyui_config.json", default_value={})

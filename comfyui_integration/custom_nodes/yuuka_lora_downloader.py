@@ -8,6 +8,7 @@ import requests
 from dotenv import load_dotenv
 import folder_paths
 from server import PromptServer
+from aiohttp import web
 
 
 class YuukaLoraDownloader:
@@ -256,3 +257,133 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Yuuka_Lora_Downloader": "Lora Downloader (by Yuuka)",
 }
+
+
+# ----------------------------
+# Additional server endpoints
+# ----------------------------
+
+def _get_loras_directory() -> str:
+    paths = folder_paths.get_folder_paths("loras")
+    if not paths:
+        raise RuntimeError("LoRA directory not configured")
+    return paths[0]
+
+
+async def _delete_lora_files(filename: str) -> dict:
+    """Delete a LoRA .safetensors file and its sidecar .json metadata.
+
+    Returns a dict with {deleted: bool, filename: str, removed: [paths], errors: [str]}
+    """
+    result = {"deleted": False, "filename": filename, "removed": [], "errors": []}
+    if not filename:
+        result["errors"].append("Missing filename")
+        return result
+
+    # Only allow basename to prevent path traversal
+    safe_name = os.path.basename(filename)
+    try:
+        loras_dir = _get_loras_directory()
+    except Exception as exc:  # noqa: BLE001
+        result["errors"].append(f"Cannot resolve loras path: {exc}")
+        return result
+
+    target_path = os.path.join(loras_dir, safe_name)
+    # Sidecar metadata JSON placed next to LoRA file using stem
+    sidecar_path = os.path.join(loras_dir, f"{os.path.splitext(safe_name)[0]}.json")
+
+    # Delete LoRA file if exists
+    try:
+        if os.path.isfile(target_path):
+            os.remove(target_path)
+            result["removed"].append(target_path)
+        else:
+            result["errors"].append("LoRA file not found")
+    except Exception as exc:  # noqa: BLE001
+        result["errors"].append(f"Failed to delete LoRA file: {exc}")
+
+    # Delete sidecar JSON if exists (best-effort)
+    try:
+        if os.path.isfile(sidecar_path):
+            os.remove(sidecar_path)
+            result["removed"].append(sidecar_path)
+    except Exception as exc:  # noqa: BLE001
+        result["errors"].append(f"Failed to delete sidecar JSON: {exc}")
+
+    result["deleted"] = any(p.endswith(safe_name) or p.endswith(f"{os.path.splitext(safe_name)[0]}.json") for p in result["removed"]) and ("LoRA file not found" not in result["errors"]) 
+    return result
+
+
+@PromptServer.instance.routes.post("/yuuka/lora/delete")
+async def yuuka_lora_delete(request):
+    """HTTP endpoint to delete a LoRA by filename on the ComfyUI host.
+
+    Body JSON: { filename: str }
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    filename = (payload.get("filename") or "").strip()
+    if not filename:
+        return web.json_response({"deleted": False, "error": "Missing filename"}, status=400)
+
+    result = await _delete_lora_files(filename)
+    status = 200 if result.get("deleted") or "LoRA file not found" in result.get("errors", []) else 500
+    # If the main file was not found, we still return 200 to indicate idempotent success on removal intent.
+    if "LoRA file not found" in result.get("errors", []):
+        status = 200
+    return web.json_response(result, status=status)
+
+
+@PromptServer.instance.routes.post("/yuuka/lora/status")
+async def yuuka_lora_status(request):
+    """Return availability status for a list of LoRA filenames."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    filenames = payload.get("filenames")
+    if not isinstance(filenames, list):
+        return web.json_response({"status": {}}, status=200)
+
+    try:
+        loras_dir = _get_loras_directory()
+    except Exception as exc:  # noqa: BLE001
+        return web.json_response({"status": {}, "error": str(exc)}, status=500)
+
+    status_map = {}
+    for entry in filenames:
+        if not isinstance(entry, str):
+            continue
+        cleaned = entry.strip()
+        if not cleaned:
+            continue
+        safe_name = os.path.basename(cleaned)
+        target_path = os.path.join(loras_dir, safe_name)
+        status_map[safe_name] = os.path.isfile(target_path)
+
+    return web.json_response({"status": status_map}, status=200)
+
+
+@PromptServer.instance.routes.get("/yuuka/lora/list")
+async def yuuka_lora_list(_request):
+    """Return all LoRA filenames available on disk."""
+    try:
+        loras_dir = _get_loras_directory()
+    except Exception as exc:  # noqa: BLE001
+        return web.json_response({"files": [], "error": str(exc)}, status=500)
+
+    try:
+        entries = [
+            name
+            for name in os.listdir(loras_dir)
+            if isinstance(name, str) and name.lower().endswith(".safetensors")
+        ]
+    except Exception as exc:  # noqa: BLE001
+        return web.json_response({"files": [], "error": str(exc)}, status=500)
+
+    entries.sort()
+    return web.json_response({"files": entries}, status=200)
