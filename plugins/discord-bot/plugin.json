@@ -1,0 +1,34 @@
+{
+    "id": "discord-bot",
+    "name": "Discord Bot Manager",
+    "version": "0.1.0",
+    "author": "Yuuka",
+    "description": "Manage per-user Discord bots with isolated console, optional modules, and lifecycle controls.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:DiscordBotPlugin",
+        "frontend_component": "DiscordBotComponent"
+    },
+    "assets": {
+        "js": [
+            "pages/dashboard.js",
+            "discord_bot.js"
+        ],
+        "css": [
+            "discord_bot.css"
+        ]
+    },
+    "dependencies": {
+        "python": [
+            "py-cord>=2.4,<2.6"
+        ]
+    },
+    "ui": {
+        "tab": {
+            "id": "discord-bot",
+            "label": "Discord Bot",
+            "icon": "smart_toy"
+        },
+        "order": 45
+    }
+}

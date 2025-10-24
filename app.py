@@ -389,7 +389,7 @@ def initialize_server():
     uptime_thread = threading.Thread(target=_uptime_tracking_thread, daemon=True)
     uptime_thread.start()
 
-    print("\n✅ Yuuka's Server V3.6 is ready!")
+    print("\n✅ Yuuka's Server V3.7 is ready!")
     print(f"   - Loaded {len(plugin_manager.get_active_plugins())} plugins.")
     print("   - Local access at: http://127.0.0.1:5000")
     print("   - To access from other devices on the same network, use this machine's IP address.")
