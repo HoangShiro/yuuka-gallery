@@ -1,4 +1,4 @@
-# --- MODIFIED FILE: comfyui_integration/comfy_api_client.py ---
+# --- MODIFIED FILE: integrations/comfy_api_client.py ---
 import json
 import urllib.request
 import urllib.parse

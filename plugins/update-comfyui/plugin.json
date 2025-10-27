@@ -1,0 +1,33 @@
+{
+    "id": "update-comfyui",
+    "name": "Update ComfyUI",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Plugin dung de giam sat va khoi dong lai ComfyUI tu giao dien Character Gallery.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:UpdateComfyUIPlugin",
+        "frontend_component": "UpdateComfyUIService"
+    },
+    "assets": {
+        "js": [
+            "update_comfyui.js"
+        ],
+        "css": [
+            "update_comfyui.css"
+        ]
+    },
+    "dependencies": {
+        "python": []
+    },
+    "ui": {
+        "is_singleton": true,
+        "tab": {
+            "id": "update-comfyui",
+            "icon": "rule_settings",
+            "label": "Update ComfyUI",
+            "is_service_launcher": true
+        },
+        "order": 110
+    }
+}

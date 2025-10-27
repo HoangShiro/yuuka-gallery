@@ -1,4 +1,4 @@
-# --- MODIFIED FILE: comfyui_integration/workflow_builder_service.py ---
+# --- MODIFIED FILE: integrations/workflow_builder_service.py ---
 import os
 import json
 import uuid

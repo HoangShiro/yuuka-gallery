@@ -13,8 +13,8 @@ from PIL import Image
 from flask import request, jsonify
 
 # Yuuka: Import các thư viện tích hợp và service
-from comfyui_integration import comfy_api_client
-from comfyui_integration.workflow_builder_service import WorkflowBuilderService
+from integrations import comfy_api_client
+from integrations.workflow_builder_service import WorkflowBuilderService
 from .image_service import ImageService
 from .generation_service import GenerationService
 from .game_service import GameService # Yuuka: PvP game feature v1.0

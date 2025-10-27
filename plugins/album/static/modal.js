@@ -48,6 +48,21 @@
         const cleaned = group.replace(/^\(|\)$/g, '');
         return parseWordGroup(cleaned).map(normalizeTag).join(',');
     };
+    const buildSearchTokensFromText = (text) => {
+        if (typeof text !== 'string') return [];
+        const tokens = new Set();
+        const addToken = (value) => {
+            if (typeof value !== 'string') return;
+            const trimmed = value.trim().toLowerCase();
+            if (!trimmed || trimmed.length < 2) return;
+            tokens.add(trimmed);
+        };
+        addToken(text);
+        text
+            .split(/[\s,;:|\/\\\-]+/)
+            .forEach(addToken);
+        return Array.from(tokens);
+    };
 
     const escapeHtml = (value) => {
         if (value === null || value === undefined) return '';
@@ -63,6 +78,14 @@
         });
     };
     const escapeAttr = (value) => escapeHtml(value).replace(/`/g, '&#96;');
+    const truncateText = (value, maxLength = 40) => {
+        if (value === null || value === undefined) return '';
+        const text = String(value);
+        if (text.length <= maxLength) return text;
+        const suffix = '...';
+        const sliceLength = Math.max(0, maxLength - suffix.length);
+        return `${text.slice(0, sliceLength).trimEnd()}${suffix}`;
+    };
 
     const getModelData = (metadata) => {
         if (!metadata) return null;
@@ -405,46 +428,65 @@
             const columnsHTML = `
                 <div class="album-settings-columns">
                     <div class="album-settings-column" data-column="prompts">
-                        <h4>Prompts</h4>
-                        ${ct('character', 'Character', last_config.character)}
-                        ${ct('outfits', 'Outfits', last_config.outfits)}
-                        ${ct('expression', 'Expression', last_config.expression)}
-                        ${ct('action', 'Action', last_config.action)}
-                        ${ct('context', 'Context', last_config.context)}
-                        ${ct('quality', 'Quality', last_config.quality)}
-                        ${ct('negative', 'Negative', last_config.negative)}
+                        <div class="album-settings-section">
+                            <h4>Prompts</h4>
+                            <div class="album-settings-section__body">
+                                ${ct('character', 'Character', last_config.character)}
+                                ${ct('outfits', 'Outfits', last_config.outfits)}
+                                ${ct('expression', 'Expression', last_config.expression)}
+                                ${ct('action', 'Action', last_config.action)}
+                                ${ct('context', 'Context', last_config.context)}
+                                ${ct('quality', 'Quality', last_config.quality)}
+                                ${ct('negative', 'Negative', last_config.negative)}
+                            </div>
+                        </div>
                     </div>
                     <div class="album-settings-column" data-column="lora">
-                        <h4>LoRA</h4>
-                        <div class="form-group lora-select-group">
-                            <label for="cfg-lora_name">LoRA Name</label>
-                            <button type="button" class="lora-select-toggle" aria-haspopup="listbox" aria-expanded="false">
-                                <div class="lora-select-toggle__thumb"></div>
-                                <div class="lora-select-toggle__meta">
-                                    <span class="lora-select-toggle__title">None</span>
-                                    <span class="lora-select-toggle__subtitle">Không dùng LoRA</span>
+                        <div class="album-settings-section">
+                            <h4>LoRA</h4>
+                            <div class="album-settings-section__body">
+                                <div class="form-group lora-select-group">
+                                    <label for="cfg-lora_name">LoRA Name</label>
+                                    <button type="button" class="lora-select-toggle" aria-haspopup="listbox" aria-expanded="false">
+                                        <div class="lora-select-toggle__thumb"></div>
+                                        <div class="lora-select-toggle__meta">
+                                            <span class="lora-select-toggle__title">None</span>
+                                            <span class="lora-select-toggle__subtitle">Không dùng LoRA</span>
+                                        </div>
+                                        <span class="material-symbols-outlined lora-select-toggle__icon">expand_more</span>
+                                    </button>
+                                    <div class="lora-card-panel" role="listbox">
+                                        <div class="lora-card-panel__controls">
+                                            <input type="search" class="lora-card-panel__search-input" placeholder="Search LoRA">
+                                            <button type="button" class="lora-card-panel__search-button" title="Clear search">x</button>
+                                        </div>
+                                        <div class="lora-card-grid"></div>
+                                    </div>
+                                    <input type="hidden" id="cfg-lora_name" name="lora_name" value="${escapeAttr(selectedLora)}">
                                 </div>
-                                <span class="material-symbols-outlined lora-select-toggle__icon">expand_more</span>
-                            </button>
-                            <div class="lora-card-panel" role="listbox">
-                                <div class="lora-card-grid"></div>
+                                <div class="lora-tags-wrapper"></div>
                             </div>
-                            <input type="hidden" id="cfg-lora_name" name="lora_name" value="${escapeAttr(selectedLora)}">
                         </div>
-                        <div class="lora-tags-wrapper"></div>
                     </div>
                     <div class="album-settings-column" data-column="configs">
-                        <h4>Configs</h4>
-                        ${cse('size', 'Size', `${last_config.width}x${last_config.height}`, sizeOptions)}
-                        ${hiresConfigHTML}
-                        ${cse('ckpt_name', 'Checkpoint', last_config.ckpt_name, checkpointOptions)}
-                        ${ciwb('server_address', 'Server Address', last_config.server_address)}
+                        <div class="album-settings-section">
+                            <h4>Configs</h4>
+                            <div class="album-settings-section__body">
+                                ${cse('size', 'Size', `${last_config.width}x${last_config.height}`, sizeOptions)}
+                                ${hiresConfigHTML}
+                                ${cse('ckpt_name', 'Checkpoint', last_config.ckpt_name, checkpointOptions)}
+                                ${ciwb('server_address', 'Server Address', last_config.server_address)}
+                            </div>
+                        </div>
                     </div>
                 </div>
             `;
 
             dialog.innerHTML = `
-                <h3>${options.title}</h3>
+                <div class="modal-header">
+                    <h3>${options.title}</h3>
+                    <div class="album-settings-tabs"></div>
+                </div>
                 <div class="settings-form-container album-settings-container">
                     <form id="album-settings-form">${columnsHTML}</form>
                 </div>
@@ -465,30 +507,30 @@
             const loraFieldGroup = loraInput ? loraInput.closest('.form-group') : null;
             const loraSelectGroup = loraFieldGroup;
             const loraCardPanel = loraSelectGroup ? loraSelectGroup.querySelector('.lora-card-panel') : null;
+            const loraSearchInput = loraCardPanel ? loraCardPanel.querySelector('.lora-card-panel__search-input') : null;
+            const loraSearchButton = loraCardPanel ? loraCardPanel.querySelector('.lora-card-panel__search-button') : null;
             const loraCardGrid = loraCardPanel ? loraCardPanel.querySelector('.lora-card-grid') : null;
             const loraToggle = loraSelectGroup ? loraSelectGroup.querySelector('.lora-select-toggle') : null;
             const loraToggleThumb = loraToggle ? loraToggle.querySelector('.lora-select-toggle__thumb') : null;
             const loraToggleTitle = loraToggle ? loraToggle.querySelector('.lora-select-toggle__title') : null;
             const loraToggleSubtitle = loraToggle ? loraToggle.querySelector('.lora-select-toggle__subtitle') : null;
             const loraToggleIcon = loraToggle ? loraToggle.querySelector('.lora-select-toggle__icon') : null;
+            const loraColumn = dialog.querySelector('[data-column="lora"]');
+            const loraColumnBody = loraColumn ? loraColumn.querySelector('.album-settings-section__body') : null;
             let loraTagsWrapper = null;
             if (loraFieldGroup) {
                 loraTagsWrapper = loraFieldGroup.querySelector('.lora-tags-wrapper');
                 if (!loraTagsWrapper) {
-                    const column = loraFieldGroup.parentElement;
-                    loraTagsWrapper = column ? column.querySelector('.lora-tags-wrapper') : null;
+                    const body = loraFieldGroup.closest('.album-settings-section__body');
+                    loraTagsWrapper = body ? body.querySelector('.lora-tags-wrapper') : null;
                 }
-            } else {
-                const column = dialog.querySelector('[data-column="lora"]');
-                loraTagsWrapper = column ? column.querySelector('.lora-tags-wrapper') : null;
+            } else if (loraColumnBody) {
+                loraTagsWrapper = loraColumnBody.querySelector('.lora-tags-wrapper');
             }
-            if (!loraTagsWrapper) {
-                const column = dialog.querySelector('[data-column="lora"]');
-                if (column) {
-                    loraTagsWrapper = document.createElement('div');
-                    loraTagsWrapper.className = 'lora-tags-wrapper';
-                    column.appendChild(loraTagsWrapper);
-                }
+            if (!loraTagsWrapper && loraColumnBody) {
+                loraTagsWrapper = document.createElement('div');
+                loraTagsWrapper.className = 'lora-tags-wrapper';
+                loraColumnBody.appendChild(loraTagsWrapper);
             }
 
             let isLoraPanelOpen = false;
@@ -604,8 +646,10 @@
             const columns = Array.from(columnsContainer.querySelectorAll('.album-settings-column'));
             columns.forEach(col => col.classList.add('is-active'));
 
-            const tabsNav = document.createElement('div');
-            tabsNav.className = 'album-settings-tabs';
+            const tabsNav = dialog.querySelector('.album-settings-tabs');
+            if (tabsNav) {
+                tabsNav.innerHTML = '';
+            }
             const tabButtons = [];
             let activeTab = columns[0]?.dataset.column || 'prompts';
             columns.forEach(col => {
@@ -615,9 +659,14 @@
                 button.type = 'button';
                 button.dataset.target = columnId;
                 button.textContent = label;
-                tabsNav.appendChild(button);
+                if (tabsNav) {
+                    tabsNav.appendChild(button);
+                }
                 tabButtons.push(button);
             });
+            if (tabsNav) {
+                tabsNav.hidden = true;
+            }
 
             const setActiveTab = (target) => {
                 activeTab = target;
@@ -632,16 +681,16 @@
                 const isMobile = mobileQuery.matches;
                 modal.classList.toggle('is-mobile', isMobile);
                 if (isMobile) {
-                    if (!tabsNav.parentElement && columnsContainer.parentElement) {
-                        columnsContainer.parentElement.insertBefore(tabsNav, columnsContainer);
-                    }
                     setActiveTab(activeTab);
-                } else {
-                    if (tabsNav.parentElement) {
-                        tabsNav.parentElement.removeChild(tabsNav);
+                    if (tabsNav) {
+                        tabsNav.hidden = false;
                     }
+                } else {
                     columns.forEach(col => col.classList.add('is-active'));
                     tabButtons.forEach(btn => btn.classList.remove('is-active'));
+                    if (tabsNav) {
+                        tabsNav.hidden = true;
+                    }
                 }
             };
 
@@ -766,8 +815,63 @@
                 });
             };
 
+            const characterSearchTokens = buildSearchTokensFromText(last_config?.character);
             const loraCardElements = new Map();
             const loraOptionMeta = new Map();
+            const buildLoraSearchIndex = (value, option, metadata, fullDisplayName, fullSubtitle) => {
+                const tokens = new Set();
+                const addToken = (token) => {
+                    if (typeof token !== 'string') return;
+                    const trimmed = token.trim();
+                    if (!trimmed) return;
+                    const lowered = trimmed.toLowerCase();
+                    tokens.add(lowered);
+                    trimmed.split(/[\s,/_-]+/).forEach(part => {
+                        const piece = part.trim().toLowerCase();
+                        if (piece) tokens.add(piece);
+                    });
+                };
+                addToken(value);
+                if (option?.name) addToken(option.name);
+                if (Array.isArray(option?.keywords)) {
+                    option.keywords.forEach(addToken);
+                }
+                if (fullDisplayName) addToken(fullDisplayName);
+                if (fullSubtitle) addToken(fullSubtitle);
+                if (metadata) {
+                    ['name', 'filename', 'alias', 'title'].forEach(key => addToken(metadata[key]));
+                    const metadataTags = extractModelTags(metadata);
+                    metadataTags.forEach(addToken);
+                    const trainedWords = extractTrainedWords(metadata);
+                    trainedWords.forEach(addToken);
+                }
+                return Array.from(tokens).join(' ');
+            };
+            const reorderLoraCardsForCharacterMatch = () => {
+                if (!loraCardGrid || !characterSearchTokens.length) return;
+                const entries = Array.from(loraCardElements.entries());
+                entries.sort((a, b) => {
+                    const metaA = loraOptionMeta.get(a[0]);
+                    const metaB = loraOptionMeta.get(b[0]);
+                    const rankA = metaA?.matchesCharacter ? 0 : 1;
+                    const rankB = metaB?.matchesCharacter ? 0 : 1;
+                    if (rankA !== rankB) return rankA - rankB;
+                    const orderA = metaA?.originalOrder ?? 0;
+                    const orderB = metaB?.originalOrder ?? 0;
+                    return orderA - orderB;
+                });
+                entries.forEach(([, card]) => loraCardGrid.appendChild(card));
+            };
+            const applyLoraSearchFilter = () => {
+                if (!loraCardGrid) return;
+                const query = (loraSearchInput?.value || '').trim().toLowerCase();
+                loraCardElements.forEach((card, key) => {
+                    const meta = loraOptionMeta.get(key);
+                    const haystack = meta?.searchIndex || '';
+                    const isMatch = !query || haystack.includes(query);
+                    card.style.display = isMatch ? '' : 'none';
+                });
+            };
             const updateToggleSummary = (value) => {
                 if (!loraToggle) return;
                 const meta = loraOptionMeta.get(value) || {};
@@ -807,6 +911,48 @@
                 renderLoraTags(normalized);
             };
 
+            const updateSearchButtonState = () => {
+                if (!loraSearchButton) return;
+                const hasQuery = !!(loraSearchInput && loraSearchInput.value.trim());
+                loraSearchButton.disabled = !hasQuery;
+            };
+
+            if (loraSearchInput) {
+                const handleSearchInput = () => {
+                    applyLoraSearchFilter();
+                    updateSearchButtonState();
+                };
+                const handleSearchKeydown = (event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        applyLoraSearchFilter();
+                        updateSearchButtonState();
+                    }
+                };
+                loraSearchInput.addEventListener('input', handleSearchInput);
+                loraSearchInput.addEventListener('keydown', handleSearchKeydown);
+                cleanupFns.push(() => {
+                    loraSearchInput.removeEventListener('input', handleSearchInput);
+                    loraSearchInput.removeEventListener('keydown', handleSearchKeydown);
+                });
+            }
+            if (loraSearchButton) {
+                const handleSearchClick = (event) => {
+                    event.preventDefault();
+                    if (loraSearchInput) {
+                        if (!loraSearchInput.value) return;
+                        loraSearchInput.value = '';
+                    }
+                    applyLoraSearchFilter();
+                    updateSearchButtonState();
+                    if (loraSearchInput) {
+                        loraSearchInput.focus();
+                    }
+                };
+                loraSearchButton.addEventListener('click', handleSearchClick);
+                cleanupFns.push(() => loraSearchButton.removeEventListener('click', handleSearchClick));
+            }
+
             if (loraCardGrid && loraInput) {
                 loraCardGrid.innerHTML = '';
                 loraCardElements.clear();
@@ -814,22 +960,32 @@
                 const cardOptions = Array.isArray(loraOptions) && loraOptions.length
                     ? loraOptions
                     : [{ name: 'None', value: 'None' }];
+                let cardOrder = 0;
                 cardOptions.forEach((option) => {
                     if (!option) return;
                     const value = option.value ?? option.name ?? '';
                     if (typeof value !== 'string') return;
                     const metadata = value === 'None' ? null : findLoraMetadata(value);
-                    const displayName = value === 'None'
+                    let displayName = value === 'None'
                         ? (option.name || 'None')
                         : resolveLoraCharacterName(metadata, option.name || value);
-                    const subtitle = value === 'None'
+                    let subtitle = value === 'None'
                         ? 'Không dùng LoRA'
                         : (metadata?.filename || metadata?.name || option.name || value);
+                    const fullDisplayName = displayName;
+                    const fullSubtitle = subtitle;
+                    displayName = truncateText(displayName, 40);
+                    subtitle = truncateText(subtitle, 40);
+                    const searchIndex = buildLoraSearchIndex(value, option, metadata, fullDisplayName, fullSubtitle);
+                    const matchesCharacter = characterSearchTokens.length > 0
+                        ? characterSearchTokens.some(term => searchIndex.includes(term))
+                        : false;
                     const thumbUrl = value === 'None' ? null : getLoraThumbnailUrl(metadata);
                     const card = document.createElement('button');
                     card.type = 'button';
                     card.className = 'lora-card';
                     card.dataset.value = value;
+                    card.dataset.isCharacterMatch = matchesCharacter ? 'true' : 'false';
                     card.setAttribute('role', 'option');
                     card.setAttribute('aria-pressed', 'false');
                     card.setAttribute('aria-selected', 'false');
@@ -844,7 +1000,20 @@
                             <span class="lora-card__subtitle">${escapeHtml(subtitle || '')}</span>
                         </div>
                     `;
-                    loraOptionMeta.set(value, { displayName, subtitle, thumbUrl, metadata });
+                    card.title = fullSubtitle || fullDisplayName || displayName;
+                    card.dataset.searchIndex = searchIndex;
+                    const originalOrder = cardOrder++;
+                    loraOptionMeta.set(value, {
+                        displayName,
+                        subtitle,
+                        thumbUrl,
+                        metadata,
+                        fullDisplayName,
+                        fullSubtitle,
+                        searchIndex,
+                        matchesCharacter,
+                        originalOrder
+                    });
                     card.addEventListener('click', () => {
                         if (loraInput.value === value) {
                             renderLoraTags(value);
@@ -865,8 +1034,11 @@
                     loraCardGrid.appendChild(card);
                     loraCardElements.set(value, card);
                 });
+                reorderLoraCardsForCharacterMatch();
                 const initialValue = loraInput.value || 'None';
                 setLoraSelection(initialValue, { dispatchEvent: false });
+                applyLoraSearchFilter();
+                updateSearchButtonState();
             } else if (loraInput) {
                 loraInput.addEventListener('change', (event) => {
                     renderLoraTags(event.target.value);
