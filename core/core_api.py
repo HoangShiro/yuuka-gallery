@@ -19,6 +19,7 @@ from .image_service import ImageService
 from .generation_service import GenerationService
 from .game_service import GameService # Yuuka: PvP game feature v1.0
 from .task_service import BackgroundTaskService
+from .ai_service import AIService
 
 
 class CoreAPI:
@@ -50,6 +51,7 @@ class CoreAPI:
         self.generation_service = GenerationService(self)
         self.game_service = GameService(self) # Yuuka: PvP game feature v1.0
         self.task_service = BackgroundTaskService()
+        self.ai_service = AIService(self)
         
         # Yuuka: Thêm các hằng số URL từ phiên bản cũ
         self.CSV_CHARACTERS_URL = "https://raw.githubusercontent.com/mirabarukaso/character_select_stand_alone_app/refs/heads/main/data/wai_characters.csv"

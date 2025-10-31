@@ -4,7 +4,6 @@
     bottom: var(--spacing-3); 
     left: 50%;
     transform: translateX(-50%);
-    margin-left: calc((100vw - 100%) / 2);
     width: auto;
     max-width: 90vw;
     z-index: 1600;
@@ -52,6 +51,23 @@
     width: 100%;
 }
 
+#navibar-dock {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    max-width: clamp(380px, 75vw, 1024px);
+    padding: var(--spacing-1);
+    margin: 0 auto;
+    box-sizing: border-box;
+    gap: var(--spacing-2);
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(16px);
+    pointer-events: none;
+    transition: max-height 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), opacity 0.24s ease, transform 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), padding 0.28s ease, max-width 0.32s cubic-bezier(0.21, 0.8, 0.35, 1);
+}
+
 #navibar-search-bar .navibar-search-return {
     width: 52px;
     height: 52px;
@@ -72,7 +88,8 @@
     box-shadow: 0 4px 12px var(--color-shadow);
     pointer-events: auto;
     border-radius: var(--rounded-lg);
-    transition: border-radius 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    gap: 0;
+    transition: border-radius 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.28s ease, gap 0.24s ease;
 }
 
 #navibar-main-view {
@@ -98,12 +115,26 @@
     border-radius: var(--rounded-lg);
 }
 
+#navibar-tray.is-dock-peek-open {
+    gap: var(--spacing-1);
+    box-shadow: 0 8px 24px var(--color-shadow);
+}
+
 #navibar-tray.is-search-active #navibar-search-bar {
     padding: var(--spacing-2);
     max-height: 220px;
     opacity: 1;
     transform: translateY(0);
     pointer-events: auto;
+}
+
+#navibar-tray.is-dock-active #navibar-dock {
+    padding: var(--spacing-2);
+    max-height: 360px;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+    width: 100%;
 }
 
 html.dark-mode #navibar-tray {
@@ -157,6 +188,111 @@ html.dark-mode #navibar-tray {
 }
 
 
+/* --- Dock & contextual areas --- */
+.navibar-dock {
+    width: 100%;
+}
+
+.navibar-dock--composer .navibar-composer {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: var(--spacing-1);
+    width: 100%;
+    border-radius: var(--rounded-lg);
+    padding: var(--spacing-2);
+    background: none;
+    border: none;
+    box-shadow: none;
+}
+
+html.dark-mode .navibar-dock--composer .navibar-composer {
+    background: none;
+    border: none;
+    box-shadow: none;
+}
+
+.navibar-composer__input {
+    flex: 1;
+    min-height: 24px;
+    max-height: 190px;
+    border: none;
+    background: transparent;
+    resize: none;
+    color: var(--color-primary-text);
+    font-size: 15px;
+    line-height: 1.4;
+    font-family: inherit;
+    outline: none;
+    padding: 0;
+    width: 100%;
+}
+
+.navibar-composer__input::placeholder {
+    color: rgba(0, 0, 0, 0.45);
+}
+
+html.dark-mode .navibar-composer__input::placeholder {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.navibar-composer__input:disabled {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+.nav-btn--minimal {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    color: var(--color-primary-text);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.nav-btn--minimal:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+.nav-btn--minimal:focus-visible {
+    outline: none;
+}
+
+.nav-btn--minimal .material-symbols-outlined {
+    font-size: 22px;
+}
+
+.nav-btn--minimal.is-active {
+    color: var(--color-accent);
+}
+
+.nav-btn--minimal.is-active .material-symbols-outlined {
+    transform: scale(1.05);
+}
+
+.nav-btn--minimal:hover,
+.nav-btn--minimal:focus-visible {
+    color: var(--color-accent);
+}
+
+.nav-btn--submit {
+    color: var(--color-accent);
+}
+
+.nav-btn--submit:disabled {
+    color: rgba(0, 0, 0, 0.35);
+}
+
+.nav-btn--submit:hover,
+.nav-btn--submit:focus-visible {
+    color: var(--color-accent);
+    transform: scale(1.05);
+}
+
 /* --- Styling chung cho các nút --- */
 .nav-btn, .main-bar-slot {
     border-radius: var(--rounded-full); 
@@ -199,6 +335,43 @@ html.dark-mode .nav-btn:not(.is-tool-placeholder):hover {
 }
 .nav-btn.active .material-symbols-outlined { 
     font-variation-settings: 'FILL' 1; 
+}
+
+.nav-btn--ghost {
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.35);
+}
+
+.nav-btn--submit:focus-visible {
+    color: var(--color-accent);
+    transform: scale(1.05);
+}
+
+html.dark-mode .nav-btn--minimal {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+html.dark-mode .nav-btn--submit:disabled {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+html.dark-mode .nav-btn--ghost {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.nav-btn--primary {
+    background: var(--color-accent);
+    color: #fff;
+}
+
+.nav-btn--primary:hover {
+    filter: brightness(1.05);
+}
+
+.nav-btn--primary:active {
+    filter: brightness(0.95);
 }
 
 .nav-btn.is-tool-placeholder {
@@ -302,5 +475,33 @@ html.dark-mode .nav-btn.is-tool-placeholder {
     #navibar-main-bar .nav-btn, #navibar-main-bar .main-bar-slot {
         width: 44px;
         height: 44px;
+    }
+
+    #navibar-tray.is-dock-active #navibar-dock {
+        padding: var(--spacing-1);
+        max-width: 100%;
+    }
+
+    .navibar-dock--composer .navibar-composer {
+        grid-template-columns: auto 1fr auto;
+        gap: var(--spacing-1);
+    }
+
+    .nav-btn--minimal {
+        width: 40px;
+        height: 40px;
+    }
+}
+
+@media (min-width: 1280px) {
+    #navibar-tray.is-dock-active #navibar-dock {
+        max-width: clamp(520px, 60vw, 1180px);
+        min-width: 600px;
+    }
+}
+
+@media (min-width: 1600px) {
+    #navibar-tray.is-dock-active #navibar-dock {
+        max-width: clamp(640px, 50vw, 1360px);
     }
 }

@@ -1,0 +1,41 @@
+{
+    "id": "chat",
+    "name": "Character Chat",
+    "version": "0.1.0",
+    "author": "Yuuka",
+    "description": "Plugin chat dựa trên Character Definition và AIService, hỗ trợ nhiều tab và modal.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:ChatPlugin",
+        "frontend_component": "ChatComponent"
+    },
+    "assets": {
+        "js": [
+            "chat-bootstrap.js",
+            "services/chat-api.js",
+            "stores/chat-store.js",
+            "components/tab-character-list.js",
+            "components/tab-chat-list.js",
+            "components/tab-chat-page.js",
+            "components/tab-character-definition.js",
+            "components/tab-generation-settings.js",
+            "modals/message-controls.js",
+            "chat.js"
+        ],
+        "css": [
+            "chat.css"
+        ]
+    },
+    "dependencies": {
+        "python": []
+    },
+    "ui": {
+        "tab": {
+            "id": "chat",
+            "label": "Chat",
+            "icon": "person_heart"
+        },
+        "order": 8,
+        "layout": "page"
+    }
+}

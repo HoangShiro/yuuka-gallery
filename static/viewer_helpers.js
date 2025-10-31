@@ -20,6 +20,60 @@
             span.textContent = value;
             return `<div class="info-row"><strong>${label}:</strong> <span>${span.innerHTML}</span></div>`;
         };
+        const resolveWorkflowDisplay = () => {
+            const normalize = (value) => normalizeText(value).toLowerCase();
+            const workflowTemplate = normalizeText(cfg.workflow_template);
+            const workflowType = normalize(cfg.workflow_type);
+            const hasLoRA = typeof cfg.lora_name === 'string'
+                && cfg.lora_name.trim()
+                && cfg.lora_name.trim().toLowerCase() !== 'none';
+            const labelMap = {
+                'hires_lora': 'Hires Fix + LoRA',
+                'hires': 'Hires Fix',
+                'hires_input_image_lora': 'Hires Input Image + LoRA',
+                'hires_input_image': 'Hires Input Image',
+                'sdxl_lora': 'SDXL + LoRA',
+                'lora': 'SDXL + LoRA',
+                'standard': 'Standard'
+            };
+            let label = labelMap[workflowType];
+            if (!label && workflowType.endsWith('_lora')) {
+                const baseType = workflowType.replace(/_lora$/, '');
+                if (labelMap[baseType]) {
+                    label = `${labelMap[baseType]} + LoRA`;
+                }
+            }
+            if (!label) {
+                const templateLower = workflowTemplate.toLowerCase();
+                if (templateLower.includes('hiresfix') && templateLower.includes('input_image')) {
+                    label = templateLower.includes('lora') || hasLoRA ? 'Hires Input Image + LoRA' : 'Hires Input Image';
+                } else if (templateLower.includes('hiresfix')) {
+                    label = templateLower.includes('lora') || hasLoRA ? 'Hires Fix + LoRA' : 'Hires Fix';
+                } else if (templateLower.includes('lora')) {
+                    label = 'SDXL + LoRA';
+                }
+            }
+            if (!label) {
+                const width = Number(cfg.width);
+                const height = Number(cfg.height);
+                const baseWidth = Number(cfg.hires_base_width);
+                const baseHeight = Number(cfg.hires_base_height);
+                const widthHires = Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth + 4;
+                const heightHires = Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight + 4;
+                const noBaseData = (!Number.isFinite(baseWidth) || baseWidth <= 0) && (!Number.isFinite(baseHeight) || baseHeight <= 0);
+                const bigDimension = (Number.isFinite(width) && width >= 1536) || (Number.isFinite(height) && height >= 1536);
+                if (widthHires || heightHires || (noBaseData && bigDimension)) {
+                    label = hasLoRA ? 'Hires Fix + LoRA' : 'Hires Fix';
+                }
+            }
+            if (!label) {
+                label = hasLoRA ? 'SDXL + LoRA' : '';
+            }
+            if (workflowTemplate && workflowTemplate.toLowerCase() !== 'standard') {
+                return label ? `${label} (${workflowTemplate})` : workflowTemplate;
+            }
+            return label;
+        };
 
         const promptRows = ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative']
             .map(key => buildRow(key.charAt(0).toUpperCase() + key.slice(1), cfg[key]))
@@ -43,6 +97,8 @@
             buildRow('CFG', cfg.cfg)
         }${
             buildRow('LoRA', cfg.lora_name)
+        }${
+            buildRow('Workflow', resolveWorkflowDisplay())
         }</div>`;
 
         const loraTags = Array.isArray(cfg.lora_prompt_tags)

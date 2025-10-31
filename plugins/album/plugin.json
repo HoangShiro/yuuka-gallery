@@ -1,35 +1,33 @@
 {
-    "id":  "album",
-    "name":  "Album",
-    "version":  "1.0.0",
-    "author":  "Yuuka",
-    "description":  "Cung cấp một thư viện cá nhân cho các ảnh được tạo bởi ComfyUI, được sắp xếp theo từng nhân vật.",
-    "static_folder":  "static",
-    "entry_points":  {
-                         "backend":  "backend:AlbumPlugin",
-                         "frontend_component":  "AlbumComponent"
-                     },
-    "assets":  {
-                   "js":  [
-                              "modal.js",
-                              "album.js"
-                          ],
-                   "css":  [
-                               "album.css"
-                           ]
-               },
-    "dependencies":  {
-                         "python":  [
-
-                                    ]
-                     },
-    "ui":  {
-               "tab":  {
-                           "id":  "album",
-                           "label":  "Album",
-                           "icon":  "photo_album"
-                       },
-               "order":  10,
-               "needs_generation_poller":  true
-           }
+    "id": "album",
+    "name": "Album",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Cung cấp một thư viện cá nhân cho các ảnh được tạo bởi ComfyUI, được sắp xếp theo từng nhân vật.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:AlbumPlugin",
+        "frontend_component": "AlbumComponent"
+    },
+    "assets": {
+        "js": [
+            "modal.js",
+            "album.js"
+        ],
+        "css": [
+            "album.css"
+        ]
+    },
+    "dependencies": {
+        "python": []
+    },
+    "ui": {
+        "tab": {
+            "id": "album",
+            "label": "Album",
+            "icon": "photo_album"
+        },
+        "order": 10,
+        "needs_generation_poller": true
+    }
 }

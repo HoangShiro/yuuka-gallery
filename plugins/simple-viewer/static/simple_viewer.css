@@ -150,15 +150,66 @@
     }
 }
 
-.sv-viewer-close {
+.sv-viewer-toolbar {
     position: absolute;
-    top: 5px;
+    top: 8px;
     right: 15px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    z-index: 3;
+}
+
+.sv-viewer-download {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: none;
+    border: none;
     color: #f1f1f1;
-    font-size: 40px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    padding: 0;
+}
+
+.sv-viewer-download:hover {
+    transform: scale(1.05);
+}
+
+.sv-viewer-download:active {
+    transform: scale(0.96);
+}
+
+.sv-viewer-download .material-symbols-outlined {
+    font-size: 24px;
+    line-height: 1;
+}
+
+.sv-viewer-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: none;
+    border: none;
+    color: #f1f1f1;
+    font-size: 32px;
     font-weight: bold;
     cursor: pointer;
-    z-index: 3;
+    transition: transform 0.2s ease;
+}
+
+.sv-viewer-close:hover {
+    transform: scale(1.05);
+}
+
+.sv-viewer-close:active {
+    transform: scale(0.96);
 }
 
 .sv-viewer-actions {

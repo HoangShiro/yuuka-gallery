@@ -1014,10 +1014,6 @@ class SlotMachineService {
                 this.start({ autoSpin: true, forceJackpot: true });
             }
         });
-
-        document.querySelector('.container')?.addEventListener('dblclick', (e) => {
-            if (e.target.closest('.plugin-container')) this.start();
-        });
     }
 }
 

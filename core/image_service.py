@@ -6,6 +6,7 @@ import base64
 import io
 import random
 from PIL import Image
+from copy import deepcopy
 
 class ImageService:
     """Yuuka: Service mới để quản lý tập trung dữ liệu ảnh."""
@@ -30,6 +31,15 @@ class ImageService:
         all_images = self.data_manager.read_json(self.IMAGE_DATA_FILENAME, obfuscated=True)
         user_images = all_images.setdefault(user_hash, {})
         char_images = user_images.setdefault(character_hash, [])
+
+        def _to_bool(value):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.strip().lower() in ("1", "true", "yes", "on")
+            if isinstance(value, (int, float)):
+                return value != 0
+            return False
         
         try:
             # Yuuka: new image paths v1.0 - Chuyển logic lưu file vào đây
@@ -51,11 +61,57 @@ class ImageService:
             preview_filepath = os.path.join('user_images', 'pv_imgs', filename)
             self.data_manager.save_binary(obfuscated_preview_data, preview_filepath)
 
+            config_to_save = generation_config
+            if isinstance(generation_config, dict):
+                config_to_save = deepcopy(generation_config)
+                workflow_template = config_to_save.get("_workflow_template")
+                if workflow_template is not None:
+                    workflow_template = str(workflow_template).strip()
+                raw_lora_name = config_to_save.get("lora_name")
+                has_lora = isinstance(raw_lora_name, str) and raw_lora_name.strip() and raw_lora_name.strip().lower() != "none"
+
+                if config_to_save.get("_workflow_type") == "hires_input_image":
+                    config_to_save["hires_enabled"] = True
+
+                template_lower = (workflow_template or "").lower()
+                is_hires = _to_bool(config_to_save.get("hires_enabled"))
+                if not is_hires and "hiresfix" in template_lower:
+                    config_to_save["hires_enabled"] = True
+                    is_hires = True
+
+                workflow_type_value = config_to_save.get("workflow_type")
+                workflow_type = workflow_type_value.strip().lower() if isinstance(workflow_type_value, str) else ""
+
+                if not workflow_type:
+                    if template_lower:
+                        if "hiresfix" in template_lower and "input_image" in template_lower:
+                            workflow_type = "hires_input_image_lora" if ("lora" in template_lower or has_lora) else "hires_input_image"
+                        elif "hiresfix" in template_lower:
+                            workflow_type = "hires_lora" if ("lora" in template_lower or has_lora) else "hires"
+                        elif "lora" in template_lower:
+                            workflow_type = "sdxl_lora"
+                        else:
+                            workflow_type = "standard"
+                    else:
+                        if is_hires:
+                            workflow_type = "hires_lora" if has_lora else "hires"
+                        elif has_lora:
+                            workflow_type = "sdxl_lora"
+                        else:
+                            workflow_type = "standard"
+
+                if workflow_template:
+                    config_to_save["workflow_template"] = workflow_template
+                if workflow_type:
+                    config_to_save["workflow_type"] = workflow_type
+
+            sanitized_config = self._sanitize_config(config_to_save)
+
             new_metadata = {
                 "id": str(uuid.uuid4()),
                 "url": f"/user_image/imgs/{filename}",
                 "pv_url": f"/user_image/pv_imgs/{filename}", # Yuuka: new image paths v1.0
-                "generationConfig": self._sanitize_config(generation_config),
+                "generationConfig": sanitized_config,
                 "createdAt": int(time.time()),
                 "character_hash": character_hash
             }

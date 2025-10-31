@@ -172,7 +172,7 @@ window.Yuuka.plugins.simpleViewer = (() => {
         const slider = viewerElement.querySelector('.sv-viewer-image-slider');
         const infoPanel = viewerElement.querySelector('.sv-viewer-info');
         
-        const oldActiveImages = slider.querySelectorAll('img.active');
+        const oldActiveImages = Array.from(slider.querySelectorAll('img.active'));
 
         slider.querySelectorAll('.sv-viewer-placeholder').forEach(el => el.remove());
         const placeholder = createPlaceholder();
@@ -182,21 +182,70 @@ window.Yuuka.plugins.simpleViewer = (() => {
         slider.appendChild(newImgElement);
         initZoomAndPan(newImgElement);
 
-        newImgElement.addEventListener('transitionend', (e) => {
-            if (e.propertyName !== 'opacity') return;
-            
-            oldActiveImages.forEach(oldImg => {
-                oldImg.addEventListener('transitionend', () => {
-                    oldImg.remove();
-                }, { once: true });
-                oldImg.classList.remove('active');
+        let cleanupExecuted = false;
+        let cleanupTimeout = null;
+
+        function fadeOutImage(img) {
+            if (!img || img === newImgElement || img.dataset.svRemoving === 'true') return;
+            img.dataset.svRemoving = 'true';
+
+            let fallbackRemoval = null;
+
+            const finalizeRemoval = () => {
+                img.removeEventListener('transitionend', handleImageTransition);
+                if (fallbackRemoval !== null) {
+                    clearTimeout(fallbackRemoval);
+                }
+                delete img.dataset.svRemoving;
+                if (img !== newImgElement && img.isConnected) {
+                    img.remove();
+                }
+            };
+
+            const handleImageTransition = (event) => {
+                if (event.propertyName !== 'opacity') return;
+                finalizeRemoval();
+            };
+
+            img.addEventListener('transitionend', handleImageTransition);
+
+            requestAnimationFrame(() => {
+                img.classList.remove('active');
             });
 
-        }, { once: true });
+            fallbackRemoval = setTimeout(finalizeRemoval, 500);
+        }
+
+        function cleanupOldImages() {
+            if (cleanupExecuted) return;
+            cleanupExecuted = true;
+            if (cleanupTimeout !== null) {
+                clearTimeout(cleanupTimeout);
+            }
+
+            oldActiveImages.forEach(img => {
+                if (!img || img === newImgElement) return;
+                if (!img.isConnected) return;
+                fadeOutImage(img);
+            });
+
+            newImgElement.removeEventListener('transitionend', handleNewImageTransition);
+        }
+
+        function handleNewImageTransition(event) {
+            if (event.propertyName !== 'opacity') return;
+            cleanupOldImages();
+        }
+
+        newImgElement.addEventListener('transitionend', handleNewImageTransition);
 
         const activateImage = () => {
             requestAnimationFrame(() => {
-                newImgElement.classList.add('active');
+                // Force layout before toggling the active state to make sure mobile browsers register the transition.
+                newImgElement.getBoundingClientRect();
+                requestAnimationFrame(() => {
+                    newImgElement.classList.add('active');
+                });
             });
             placeholder.classList.add('hidden');
             const removePlaceholder = () => {
@@ -206,6 +255,8 @@ window.Yuuka.plugins.simpleViewer = (() => {
             };
             placeholder.addEventListener('transitionend', removePlaceholder, { once: true });
             setTimeout(removePlaceholder, 400);
+            // Fallback in case the new image never fires its opacity transition (mobile race condition).
+            cleanupTimeout = setTimeout(cleanupOldImages, 700);
             const resolvedPromise = Promise.resolve();
             const cacheEntry = imageCache.get(newItem.imageUrl);
             if (cacheEntry) {
@@ -383,6 +434,47 @@ window.Yuuka.plugins.simpleViewer = (() => {
         currentIndex = -1;
     }
 
+    /**
+     * Trigger a download for the currently visible image.
+     */
+    function downloadCurrentImage() {
+        if (!viewerElement) return;
+        if (currentIndex < 0 || currentIndex >= items.length) return;
+        const currentItem = items[currentIndex];
+        if (!currentItem) return;
+
+        const imageUrl = currentItem.imageUrl || currentItem.url;
+        if (!imageUrl) return;
+
+        const sanitizeFilename = (name) => name.replace(/[\\/:*?"<>|]/g, '_').trim();
+
+        let filename = currentItem.filename || currentItem.name || '';
+        let fallbackFromUrl = '';
+        try {
+            const urlObj = new URL(imageUrl, window.location.href);
+            fallbackFromUrl = urlObj.pathname.split('/').pop() || '';
+        } catch (_) {
+            const parts = imageUrl.split('/');
+            fallbackFromUrl = parts[parts.length - 1] || '';
+        }
+
+        filename = sanitizeFilename(filename || fallbackFromUrl || `image-${Date.now()}`);
+
+        if (!/\.[a-z0-9]{2,5}$/i.test(filename)) {
+            const extensionMatch = (fallbackFromUrl || imageUrl).match(/\.(jpe?g|png|gif|webp|bmp|tiff?|avif)(?:$|\?)/i);
+            const inferredExtension = extensionMatch ? extensionMatch[1] : 'jpg';
+            filename = `${filename}.${inferredExtension}`;
+        }
+
+        const anchor = document.createElement('a');
+        anchor.href = imageUrl;
+        anchor.download = filename;
+        anchor.rel = 'noopener';
+        document.body.appendChild(anchor);
+        anchor.click();
+        requestAnimationFrame(() => anchor.remove());
+    }
+
 
     // --- Public API ---
     return {
@@ -405,7 +497,12 @@ window.Yuuka.plugins.simpleViewer = (() => {
             viewerElement.className = 'sv-viewer';
             viewerElement.innerHTML = `
                 <div class="sv-viewer-content">
-                    <span class="sv-viewer-close">&times;</span>
+                    <div class="sv-viewer-toolbar">
+                        <button class="sv-viewer-download" title="Download image">
+                            <span class="material-symbols-outlined">download</span>
+                        </button>
+                        <span class="sv-viewer-close" title="Close viewer">&times;</span>
+                    </div>
                     <div class="sv-viewer-nav prev" title="Previous image">‹</div>
                     <div class="sv-viewer-image-wrapper"><div class="sv-viewer-image-slider"></div></div>
                     <div class="sv-viewer-nav next" title="Next image">›</div>
@@ -418,12 +515,13 @@ window.Yuuka.plugins.simpleViewer = (() => {
             const viewerContent = viewerElement.querySelector('.sv-viewer-content');
             const navPrev = viewerElement.querySelector('.sv-viewer-nav.prev');
             const navNext = viewerElement.querySelector('.sv-viewer-nav.next');
+            const downloadButton = viewerElement.querySelector('.sv-viewer-download');
 
             let isDragging = false, startPos = { x: 0, y: 0 };
             const dragThreshold = 10;
             const handleInteractionStart = (e) => { isDragging = false; const p = e.touches ? e.touches[0] : e; startPos = { x: p.clientX, y: p.clientY }; };
             const handleInteractionMove = (e) => { if (isDragging) return; const p = e.touches ? e.touches[0] : e; const dX = Math.abs(p.clientX - startPos.x); const dY = Math.abs(p.clientY - startPos.y); if (dX > dragThreshold || dY > dragThreshold) isDragging = true; };
-            const handleInteractionEnd = (e) => { if (isDragging || e.target.closest('.sv-viewer-actions, .sv-viewer-nav, .sv-viewer-close, .sv-viewer-info')) return; const r = viewerElement.getBoundingClientRect(); const endP = e.changedTouches ? e.changedTouches[0] : e; if (endP.clientX > r.width * 0.5) showNext(); else showPrev(); };
+            const handleInteractionEnd = (e) => { if (isDragging || e.target.closest('.sv-viewer-actions, .sv-viewer-nav, .sv-viewer-close, .sv-viewer-info, .sv-viewer-download, .sv-viewer-toolbar')) return; const r = viewerElement.getBoundingClientRect(); const endP = e.changedTouches ? e.changedTouches[0] : e; if (endP.clientX > r.width * 0.5) showNext(); else showPrev(); };
 
             updateViewerContent(options.startIndex || 0);
 
@@ -443,6 +541,13 @@ window.Yuuka.plugins.simpleViewer = (() => {
                 navNext.style.display = 'none';
             }
 
+            if (downloadButton) {
+                downloadButton.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    downloadCurrentImage();
+                });
+            }
             viewerElement.querySelector('.sv-viewer-close').addEventListener('click', close);
             document.addEventListener('keydown', keydownHandler);
             Yuuka.events.on('image:added', handleImageAdded); // Yuuka: image placeholder v1.0

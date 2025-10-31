@@ -15,6 +15,15 @@ SDXL_LORA_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "SDXL_with_LoRA.json")
 HIRESFIX_ESRGAN_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "hiresfix_esrgan.json")
 HIRESFIX_ESRGAN_LORA_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "hiresfix_esrgan_LoRA.json")
 
+HIRESFIX_ESRGAN_INPUT_IMAGE_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "hiresfix_esrgan_input_image.json")
+HIRESFIX_ESRGAN_INPUT_IMAGE_LORA_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "hiresfix_esrgan_input_image_LoRA.json")
+
+SDXL_LORA_WORKFLOW_NAME = os.path.basename(SDXL_LORA_WORKFLOW_PATH)
+HIRESFIX_ESRGAN_WORKFLOW_NAME = os.path.basename(HIRESFIX_ESRGAN_WORKFLOW_PATH)
+HIRESFIX_ESRGAN_LORA_WORKFLOW_NAME = os.path.basename(HIRESFIX_ESRGAN_LORA_WORKFLOW_PATH)
+HIRESFIX_ESRGAN_INPUT_IMAGE_WORKFLOW_NAME = os.path.basename(HIRESFIX_ESRGAN_INPUT_IMAGE_WORKFLOW_PATH)
+HIRESFIX_ESRGAN_INPUT_IMAGE_LORA_WORKFLOW_NAME = os.path.basename(HIRESFIX_ESRGAN_INPUT_IMAGE_LORA_WORKFLOW_PATH)
+
 
 COMBINED_TEXT_PROMPT_KEY = "combined_text_prompt"
 
@@ -91,8 +100,8 @@ class WorkflowBuilderService:
             "sdxl_lora": SDXL_LORA_WORKFLOW_PATH,
             "hiresfix_esrgan": HIRESFIX_ESRGAN_WORKFLOW_PATH,
             "hiresfix_esrgan_lora": HIRESFIX_ESRGAN_LORA_WORKFLOW_PATH,
-            "hiresfix_esrgan_input_image": os.path.join(_WORKFLOWS_DIR, "hiresfix_esrgan_input_image.json"),
-            "hiresfix_esrgan_input_image_lora": os.path.join(_WORKFLOWS_DIR, "hiresfix_esrgan_input_image_LoRA.json"),
+            "hiresfix_esrgan_input_image": HIRESFIX_ESRGAN_INPUT_IMAGE_WORKFLOW_PATH,
+            "hiresfix_esrgan_input_image_lora": HIRESFIX_ESRGAN_INPUT_IMAGE_LORA_WORKFLOW_PATH,
         }
         for name, path in workflow_paths.items():
             try:
@@ -111,6 +120,9 @@ class WorkflowBuilderService:
         """
         Hàm điều phối chính. Nó sẽ quyết định dùng builder nào dựa trên cfg_data.
         """
+        if isinstance(cfg_data, dict):
+            cfg_data["_workflow_template"] = None
+
         workflow_type = cfg_data.get('_workflow_type')
         if workflow_type == 'hires_input_image':
             return self._build_hiresfix_input_image_workflow(cfg_data, seed)
@@ -131,6 +143,9 @@ class WorkflowBuilderService:
         Yuuka: Cập nhật workflow tiêu chuẩn theo cấu trúc mới.
         Workflow này sẽ trả về ảnh dưới dạng base64 qua API.
         """
+        if isinstance(cfg_data, dict):
+            cfg_data["_workflow_template"] = "standard"
+
         text_prompt = cfg_data.get(COMBINED_TEXT_PROMPT_KEY, build_full_prompt_from_cfg(cfg_data))
         negative_prompt = ", ".join(normalize_tag_list(str(cfg_data.get("negative", DEFAULT_CONFIG["negative"]))))
         
@@ -204,6 +219,12 @@ class WorkflowBuilderService:
         if not template:
             print("[WorkflowBuilder] hiresfix_esrgan_input_image template not found. Falling back to standard workflow.")
             return self._build_standard_workflow(cfg_data, seed)
+
+        if isinstance(cfg_data, dict):
+            cfg_data["_workflow_template"] = HIRESFIX_ESRGAN_INPUT_IMAGE_LORA_WORKFLOW_NAME if use_lora else HIRESFIX_ESRGAN_INPUT_IMAGE_WORKFLOW_NAME
+
+        if isinstance(cfg_data, dict):
+            cfg_data["_workflow_template"] = SDXL_LORA_WORKFLOW_NAME
 
         workflow = deepcopy(template)
 
@@ -303,6 +324,9 @@ class WorkflowBuilderService:
         if not template:
             print("[WorkflowBuilder] hiresfix_esrgan template not found. Falling back to standard workflow.")
             return self._build_standard_workflow(cfg_data, seed)
+
+        if isinstance(cfg_data, dict):
+            cfg_data["_workflow_template"] = HIRESFIX_ESRGAN_LORA_WORKFLOW_NAME if use_lora else HIRESFIX_ESRGAN_WORKFLOW_NAME
 
         workflow = deepcopy(template)
         text_prompt = cfg_data.get(COMBINED_TEXT_PROMPT_KEY, build_full_prompt_from_cfg(cfg_data))

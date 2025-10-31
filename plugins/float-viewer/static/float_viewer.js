@@ -377,18 +377,176 @@ class FloatViewerComponent {
 
         const canHires = !!(this.api && this.api.album);
 
+        const analyzeWorkflowConfig = (cfg = {}) => {
+            const normalizeStr = (value) => typeof value === 'string' ? value.trim() : '';
+            const toBool = (value) => {
+                if (typeof value === 'boolean') return value;
+                if (typeof value === 'number') return value !== 0;
+                if (typeof value === 'string') {
+                    const lowered = value.trim().toLowerCase();
+                    return ['1', 'true', 'yes', 'on'].includes(lowered);
+                }
+                return false;
+            };
+            const toNumber = (value) => {
+                const num = Number(value);
+                return Number.isFinite(num) ? num : null;
+            };
+
+            const workflowTemplate = normalizeStr(cfg.workflow_template || cfg._workflow_template || '');
+            const workflowTypeRaw = normalizeStr(cfg.workflow_type || cfg._workflow_type || '');
+            let workflowType = workflowTypeRaw.toLowerCase();
+            const templateLower = workflowTemplate.toLowerCase();
+
+            const loraName = normalizeStr(cfg.lora_name);
+            const hasLoRA = Boolean(loraName) && loraName.toLowerCase() !== 'none';
+
+            let hiresEnabled = toBool(cfg.hires_enabled);
+
+            const width = toNumber(cfg.width);
+            const height = toNumber(cfg.height);
+            let baseWidth = toNumber(cfg.hires_base_width);
+            let baseHeight = toNumber(cfg.hires_base_height);
+
+            const widthExceedsBase = Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth + 4;
+            const heightExceedsBase = Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight + 4;
+
+            if (!hiresEnabled) {
+                if (workflowType.includes('hires') || templateLower.includes('hiresfix')) {
+                    hiresEnabled = true;
+                } else if (widthExceedsBase || heightExceedsBase) {
+                    hiresEnabled = true;
+                }
+            }
+
+            const bigDimensionDetected = (
+                (Number.isFinite(width) && width >= 1536) ||
+                (Number.isFinite(height) && height >= 1536)
+            );
+            if (!hiresEnabled && bigDimensionDetected && (!Number.isFinite(baseWidth) || baseWidth === null || baseWidth <= 0)) {
+                hiresEnabled = true;
+            }
+
+            if (hiresEnabled) {
+                if (!Number.isFinite(baseWidth) || baseWidth <= 0) {
+                    if (Number.isFinite(width) && width > 0) {
+                        baseWidth = Math.max(64, Math.round(width / 2));
+                    }
+                }
+                if (!Number.isFinite(baseHeight) || baseHeight <= 0) {
+                    if (Number.isFinite(height) && height > 0) {
+                        baseHeight = Math.max(64, Math.round(height / 2));
+                    }
+                }
+            }
+
+            if (!workflowType) {
+                if (hiresEnabled) {
+                    workflowType = hasLoRA ? 'hires_lora' : 'hires';
+                } else if (hasLoRA) {
+                    workflowType = 'sdxl_lora';
+                } else {
+                    workflowType = 'standard';
+                }
+            }
+
+            return {
+                isHires: Boolean(hiresEnabled),
+                hasLoRA,
+                workflowTemplate,
+                workflowType,
+                baseWidth: Number.isFinite(baseWidth) && baseWidth > 0 ? Math.round(baseWidth) : null,
+                baseHeight: Number.isFinite(baseHeight) && baseHeight > 0 ? Math.round(baseHeight) : null
+            };
+        };
+
+        const buildGenerationPayload = async (item, overrides = {}) => {
+            const generationConfig = { ...(item?.generationConfig || {}) };
+            const characterHash = item?.character_hash;
+            let lastConfig = {};
+            if (canHires && characterHash) {
+                try {
+                    const info = await this.api.album.get(`/comfyui/info?character_hash=${characterHash}&no_choices=true`);
+                    if (info?.last_config) {
+                        lastConfig = info.last_config;
+                    }
+                } catch (err) {
+                    console.warn('[FloatViewer] Failed to fetch last_config for character:', characterHash, err);
+                }
+            }
+            const payload = {
+                ...lastConfig,
+                ...generationConfig,
+                ...overrides
+            };
+            if (payload.seed === undefined) {
+                payload.seed = 0;
+            }
+            if (Array.isArray(payload.lora_prompt_tags)) {
+                payload.lora_prompt_tags = payload.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean);
+            } else if (payload.lora_prompt_tags) {
+                const tagText = String(payload.lora_prompt_tags).trim();
+                payload.lora_prompt_tags = tagText ? [tagText] : [];
+            } else {
+                payload.lora_prompt_tags = [];
+            }
+
+            const analysis = analyzeWorkflowConfig(payload);
+            payload.hires_enabled = analysis.isHires;
+            if (analysis.baseWidth) {
+                const currentBaseWidth = Number(payload.hires_base_width);
+                if (!Number.isFinite(currentBaseWidth) || currentBaseWidth <= 0) {
+                    payload.hires_base_width = analysis.baseWidth;
+                }
+            }
+            if (analysis.baseHeight) {
+                const currentBaseHeight = Number(payload.hires_base_height);
+                if (!Number.isFinite(currentBaseHeight) || currentBaseHeight <= 0) {
+                    payload.hires_base_height = analysis.baseHeight;
+                }
+            }
+            if (analysis.workflowType && !payload.workflow_type) {
+                payload.workflow_type = analysis.workflowType;
+            }
+            if (analysis.workflowTemplate && !payload.workflow_template) {
+                payload.workflow_template = analysis.workflowTemplate;
+            }
+
+            if (payload.hires_enabled) {
+                delete payload._workflow_type;
+            } else if (analysis.hasLoRA) {
+                payload._workflow_type = 'sdxl_lora';
+            } else {
+                delete payload._workflow_type;
+            }
+
+            if (!payload.character && item?.character) {
+                payload.character = item.character;
+            }
+
+            return payload;
+        };
+
+        const regenerateImage = async (item, close) => {
+            try {
+                const payload = await buildGenerationPayload(item);
+                if (item?.character_hash) {
+                    payload.character_hash = item.character_hash;
+                }
+                await this.api.generation.start(item.character_hash, payload);
+                showError('Đã gửi yêu cầu tạo lại ảnh.');
+                if (typeof close === 'function') close();
+            } catch (err) {
+                showError(`Lỗi tạo lại: ${err.message}`);
+                throw err;
+            }
+        };
+
         let actionButtons;
         if (viewerHelpers?.createActionButtons) {
             actionButtons = viewerHelpers.createActionButtons({
                 regen: {
-                    onClick: (item, close) => {
-                        this.api.generation.start(item.character_hash, item.generationConfig)
-                            .then(() => {
-                                showError('Đã gửi yêu cầu tạo lại ảnh.');
-                                close();
-                            })
-                            .catch(err => showError(`Lỗi tạo lại: ${err.message}`));
-                    }
+                    onClick: (item, close) => { regenerateImage(item, close).catch(() => {}); }
                 },
                 hires: {
                     disabled: (item) => !canHires || isImageHiresFn(item),
@@ -407,14 +565,7 @@ class FloatViewerComponent {
                     id: 'regen',
                     icon: 'auto_awesome',
                     title: 'Tao lai',
-                    onClick: (item, close) => {
-                        this.api.generation.start(item.character_hash, item.generationConfig)
-                            .then(() => {
-                                showError('Đã gửi yêu cầu tạo lại ảnh.');
-                                close();
-                            })
-                            .catch(err => showError(`Lỗi tạo lại: ${err.message}`));
-                    }
+                    onClick: (item, close) => { regenerateImage(item, close).catch(() => {}); }
                 },
                 {
                     id: 'hires',

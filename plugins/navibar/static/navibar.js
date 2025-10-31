@@ -10,6 +10,7 @@ class NavibarComponent {
                     <div id="navibar-main-bar"></div>
                 </div>
                 <div id="navibar-search-bar"></div>
+                <div id="navibar-dock" class="navibar-dock"></div>
             </div>
         `;
 
@@ -18,6 +19,7 @@ class NavibarComponent {
         this._mainBar = this.element.querySelector('#navibar-main-bar');
         this._subGrid = this.element.querySelector('#navibar-sub-grid');
         this._searchBarContainer = this.element.querySelector('#navibar-search-bar');
+        this._dockContainer = this.element.querySelector('#navibar-dock');
 
         this._allMainButtons = new Map();
         this._allToolButtons = new Map();
@@ -32,6 +34,10 @@ class NavibarComponent {
         this._isDragActive = false;
         this._searchBarCleanup = null;
         this._searchBarTeardownTimer = null;
+        this._dockCleanup = null;
+        this._dockOwnerId = null;
+        this._isDockActive = false;
+        this._isDockPeekOpen = false;
         this._prefersReducedMotion = false;
         this._hasRenderedOnce = false;
         this._boundHandleMotionPreferenceChange = this._handleMotionPreferenceChange.bind(this);
@@ -106,6 +112,7 @@ class NavibarComponent {
             clearTimeout(this._searchBarTeardownTimer);
             this._searchBarTeardownTimer = null;
         }
+        this.closeDock();
         console.log("[Plugin:Navibar] Service destroyed and event listeners removed.");
     }
 
@@ -327,6 +334,10 @@ class NavibarComponent {
 
             this._isSearchActive = true;
             this._isSubGridOpen = false;
+            if (this._isDockPeekOpen) {
+                this._isDockPeekOpen = false;
+                this._emitDockPeekChange();
+            }
             this._searchBarContainer.innerHTML = '';
 
             if (searchElement.id === 'search-form') {
@@ -397,6 +408,202 @@ class NavibarComponent {
             }
         }
         this._updateViewState();
+    }
+
+    openDock(ownerId, options = {}) {
+        if (!this._dockContainer) {
+            console.warn("[Navibar] Dock container is not initialized.");
+            return null;
+        }
+        if (!ownerId) {
+            console.warn("[Navibar] Dock ownerId is required.");
+            return null;
+        }
+
+        if (this._isSearchActive) {
+            this.showSearchBar(null);
+        }
+        this._isSubGridOpen = false;
+
+        const allowReplace = options.allowReplace !== false;
+        if (this._dockOwnerId && this._dockOwnerId !== ownerId && !allowReplace) {
+            console.warn(`[Navibar] Dock is already claimed by '${this._dockOwnerId}'. '${ownerId}' cannot replace it without allowReplace.`);
+            return null;
+        }
+        if (this._dockOwnerId && this._dockOwnerId !== ownerId && allowReplace) {
+            this.closeDock(this._dockOwnerId);
+        }
+        if (this._dockOwnerId === ownerId) {
+            this.closeDock(ownerId);
+        }
+
+        let contentElement = options.element || null;
+        let renderCleanup = null;
+        if (!contentElement && typeof options.render === "function") {
+            try {
+                const renderResult = options.render(this._dockContainer);
+                if (renderResult instanceof HTMLElement) {
+                    contentElement = renderResult;
+                } else if (renderResult && renderResult.element instanceof HTMLElement) {
+                    contentElement = renderResult.element;
+                    if (typeof renderResult.cleanup === "function") {
+                        renderCleanup = renderResult.cleanup;
+                    }
+                }
+            } catch (err) {
+                console.error("[Navibar] Dock render function error.", err);
+            }
+        }
+
+        if (!contentElement) {
+            console.warn(`[Navibar] Dock '${ownerId}' did not provide a valid element.`);
+            return null;
+        }
+
+        this._dockContainer.innerHTML = "";
+        this._dockContainer.className = "navibar-dock";
+        this._dockContainer.dataset.owner = ownerId;
+
+        const extraClasses = Array.isArray(options.classes)
+            ? options.classes
+            : (typeof options.className === "string" ? options.className.split(/\s+/) : []);
+        extraClasses.filter(Boolean).forEach(cls => this._dockContainer.classList.add(cls));
+
+        if (!contentElement.parentElement || contentElement.parentElement !== this._dockContainer) {
+            this._dockContainer.appendChild(contentElement);
+        }
+
+        const providedCleanup = typeof options.onClose === "function" ? options.onClose : null;
+        if (renderCleanup || providedCleanup) {
+            this._dockCleanup = () => {
+                try {
+                    if (typeof renderCleanup === "function") {
+                        renderCleanup();
+                    }
+                } finally {
+                    if (typeof providedCleanup === "function") {
+                        providedCleanup();
+                    }
+                }
+            };
+        } else {
+            this._dockCleanup = null;
+        }
+
+        this._dockOwnerId = ownerId;
+        this._isDockPeekOpen = false;
+        this._isDockActive = true;
+        this._updateViewState();
+        this._emitDockPeekChange();
+
+        if (options.autoFocus !== false) {
+            const selector = options.focusSelector || options.autoFocusSelector;
+            const focusTarget = selector
+                ? this._dockContainer.querySelector(selector)
+                : this._dockContainer.querySelector("textarea, input, [contenteditable='true']");
+            if (focusTarget && typeof focusTarget.focus === "function") {
+                const preventScroll = options.preventScroll !== false;
+                setTimeout(() => {
+                    try {
+                        focusTarget.focus({ preventScroll });
+                    } catch {
+                        focusTarget.focus();
+                    }
+                }, 0);
+            }
+        }
+
+        return {
+            ownerId,
+            element: contentElement,
+            close: () => this.closeDock(ownerId),
+        };
+    }
+
+    closeDock(ownerId) {
+        if (!this._dockContainer || !this._dockOwnerId) {
+            return;
+        }
+        if (ownerId && this._dockOwnerId !== ownerId) {
+            return;
+        }
+
+        const cleanup = this._dockCleanup;
+        this._dockCleanup = null;
+        this._dockOwnerId = null;
+
+        this._dockContainer.innerHTML = "";
+        this._dockContainer.removeAttribute("data-owner");
+        this._dockContainer.className = "navibar-dock";
+
+        if (this._isDockPeekOpen) {
+            this._isDockPeekOpen = false;
+        }
+        this._isDockActive = false;
+        this._updateViewState();
+        this._emitDockPeekChange();
+
+        if (typeof cleanup === "function") {
+            try {
+                cleanup();
+            } catch (err) {
+                console.error("[Navibar] Dock cleanup failed.", err);
+            }
+        }
+    }
+
+    toggleDockPeek(shouldOpen = null) {
+        if (!this._isDockActive) {
+            if (this._isDockPeekOpen) {
+                this._isDockPeekOpen = false;
+                this._updateViewState();
+                this._emitDockPeekChange();
+            }
+            return false;
+        }
+
+        const next = typeof shouldOpen === 'boolean' ? shouldOpen : !this._isDockPeekOpen;
+        if (next === this._isDockPeekOpen) {
+            return this._isDockPeekOpen;
+        }
+
+        if (next && this._isSearchActive) {
+            this.showSearchBar(null);
+        }
+
+        if (next) {
+            this._isSubGridOpen = false;
+        }
+
+        this._isDockPeekOpen = next;
+        this._updateViewState();
+        this._emitDockPeekChange();
+        return this._isDockPeekOpen;
+    }
+
+    setDockPeekOpen(shouldOpen) {
+        return this.toggleDockPeek(Boolean(shouldOpen));
+    }
+
+    isDockPeekOpen() {
+        return this._isDockActive && this._isDockPeekOpen;
+    }
+
+    _emitDockPeekChange() {
+        if (!this._tray || typeof CustomEvent !== 'function') {
+            return;
+        }
+        const detail = {
+            isOpen: this._isDockPeekOpen,
+            isDockActive: this._isDockActive,
+            ownerId: this._dockOwnerId || null,
+        };
+        const event = new CustomEvent('navibar:dockPeekChange', {
+            detail,
+            bubbles: true,
+            composed: true,
+        });
+        this._tray.dispatchEvent(event);
     }
 
     // --- STATE & INTEGRITY ---
@@ -486,12 +693,21 @@ class NavibarComponent {
     _handleClickOutside(event) {
         if (!this.element.contains(event.target)) {
             const wasSubGridOpen = this._isSubGridOpen;
+            const wasDockPeekOpen = this._isDockPeekOpen;
             if (this._isSearchActive) {
                 this.showSearchBar(null);
             }
             if (wasSubGridOpen) {
                 this._isSubGridOpen = false;
+            }
+            if (wasDockPeekOpen) {
+                this._isDockPeekOpen = false;
+            }
+            if (wasSubGridOpen || wasDockPeekOpen) {
                 this._updateViewState();
+                if (wasDockPeekOpen) {
+                    this._emitDockPeekChange();
+                }
             }
         }
     }
@@ -672,11 +888,15 @@ class NavibarComponent {
 
     _updateViewState() {
         const isSubGridVisible = this._isSubGridOpen || this._isDragActive;
+        const isDockPeekVisible = this._isDockActive && this._isDockPeekOpen;
         
         this._tray.classList.toggle('is-subgrid-open', isSubGridVisible);
         this._tray.classList.toggle('is-search-active', this._isSearchActive);
+        this._tray.classList.toggle('is-dock-active', this._isDockActive);
+        this._tray.classList.toggle('is-dock-peek-open', isDockPeekVisible);
         if (this._mainView) {
-            this._mainView.classList.toggle('is-hidden', this._isSearchActive);
+            const hideMainView = this._isSearchActive || (this._isDockActive && !this._isDockPeekOpen);
+            this._mainView.classList.toggle('is-hidden', hideMainView);
         }
         
         const menuBtn = this.element.querySelector('[data-id="navibar-menu"]');

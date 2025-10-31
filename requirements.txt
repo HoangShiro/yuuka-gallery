@@ -4,3 +4,5 @@ websocket-client
 PILLOW
 packaging
 flask_sock
+google-genai
+openai

@@ -13,6 +13,8 @@ class AlbumComponent {
             cachedComfyGlobalChoices: null, // Yuuka: comfyui fetch optimization v1.0
         };
         this.viewer = window.Yuuka.plugins.simpleViewer;
+        this.clipboardService = this._ensureClipboardService();
+        this.state.promptClipboard = this._getPromptClipboard();
         
         // Yuuka: Bind các event handler một lần duy nhất
         this.handleImageAdded = this.handleImageAdded.bind(this);
@@ -241,6 +243,148 @@ class AlbumComponent {
         }
     }
 
+    _ensureClipboardService() {
+        window.Yuuka = window.Yuuka || {};
+        window.Yuuka.services = window.Yuuka.services || {};
+        if (!window.Yuuka.services.albumPromptClipboard) {
+            const store = { data: null };
+            window.Yuuka.services.albumPromptClipboard = {
+                get() {
+                    return store.data ? new Map(store.data) : null;
+                },
+                set(map) {
+                    if (map instanceof Map) {
+                        store.data = new Map(map);
+                    } else if (Array.isArray(map)) {
+                        store.data = new Map(map);
+                    } else if (map && typeof map === 'object') {
+                        store.data = new Map(Object.entries(map));
+                    } else {
+                        store.data = null;
+                    }
+                    return store.data ? new Map(store.data) : null;
+                },
+                clear() {
+                    store.data = null;
+                }
+            };
+        }
+        return window.Yuuka.services.albumPromptClipboard;
+    }
+
+    _getPromptClipboard() {
+        const stored = this.clipboardService?.get?.();
+        this.state.promptClipboard = stored ? new Map(stored) : null;
+        return this.state.promptClipboard;
+    }
+
+    _setPromptClipboard(value) {
+        let map = null;
+        if (value instanceof Map) {
+            map = value;
+        } else if (Array.isArray(value)) {
+            map = new Map(value);
+        } else if (value && typeof value === 'object') {
+            map = new Map(Object.entries(value));
+        }
+        if (map) {
+            const normalized = new Map();
+            map.forEach((rawValue, rawKey) => {
+                const key = String(rawKey || '').trim();
+                if (!key) return;
+                const cleaned = rawValue == null ? '' : String(rawValue).trim();
+                normalized.set(key, cleaned);
+            });
+            map = normalized;
+        }
+        const stored = this.clipboardService?.set?.(map) || null;
+        this.state.promptClipboard = stored ? new Map(stored) : null;
+        return this.state.promptClipboard;
+    }
+
+    _analyzeWorkflowConfig(cfg = {}) {
+        const normalizeStr = (value) => typeof value === 'string' ? value.trim() : '';
+        const toBool = (value) => {
+            if (typeof value === 'boolean') return value;
+            if (typeof value === 'number') return value !== 0;
+            if (typeof value === 'string') {
+                const lowered = value.trim().toLowerCase();
+                return ['1', 'true', 'yes', 'on'].includes(lowered);
+            }
+            return false;
+        };
+        const toNumber = (value) => {
+            const num = Number(value);
+            return Number.isFinite(num) ? num : null;
+        };
+
+        const workflowTemplate = normalizeStr(cfg.workflow_template || cfg._workflow_template || '');
+        const workflowTypeRaw = normalizeStr(cfg.workflow_type || cfg._workflow_type || '');
+        let workflowType = workflowTypeRaw.toLowerCase();
+        const templateLower = workflowTemplate.toLowerCase();
+
+        const loraName = normalizeStr(cfg.lora_name);
+        const hasLoRA = Boolean(loraName) && loraName.toLowerCase() !== 'none';
+
+        let hiresEnabled = toBool(cfg.hires_enabled);
+
+        const width = toNumber(cfg.width);
+        const height = toNumber(cfg.height);
+        let baseWidth = toNumber(cfg.hires_base_width);
+        let baseHeight = toNumber(cfg.hires_base_height);
+
+        const widthExceedsBase = Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth + 4;
+        const heightExceedsBase = Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight + 4;
+
+        if (!hiresEnabled) {
+            if (workflowType.includes('hires') || templateLower.includes('hiresfix')) {
+                hiresEnabled = true;
+            } else if (widthExceedsBase || heightExceedsBase) {
+                hiresEnabled = true;
+            }
+        }
+
+        const bigDimensionDetected = (
+            (Number.isFinite(width) && width >= 1536) ||
+            (Number.isFinite(height) && height >= 1536)
+        );
+        if (!hiresEnabled && bigDimensionDetected && (!Number.isFinite(baseWidth) || baseWidth === null || baseWidth <= 0)) {
+            hiresEnabled = true;
+        }
+
+        if (hiresEnabled) {
+            if (!Number.isFinite(baseWidth) || baseWidth <= 0) {
+                if (Number.isFinite(width) && width > 0) {
+                    baseWidth = Math.max(64, Math.round(width / 2));
+                }
+            }
+            if (!Number.isFinite(baseHeight) || baseHeight <= 0) {
+                if (Number.isFinite(height) && height > 0) {
+                    baseHeight = Math.max(64, Math.round(height / 2));
+                }
+            }
+        }
+
+        if (!workflowType) {
+            if (hiresEnabled) {
+                workflowType = hasLoRA ? 'hires_lora' : 'hires';
+            } else if (hasLoRA) {
+                workflowType = 'sdxl_lora';
+            } else {
+                workflowType = 'standard';
+            }
+        }
+
+        return {
+            isHires: Boolean(hiresEnabled),
+            hasLoRA,
+            workflowTemplate,
+            workflowType,
+            baseWidth: Number.isFinite(baseWidth) && baseWidth > 0 ? Math.round(baseWidth) : null,
+            baseHeight: Number.isFinite(baseHeight) && baseHeight > 0 ? Math.round(baseHeight) : null
+        };
+    }
+
     async _startGeneration(configOverrides={}) {
         if (this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length >= 5) { showError("Đã đạt giới hạn 5 tác vụ đồng thời."); return; }
         if (!this.state.isComfyUIAvaidable) { showError("ComfyUI chưa kết nối."); return; }
@@ -266,17 +410,30 @@ class AlbumComponent {
             } else {
                 payload.lora_prompt_tags = [];
             }
-            if (typeof payload.hires_enabled === 'string') {
-                payload.hires_enabled = payload.hires_enabled.trim().toLowerCase() === 'true';
-            } else {
-                payload.hires_enabled = Boolean(payload.hires_enabled);
+            const analysis = this._analyzeWorkflowConfig(payload);
+            payload.hires_enabled = analysis.isHires;
+            if (analysis.baseWidth) {
+                const currentBaseWidth = Number(payload.hires_base_width);
+                if (!Number.isFinite(currentBaseWidth) || currentBaseWidth <= 0) {
+                    payload.hires_base_width = analysis.baseWidth;
+                }
             }
-            const hasLoRA = typeof payload.lora_name === 'string'
-                && payload.lora_name.trim()
-                && payload.lora_name.trim().toLowerCase() !== 'none';
+            if (analysis.baseHeight) {
+                const currentBaseHeight = Number(payload.hires_base_height);
+                if (!Number.isFinite(currentBaseHeight) || currentBaseHeight <= 0) {
+                    payload.hires_base_height = analysis.baseHeight;
+                }
+            }
+            if (analysis.workflowType && !payload.workflow_type) {
+                payload.workflow_type = analysis.workflowType;
+            }
+            if (analysis.workflowTemplate && !payload.workflow_template) {
+                payload.workflow_template = analysis.workflowTemplate;
+            }
+
             if (payload.hires_enabled) {
                 delete payload._workflow_type;
-            } else if (hasLoRA) {
+            } else if (analysis.hasLoRA) {
                 payload._workflow_type = 'sdxl_lora';
             } else {
                 delete payload._workflow_type;
@@ -643,6 +800,60 @@ class AlbumComponent {
                 span.textContent = value;
                 return `<div class="info-row"><strong>${label}:</strong> <span>${span.innerHTML}</span></div>`;
             };
+            const resolveWorkflowDisplay = () => {
+                const normalize = (value) => String(value || '').trim().toLowerCase();
+                const workflowTemplate = String(cfg.workflow_template || '').trim();
+                const workflowType = normalize(cfg.workflow_type);
+                const hasLoRA = typeof cfg.lora_name === 'string'
+                    && cfg.lora_name.trim()
+                    && cfg.lora_name.trim().toLowerCase() !== 'none';
+                const labelMap = {
+                    'hires_lora': 'Hires Fix + LoRA',
+                    'hires': 'Hires Fix',
+                    'hires_input_image_lora': 'Hires Input Image + LoRA',
+                    'hires_input_image': 'Hires Input Image',
+                    'sdxl_lora': 'SDXL + LoRA',
+                    'lora': 'SDXL + LoRA',
+                    'standard': 'Standard'
+                };
+                let label = labelMap[workflowType];
+                if (!label && workflowType.endsWith('_lora')) {
+                    const baseType = workflowType.replace(/_lora$/, '');
+                    if (labelMap[baseType]) {
+                        label = `${labelMap[baseType]} + LoRA`;
+                    }
+                }
+                if (!label) {
+                    const templateLower = workflowTemplate.toLowerCase();
+                    if (templateLower.includes('hiresfix') && templateLower.includes('input_image')) {
+                        label = templateLower.includes('lora') || hasLoRA ? 'Hires Input Image + LoRA' : 'Hires Input Image';
+                    } else if (templateLower.includes('hiresfix')) {
+                        label = templateLower.includes('lora') || hasLoRA ? 'Hires Fix + LoRA' : 'Hires Fix';
+                    } else if (templateLower.includes('lora')) {
+                        label = 'SDXL + LoRA';
+                    }
+                }
+                if (!label) {
+                    const width = Number(cfg.width);
+                    const height = Number(cfg.height);
+                    const baseWidth = Number(cfg.hires_base_width);
+                    const baseHeight = Number(cfg.hires_base_height);
+                    const widthHires = Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth + 4;
+                    const heightHires = Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight + 4;
+                    const noBaseData = (!Number.isFinite(baseWidth) || baseWidth <= 0) && (!Number.isFinite(baseHeight) || baseHeight <= 0);
+                    const bigDimension = (Number.isFinite(width) && width >= 1536) || (Number.isFinite(height) && height >= 1536);
+                    if (widthHires || heightHires || (noBaseData && bigDimension)) {
+                        label = hasLoRA ? 'Hires Fix + LoRA' : 'Hires Fix';
+                    }
+                }
+                if (!label) {
+                    label = hasLoRA ? 'SDXL + LoRA' : '';
+                }
+                if (workflowTemplate && workflowTemplate.toLowerCase() !== 'standard') {
+                    return label ? `${label} (${workflowTemplate})` : workflowTemplate;
+                }
+                return label;
+            };
             const promptRows = ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative']
                 .map(key => buildRow(key.charAt(0).toUpperCase() + key.slice(1), cfg[key]))
                 .filter(Boolean)
@@ -661,6 +872,8 @@ class AlbumComponent {
                 buildRow('CFG', cfg.cfg)
             }${
                 buildRow('LoRA', cfg.lora_name)
+            }${
+                buildRow('Workflow', resolveWorkflowDisplay())
             }</div>`;
             const loraTags = Array.isArray(cfg.lora_prompt_tags)
                 ? cfg.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean).join(', ')
@@ -721,10 +934,9 @@ class AlbumComponent {
         const copyPromptHandler = (item) => {
             const cfg = item.generationConfig;
             const keys = ['outfits', 'expression', 'action', 'context', 'quality', 'negative'];
-            this.state.promptClipboard = new Map(
-                keys.map(key => [key, cfg[key] ? String(cfg[key]).trim() : ''])
-            );
-            showError("Prompt đã copy.");
+            const clipboardData = keys.map(key => [key, cfg[key] ? String(cfg[key]).trim() : '']);
+            this._setPromptClipboard(clipboardData);
+            showError("Prompt đã sao chép.");
         };
 
         const deleteHandler = async (item, close, updateItems) => {
@@ -820,6 +1032,7 @@ class AlbumComponent {
             showError('Album settings UI is not ready.');
             return;
         }
+        const currentClipboard = this._getPromptClipboard();
         await modalApi.openSettingsModal({
             title: `Cấu hình cho ${this.state.selectedCharacter.name}`,
             modalClass: 'plugin-album__settings-modal',
@@ -860,7 +1073,9 @@ class AlbumComponent {
             onGenerate: async (updatedConfig) => {
                 await this._startGeneration(updatedConfig);
             },
-            promptClipboard: this.state.promptClipboard,
+            promptClipboard: currentClipboard,
+            getPromptClipboard: () => this._getPromptClipboard(),
+            setPromptClipboard: (value) => this._setPromptClipboard(value),
             // Yuuka: comfyui fetch optimization v1.0
             onConnect: async (address, btn, close) => {
                 btn.textContent = '...';

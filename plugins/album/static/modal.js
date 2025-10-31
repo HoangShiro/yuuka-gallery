@@ -1063,15 +1063,47 @@
                 setTimeout(autoResize, 0);
             });
 
+            const getPromptClipboard = () => {
+                if (typeof options.getPromptClipboard === 'function') {
+                    const result = options.getPromptClipboard();
+                    if (result instanceof Map) return result;
+                    if (result && typeof result === 'object') return new Map(Object.entries(result));
+                    return null;
+                }
+                const fallback = options.promptClipboard;
+                if (fallback instanceof Map) return fallback;
+                if (fallback && typeof fallback === 'object') return new Map(Object.entries(fallback));
+                return null;
+            };
+
+            const setPromptClipboard = (entries) => {
+                let map = null;
+                if (entries instanceof Map) {
+                    map = entries;
+                } else if (Array.isArray(entries)) {
+                    map = new Map(entries);
+                } else if (entries && typeof entries === 'object') {
+                    map = new Map(Object.entries(entries));
+                }
+                if (typeof options.setPromptClipboard === 'function') {
+                    return options.setPromptClipboard(map || null);
+                }
+                options.promptClipboard = map || null;
+                return options.promptClipboard;
+            };
+
             dialog.querySelector('.btn-cancel').addEventListener('click', close);
             dialog.querySelector('.btn-copy').addEventListener('click', () => {
                 const keys = ['outfits', 'expression', 'action', 'context', 'quality', 'negative'];
-                options.promptClipboard = new Map(keys.map(k => [k, form.elements[k] ? form.elements[k].value.trim() : '']));
+                const clipboardEntries = keys.map(k => [k, form.elements[k] ? form.elements[k].value.trim() : '']);
+                setPromptClipboard(clipboardEntries);
                 showError("Prompt đã sao chép.");
             });
             dialog.querySelector('.btn-paste').addEventListener('click', () => {
-                if (!options.promptClipboard) { showError("Chưa sao chép prompt."); return; }
-                options.promptClipboard.forEach((v, k) => {
+                const clipboard = getPromptClipboard();
+                const entries = clipboard instanceof Map ? clipboard : clipboard ? new Map(Object.entries(clipboard)) : null;
+                if (!entries || entries.size === 0) { showError("Chưa sao chép prompt."); return; }
+                entries.forEach((v, k) => {
                     if (form.elements[k]) form.elements[k].value = v;
                 });
                 dialog.querySelectorAll('textarea').forEach(t => t.dispatchEvent(new Event('input', { bubbles: true })));
