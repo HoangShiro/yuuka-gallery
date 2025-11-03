@@ -6,3 +6,4 @@ packaging
 flask_sock
 google-genai
 openai
+python-dotenv
