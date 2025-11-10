@@ -12,6 +12,8 @@
     "assets": {
         "js": [
             "chat-bootstrap.js",
+            "controllers/chat-snapshot-manager.js",
+            "controllers/chat-message-actions.js",
             "services/chat-api.js",
             "stores/chat-store.js",
             "components/tab-character-list.js",
@@ -23,7 +25,8 @@
             "chat.js"
         ],
         "css": [
-            "chat.css"
+            "chat.css",
+            "ui-settings.css"
         ]
     },
     "dependencies": {

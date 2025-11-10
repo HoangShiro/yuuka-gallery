@@ -16,8 +16,8 @@ class No200RequestHandler(WSGIRequestHandler):
         except Exception:
             # nếu không parse được, cứ log như bình thường
             return super().log_request(code, size)
-        # ✂️ Bỏ qua 200
-        if code_int == 200:
+        # ✂️ Bỏ qua 200 và 304 (Not Modified)
+        if code_int in (200, 304):
             return
         return super().log_request(code, size)
 

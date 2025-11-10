@@ -176,7 +176,7 @@ def create_blueprint(plugin):
                     mimetype="application/json",
                 )
 
-        response = {"message": message}
+        response = {"message": message, "session_id": session_id}
         status_code = 201
 
         if role == "user":

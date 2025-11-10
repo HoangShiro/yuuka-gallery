@@ -146,21 +146,11 @@ html.dark-mode #result-footer { background: rgba(42, 39, 38, 0.6); border: 1px s
     padding: 16px 50px 16px 24px;
     font-size: var(--font-size-base);
     border-radius: var(--rounded-lg);
-    border: none; /* Remove border for a cleaner look */
-    outline: none; /* Remove default focus outline */
-    background-color: rgba(0, 0, 0, 0);
+    border: none;
+    outline: none;
+    background-color: transparent;
     color: var(--color-primary-text);
-    box-shadow: 0 8px 25px -8px var(--color-shadow); /* A softer, more modern shadow */
     transition: box-shadow 0.25s ease;
-}
-
-#search-box:focus {
-    /* Add a focus ring using a colored shadow */
-    box-shadow: 0 8px 25px -8px var(--color-shadow), 0 0 0 1px #ff8a754f;
-}
-
-html.dark-mode #search-box:focus {
-     box-shadow: 0 8px 25px -8px var(--color-shadow), 0 0 0 1px #ff9c8d4f;
 }
 
 html.dark-mode #search-box::placeholder {
@@ -172,7 +162,7 @@ html.dark-mode #search-box::placeholder {
     right: 6px;
     top: 50%;
     transform: translateY(-50%);
-    background-color: var(--color-accent);
+    background-color: transparent;
     color: white;
     border: none;
     border-radius: 50%;
@@ -186,7 +176,7 @@ html.dark-mode #search-box::placeholder {
 }
 
 .search-submit-btn:hover {
-    background-color: var(--color-accent-hover);
+    background-color: rgba(255, 255, 255, 0.1);
     transform: translateY(-50%) scale(1.1);
 }
 .search-submit-btn:active {

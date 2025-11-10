@@ -161,9 +161,41 @@
                 return;
             }
 
-            const response = await this.api.getHistory(characterId, sessionId);
+            // Preserve current session if caller omits sessionId and we are staying on the same character
+            let effectiveSessionId = sessionId;
+            const switchingToDifferentSession = (
+                characterId !== this.state.activeCharacterId ||
+                (sessionId !== null && sessionId !== this.state.activeSessionId)
+            );
+            if (effectiveSessionId == null && this.state.activeCharacterId === characterId && this.state.activeSessionId) {
+                effectiveSessionId = this.state.activeSessionId;
+            }
+
+            // Pre-clear to avoid UI flicker of old messages while waiting for new history
+            // Only clear if actually switching character or session
+            const selectToken = `${characterId}|${effectiveSessionId || 'null'}|${Date.now()}`;
+            this._pendingSelectToken = selectToken;
+            if (switchingToDifferentSession) {
+                this.state.activeCharacterId = characterId;
+                this.state.activeSessionId = effectiveSessionId;
+                this.state.activeCharacterDefinition = null;
+                this.state.activeHistory = [];
+                this._emit("active-character", {
+                    characterId,
+                    sessionId: effectiveSessionId,
+                    definition: null,
+                    messages: [],
+                    loading: true,
+                });
+            }
+
+            const response = await this.api.getHistory(characterId, effectiveSessionId);
+            // If another selectCharacter started after this one, abort applying results
+            if (this._pendingSelectToken !== selectToken) {
+                return null; // stale response
+            }
             this.state.activeCharacterId = characterId;
-            this.state.activeSessionId = response.session_id || sessionId || null;
+            this.state.activeSessionId = response.session_id || effectiveSessionId || null;
             this.state.activeCharacterDefinition = response.definition || null;
             this.state.activeHistory = response.messages || [];
             this._emit("active-character", {
@@ -171,6 +203,7 @@
                 sessionId: this.state.activeSessionId,
                 definition: this.state.activeCharacterDefinition,
                 messages: this.state.activeHistory,
+                loading: false,
             });
             return response;
         }
@@ -191,7 +224,8 @@
             await this.refreshSessions();
             let latest = null;
             if (resolvedId) {
-                const history = await this.selectCharacter(resolvedId);
+                const keepSessionId = (resolvedId === this.state.activeCharacterId) ? this.state.activeSessionId : null;
+                const history = await this.selectCharacter(resolvedId, keepSessionId);
                 latest = history?.definition || response?.definition || payload;
             } else {
                 await this.selectCharacter(null);
@@ -630,7 +664,9 @@
                     } else {
                         if (status.status === "completed" && status.message && status.message.character_id) {
                             if (this.state.activeCharacterId === status.message.character_id) {
-                                await this.selectCharacter(status.message.character_id);
+                                // Prefer session_id from job context when available; fallback to current active session
+                                const ctxSessionId = status.context?.session_id || this.state.activeSessionId;
+                                await this.selectCharacter(status.message.character_id, ctxSessionId);
                             }
                             await this.refreshSessions();
                         }

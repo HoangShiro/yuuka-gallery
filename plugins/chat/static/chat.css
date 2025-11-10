@@ -523,6 +523,7 @@
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2; /* Standard property for compatibility */
     -webkit-box-orient: vertical;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -707,6 +708,16 @@
     align-items: center;
     transform: none;
     z-index: 1;
+}
+
+/* Snapshot indicator: match the visual tone of disabled toolbar buttons */
+.chat-message__toolbar .chat-message__snapshot-indicator {
+    color: var(--chat-muted);
+    opacity: 0.35; /* align with .chat-message__toolbar .chat-btn[disabled] */
+    font-size: 12px;
+    line-height: 1;
+    margin-inline-start: 4px;
+    user-select: none;
 }
 
 /* Alignment handled by parent .chat-message align-items */

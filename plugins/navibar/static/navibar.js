@@ -2,12 +2,15 @@ class NavibarComponent {
     constructor(container, api, allPlugins) {
         this.api = api;
         this.element = document.getElementById('main-nav');
-        // Yuuka: navibar refactor v4.1 - ThÃªm tray container
+        // Yuuka: navibar refactor v4.2 - add function buttons container (menu + tool slots)
         this.element.innerHTML = `
             <div id="navibar-tray">
                 <div id="navibar-main-view">
                     <div id="navibar-sub-grid"></div>
-                    <div id="navibar-main-bar"></div>
+                    <div id="navibar-main-bar">
+                        <div id="navibar-function-buttons" class="navibar-function-buttons"></div>
+                        <div id="navibar-main-buttons" class="navibar-main-buttons"></div>
+                    </div>
                 </div>
                 <div id="navibar-search-bar"></div>
                 <div id="navibar-dock" class="navibar-dock"></div>
@@ -16,7 +19,9 @@ class NavibarComponent {
 
         this._tray = this.element.querySelector('#navibar-tray');
         this._mainView = this.element.querySelector('#navibar-main-view');
-        this._mainBar = this.element.querySelector('#navibar-main-bar');
+    this._mainBarWrapper = this.element.querySelector('#navibar-main-bar');
+    this._functionButtons = this.element.querySelector('#navibar-function-buttons');
+    this._mainBar = this.element.querySelector('#navibar-main-buttons');
         this._subGrid = this.element.querySelector('#navibar-sub-grid');
         this._searchBarContainer = this.element.querySelector('#navibar-search-bar');
         this._dockContainer = this.element.querySelector('#navibar-dock');
@@ -26,7 +31,8 @@ class NavibarComponent {
         this._allSpecialButtons = new Map();
         this._toggleStates = new Map();
 
-        this._mainBarLayout = [];
+    this._functionButtonsLayout = [];
+    this._mainBarLayout = [];
         this._subGridLayout = []; 
         this._activePluginId = null;
         this._isSearchActive = false;
@@ -40,6 +46,11 @@ class NavibarComponent {
         this._isDockPeekOpen = false;
         this._prefersReducedMotion = false;
         this._hasRenderedOnce = false;
+    // Debug and layout snapshot
+    this._lastFunctionLayoutSnapshot = [];
+    this._debugEnabled = !!(window.Yuuka && window.Yuuka.debug && window.Yuuka.debug.navibar);
+        // Touch mode detection for drag behavior
+        this._isTouchMode = false;
         this._boundHandleMotionPreferenceChange = this._handleMotionPreferenceChange.bind(this);
         this._motionMediaQuery = null;
         if (window.matchMedia) {
@@ -52,19 +63,31 @@ class NavibarComponent {
             }
             this._motionMediaQuery = mediaQuery;
         }
+        // Detect touch support
+        try {
+            this._isTouchMode = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0 || (navigator.msMaxTouchPoints || 0) > 0;
+        } catch {}
+        if (this._isTouchMode) {
+            // Mark tray for CSS touch-specific behaviors and suppress context menu
+            this._tray?.classList?.add('is-touch');
+            const preventContextMenu = (e) => { e.preventDefault(); };
+            this.element.addEventListener('contextmenu', preventContextMenu, { passive: false });
+            // Keep a reference if we need to remove later
+            this._preventContextMenuHandler = preventContextMenu;
+        }
         
         this._boundHandleClickOutside = this._handleClickOutside.bind(this);
         document.addEventListener('mousedown', this._boundHandleClickOutside);
         
-        this._allSpecialButtons.set('navibar-menu', { id: 'navibar-menu', title: 'Menu', icon: 'menu', type: 'special', onClick: () => this._toggleSubGrid() });
+    this._allSpecialButtons.set('navibar-menu', { id: 'navibar-menu', title: 'Menu', icon: 'keyboard_arrow_up', type: 'special', onClick: () => this._toggleSubGrid() });
         this._allSpecialButtons.set('tool-slot-1', { id: 'tool-slot-1', title: 'Tool Slot 1', icon: 'fiber_manual_record', type: 'tool_slot' });
         this._allSpecialButtons.set('tool-slot-2', { id: 'tool-slot-2', title: 'Tool Slot 2', icon: 'fiber_manual_record', type: 'tool_slot' });
 
         this._registerButtonsFromManifests(allPlugins);
         this._loadState();
         
-        if (this._mainBarLayout.length === 0 && this._subGridLayout.length === 0) {
-            console.log("[Navibar] No saved layout found. Creating default layout.");
+        if (this._mainBarLayout.length === 0 && this._subGridLayout.length === 0 && this._functionButtonsLayout.length === 0) {
+            console.log("[Navibar] No saved layout found. Creating default layout (top 3 main buttons).");
             const mainButtons = [...this._allMainButtons.values()];
             const sortedMainButtonIds = mainButtons
                 .map(btn => ({ id: btn.id, pluginId: btn.pluginId }))
@@ -77,12 +100,15 @@ class NavibarComponent {
                 })
                 .map(item => item.id);
 
-            this._mainBarLayout = [
-                ...sortedMainButtonIds,
-                'tool-slot-1', 
+            const top3 = sortedMainButtonIds.slice(0, 3);
+            const rest = sortedMainButtonIds.slice(3);
+            this._functionButtonsLayout = [
+                'tool-slot-1',
                 'tool-slot-2',
                 'navibar-menu'
             ];
+            this._mainBarLayout = [...top3];
+            this._subGridLayout = [...rest];
         }
         
         this._integrityCheck(); 
@@ -93,6 +119,8 @@ class NavibarComponent {
             window.Yuuka.services.navibar = this;
             console.log("[Plugin:Navibar] Service registered.");
         }
+        // Initial snapshot for function buttons layout
+        this._snapshotFunctionLayout('[init]');
     }
     
     destroy() {
@@ -105,6 +133,12 @@ class NavibarComponent {
             }
             this._motionMediaQuery = null;
         }
+        if (this._preventContextMenuHandler) {
+            try { this.element.removeEventListener('contextmenu', this._preventContextMenuHandler); } catch {}
+            this._preventContextMenuHandler = null;
+        }
+        document.documentElement.classList.remove('yuuka-navibar--scroll-lock');
+        document.body.classList.remove('yuuka-navibar--scroll-lock');
         if (this._searchBarCleanup) {
             this._searchBarCleanup();
         }
@@ -649,11 +683,13 @@ class NavibarComponent {
     _saveState() {
         localStorage.setItem('yuuka-navibar-mainbar', JSON.stringify(this._mainBarLayout));
         localStorage.setItem('yuuka-navibar-subgrid', JSON.stringify(this._subGridLayout));
+        localStorage.setItem('yuuka-navibar-function', JSON.stringify(this._functionButtonsLayout));
     }
 
     _loadState() {
         const savedMainBar = localStorage.getItem('yuuka-navibar-mainbar');
         const savedSubGrid = localStorage.getItem('yuuka-navibar-subgrid');
+        const savedFunction = localStorage.getItem('yuuka-navibar-function');
         if (savedMainBar) {
             try { this._mainBarLayout = JSON.parse(savedMainBar); } 
             catch (e) { this._mainBarLayout = []; }
@@ -661,6 +697,17 @@ class NavibarComponent {
         if (savedSubGrid) {
             try { this._subGridLayout = JSON.parse(savedSubGrid); }
             catch (e) { this._subGridLayout = []; }
+        }
+        if (savedFunction) {
+            try { this._functionButtonsLayout = JSON.parse(savedFunction) || []; }
+            catch (e) { this._functionButtonsLayout = []; }
+        }
+        // Back-compat: migrate function ids out of main bar if needed
+        if (!savedFunction && this._functionButtonsLayout.length === 0) {
+            const functionIds = ['navibar-menu', 'tool-slot-1', 'tool-slot-2'];
+            const legacy = new Set(this._mainBarLayout);
+            this._functionButtonsLayout = functionIds.filter(id => legacy.has(id));
+            this._mainBarLayout = this._mainBarLayout.filter(id => !functionIds.includes(id));
         }
     }
     
@@ -670,21 +717,50 @@ class NavibarComponent {
             ...this._allSpecialButtons.keys()
         ]);
         let changesMade = false;
-        const currentLayoutIds = new Set([...this._mainBarLayout, ...this._subGridLayout]);
+        const currentLayoutIds = new Set([
+            ...this._mainBarLayout,
+            ...this._subGridLayout,
+            ...this._functionButtonsLayout
+        ]);
 
+        // Remove unknown ids
         this._mainBarLayout = this._mainBarLayout.filter(id => allKnownIds.has(id));
         this._subGridLayout = this._subGridLayout.filter(id => allKnownIds.has(id));
+        this._functionButtonsLayout = this._functionButtonsLayout.filter(id => allKnownIds.has(id));
 
+        // Ensure function ids live only in function layout
+        const functionIds = ['navibar-menu', 'tool-slot-1', 'tool-slot-2'];
+        const purge = (arr) => {
+            const len = arr.length;
+            const filtered = arr.filter(id => !functionIds.includes(id));
+            if (filtered.length !== len) changesMade = true;
+            return filtered;
+        };
+        this._mainBarLayout = purge(this._mainBarLayout);
+        this._subGridLayout = purge(this._subGridLayout);
+        functionIds.forEach(fid => {
+            if (allKnownIds.has(fid) && !this._functionButtonsLayout.includes(fid)) {
+                this._functionButtonsLayout.push(fid);
+                changesMade = true;
+            }
+        });
+
+        // Place any missing known ids into subgrid (except function ids)
         allKnownIds.forEach(id => {
             if (!currentLayoutIds.has(id)) {
-                this._subGridLayout.push(id); 
+                if (functionIds.includes(id)) {
+                    this._functionButtonsLayout.push(id);
+                } else {
+                    this._subGridLayout.push(id);
+                }
                 changesMade = true;
             }
         });
         
         if (changesMade) {
-            console.log("[Navibar Integrity] State was corrected.");
+            this._log("[Navibar Integrity] State was corrected.");
             this._saveState();
+            this._snapshotFunctionLayout('[integrityCheck]');
         }
     }
     
@@ -726,7 +802,12 @@ class NavibarComponent {
         this._isDragActive = false;
         this._saveState();
         this._updateViewState();
-        console.log("[Navibar] Drag operation finished and state saved.");
+        this._snapshotFunctionLayout('[finishDrag]');
+        this._log("[Navibar] Drag operation finished and state saved. functionLayout=" + JSON.stringify(this._functionButtonsLayout));
+        if (this._isTouchMode) {
+            document.documentElement.classList.remove('yuuka-navibar--scroll-lock');
+            document.body.classList.remove('yuuka-navibar--scroll-lock');
+        }
     }
 
     // --- DRAG & DROP ---
@@ -740,11 +821,33 @@ class NavibarComponent {
             onStart: this._handleSortableStart.bind(this),
             onEnd: this._handleSortableEnd.bind(this)
         };
+        // On touch devices: long-press (0.5s) to drag, quick tap triggers click
+        if (this._isTouchMode) {
+            baseOptions.delay = 360; // ms (reduce to avoid text highlight conflicts)
+            baseOptions.delayOnTouchOnly = true;
+        }
+
+        // Function buttons container: reorder inside only
+        if (this._functionSortable) this._functionSortable.destroy();
+        if (this._functionButtons) {
+            this._functionSortable = Sortable.create(this._functionButtons, {
+                ...baseOptions,
+                group: { name: 'navibar-function', pull: false, put: false }
+            });
+        }
 
         if (this._mainBarSortable) this._mainBarSortable.destroy();
         this._mainBarSortable = Sortable.create(this._mainBar, {
             ...baseOptions,
-            group: { name: 'navibar-buttons', pull: true, put: true }
+            group: {
+                name: 'navibar-buttons',
+                pull: true,
+                put: (to, from, dragEl) => {
+                    // Disallow function role items here
+                    const role = dragEl?.dataset?.role;
+                    return role !== 'function';
+                }
+            }
         });
 
         if (this._subGridSortable) this._subGridSortable.destroy();
@@ -754,7 +857,10 @@ class NavibarComponent {
                 name: 'navibar-buttons',
                 pull: true,
                 put: (to, from, dragEl) => {
-                    return !(dragEl && dragEl.dataset && dragEl.dataset.id === 'navibar-menu');
+                    const id = dragEl?.dataset?.id;
+                    const role = dragEl?.dataset?.role;
+                    if (role === 'function' || id === 'navibar-menu') return false;
+                    return true;
                 }
             }
         });
@@ -763,18 +869,34 @@ class NavibarComponent {
     _handleSortableStart() {
         this._isDragActive = true;
         this._updateViewState();
+        // Prevent page scroll while dragging on touch devices
+        if (this._isTouchMode) {
+            document.documentElement.classList.add('yuuka-navibar--scroll-lock');
+            document.body.classList.add('yuuka-navibar--scroll-lock');
+        }
     }
 
     _handleSortableEnd(evt) {
         const trayGapDropMeta = this._detectTrayGapDrop(evt);
         if (trayGapDropMeta) {
             const draggedId = evt?.item?.dataset?.id;
-            if (draggedId) {
+            const role = evt?.item?.dataset?.role;
+            // Ignore tray-gap drop for function items
+            if (draggedId && role !== 'function') {
                 this._applyTrayGapDrop(draggedId, trayGapDropMeta);
             }
             this._finishDragOperation();
             return;
         }
+
+        // Function area layout
+        const newFunctionLayout = [];
+        if (this._functionButtons) {
+            this._functionButtons.querySelectorAll('.nav-btn, .main-bar-slot').forEach(btn => {
+                if (btn.dataset.id) newFunctionLayout.push(btn.dataset.id);
+            });
+        }
+        this._functionButtonsLayout = newFunctionLayout;
 
         const newMainBarLayout = [];
         this._mainBar.querySelectorAll('.nav-btn, .main-bar-slot').forEach(btn => {
@@ -788,13 +910,17 @@ class NavibarComponent {
         });
         this._subGridLayout = newSubGridLayout;
 
-        // Safety: keep 'navibar-menu' in the main bar only
-        const menuIdxInSub = this._subGridLayout.indexOf('navibar-menu');
-        if (menuIdxInSub !== -1) {
-            this._subGridLayout.splice(menuIdxInSub, 1);
-            if (!this._mainBarLayout.includes('navibar-menu')) {
-                this._mainBarLayout.push('navibar-menu');
-            }
+        // Safety: keep function ids in function area only
+        const functionIds = ['navibar-menu', 'tool-slot-1', 'tool-slot-2'];
+        const normalizeOut = (arr) => arr.filter(id => !functionIds.includes(id));
+        const movedFromMain = this._mainBarLayout.filter(id => functionIds.includes(id));
+        const movedFromSub = this._subGridLayout.filter(id => functionIds.includes(id));
+        if (movedFromMain.length || movedFromSub.length) {
+            this._mainBarLayout = normalizeOut(this._mainBarLayout);
+            this._subGridLayout = normalizeOut(this._subGridLayout);
+            movedFromMain.concat(movedFromSub).forEach(id => {
+                if (!this._functionButtonsLayout.includes(id)) this._functionButtonsLayout.push(id);
+            });
         }
 
         this._finishDragOperation();
@@ -856,11 +982,18 @@ class NavibarComponent {
     _applyTrayGapDrop(buttonId, meta) {
         if (!meta) return;
 
-        const safeMeta = { ...meta };
-        if (safeMeta.target === 'sub' && buttonId === 'navibar-menu') {
-            safeMeta.target = 'main';
+        const functionIds = ['navibar-menu', 'tool-slot-1', 'tool-slot-2'];
+        // Route function ids back to function layout regardless of meta
+        if (functionIds.includes(buttonId)) {
+            this._functionButtonsLayout = this._functionButtonsLayout.filter(id => id !== buttonId);
+            const insertIndex = Math.min(Math.max((meta.index ?? this._functionButtonsLayout.length), 0), this._functionButtonsLayout.length);
+            this._functionButtonsLayout.splice(insertIndex, 0, buttonId);
+            this._render();
+            this._snapshotFunctionLayout('[applyTrayGapDrop:function]');
+            return;
         }
 
+        const safeMeta = { ...meta };
         this._mainBarLayout = this._mainBarLayout.filter(id => id !== buttonId);
         this._subGridLayout = this._subGridLayout.filter(id => id !== buttonId);
 
@@ -869,6 +1002,7 @@ class NavibarComponent {
         targetLayout.splice(insertIndex, 0, buttonId);
 
         this._render();
+        this._snapshotFunctionLayout('[applyTrayGapDrop]');
     }
 
     _distanceToRect(point, rect) {
@@ -929,24 +1063,29 @@ class NavibarComponent {
     }
 
     _render() {
+        if (this._functionButtons) this._functionButtons.innerHTML = '';
         this._mainBar.innerHTML = '';
         this._subGrid.innerHTML = '';
 
-        // Ensure 'navibar-menu' never persists in sub-grid from saved state
-        const _menuIdxPersist = this._subGridLayout.indexOf('navibar-menu');
-        if (_menuIdxPersist !== -1) {
-            this._subGridLayout.splice(_menuIdxPersist, 1);
-            if (!this._mainBarLayout.includes('navibar-menu')) {
-                this._mainBarLayout.push('navibar-menu');
-            }
-            this._saveState();
-        }
+        // Strip function ids from non-function layouts just in case
+        const functionIds = ['navibar-menu', 'tool-slot-1', 'tool-slot-2'];
+        this._mainBarLayout = this._mainBarLayout.filter(id => !functionIds.includes(id));
+        this._subGridLayout = this._subGridLayout.filter(id => !functionIds.includes(id));
 
         const activeTools = [...this._allToolButtons.values()]
             .filter(b => b.pluginId === this._activePluginId)
             .sort((a,b) => (a.order || 99) - (b.order || 99));
 
-        const renderButtonInLayout = (buttonId, container) => {
+        // Prevent unexpected function layout changes on render
+        if (!this._isDragActive && this._lastFunctionLayoutSnapshot.length === this._functionButtonsLayout.length) {
+            const mismatch = this._functionButtonsLayout.some((id, idx) => id !== this._lastFunctionLayoutSnapshot[idx]);
+            if (mismatch) {
+                this._log('[Render] Restore function layout from snapshot');
+                this._functionButtonsLayout = [...this._lastFunctionLayoutSnapshot];
+            }
+        }
+
+        const renderButtonInLayout = (buttonId, container, isFunctionArea = false) => {
             let config = null;
             let isToolPlaceholder = false;
 
@@ -955,7 +1094,6 @@ class NavibarComponent {
             } else if (this._allSpecialButtons.has(buttonId)) {
                 const specialBtnConfig = this._allSpecialButtons.get(buttonId);
                 config = { ...specialBtnConfig };
-                
                 if (config.type === 'tool_slot') {
                     const toolIndex = (config.id === 'tool-slot-1') ? 0 : 1;
                     if (activeTools[toolIndex]) {
@@ -971,6 +1109,7 @@ class NavibarComponent {
 
             const btn = this._createButton({ ...config, classList: isToolPlaceholder ? ['is-tool-placeholder'] : [] });
             btn.classList.add('main-bar-slot');
+            btn.dataset.role = isFunctionArea ? 'function' : 'main';
             const shouldAnimateMount = !this._prefersReducedMotion && !this._hasRenderedOnce;
             if (shouldAnimateMount) {
                 btn.classList.add('navibar-btn-enter');
@@ -994,11 +1133,28 @@ class NavibarComponent {
             }
         };
 
+        // Render function area (menu + tool slots)
+        if (this._functionButtons) {
+            this._functionButtonsLayout.forEach(id => renderButtonInLayout(id, this._functionButtons, true));
+        }
+        // Render main bar and sub grid
         this._mainBarLayout.forEach(id => renderButtonInLayout(id, this._mainBar));
         this._subGridLayout.forEach(id => renderButtonInLayout(id, this._subGrid));
         
         this._hasRenderedOnce = true;
         this._updateViewState();
+        this._log('[Render] functionLayout=' + JSON.stringify(this._functionButtonsLayout));
+    }
+
+    // --- Debug helpers ---
+    _snapshotFunctionLayout(tag = '') {
+        this._lastFunctionLayoutSnapshot = Array.isArray(this._functionButtonsLayout) ? [...this._functionButtonsLayout] : [];
+        this._log(`${tag} snapshot=` + JSON.stringify(this._lastFunctionLayoutSnapshot));
+    }
+
+    _log(msg) {
+        if (!this._debugEnabled) return;
+        try { console.debug(msg); } catch {}
     }
 }
 

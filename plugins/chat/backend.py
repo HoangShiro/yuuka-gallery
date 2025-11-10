@@ -1,4 +1,5 @@
-from . import routes, services
+from . import routes
+from .services import ChatOrchestrator
 
 
 class ChatPlugin:
@@ -8,7 +9,7 @@ class ChatPlugin:
 
     def __init__(self, core_api):
         self.core_api = core_api
-        self.orchestrator = services.ChatOrchestrator(core_api)
+        self.orchestrator = ChatOrchestrator(core_api)
         self.blueprint = routes.create_blueprint(self)
         print("[Plugin:Chat] Backend initialized.")
 

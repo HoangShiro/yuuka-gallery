@@ -4,6 +4,7 @@ import threading
 import time
 import json
 import websocket
+from datetime import datetime
 
 class GenerationService:
     """Yuuka: Service mới để quản lý tập trung quá trình tạo ảnh."""
@@ -13,6 +14,9 @@ class GenerationService:
         self.MAX_TASKS_PER_USER = 5
         self.user_states = {}
         self.user_locks = {}
+    # Console output coordination for dynamic progress
+        self.console_lock = threading.Lock()
+        self._last_console_len = 0
 
     def _get_user_lock(self, user_hash):
         return self.user_locks.setdefault(user_hash, threading.Lock())
@@ -87,6 +91,33 @@ class GenerationService:
                 "type": event_type, "data": data, "timestamp": time.time()
             })
 
+    # ---------- Console progress helpers ----------
+    def _render_generation_progress(self, user_tail: str, workflow_label: str, size_label: str, percent: int):
+        """Render a single-line dynamic progress bar using the unified format:
+        [DD/MM - HH:MM:SS] Art Generation: <user_tail> | <workflow_label> | <size_label> | <bar> <percent>%
+        """
+        try:
+            bar_len = 24
+            p = max(0, min(100, int(percent)))
+            filled = int(bar_len * p // 100)
+            bar = "█" * filled + "░" * (bar_len - filled)
+            dt_str = datetime.now().strftime('%d/%m - %H:%M:%S')
+            line = f"\r[{dt_str}] Art Generation: {user_tail} | {workflow_label} | {size_label} | [{bar}] {p:3d}%"
+            with self.console_lock:
+                print(line, end="", flush=True)
+                self._last_console_len = len(line)
+        except Exception:
+            pass
+
+    def _clear_progress_line(self):
+        try:
+            with self.console_lock:
+                if getattr(self, "_last_console_len", 0) > 0:
+                    print("\r" + " " * self._last_console_len + "\r", end="", flush=True)
+                self._last_console_len = 0
+        except Exception:
+            pass
+
     def _run_task(self, user_hash, task_id, character_hash, cfg_data):
         ws = None
         execution_successful = False
@@ -95,6 +126,16 @@ class GenerationService:
             client_id = str(uuid.uuid4())
             seed = uuid.uuid4().int % (10**15) if int(cfg_data.get("seed", 0)) == 0 else int(cfg_data.get("seed", 0))
             target_address = cfg_data.get('server_address', '127.0.0.1:8888')
+            # Pre-calc display fields for progress line
+            user_tail = user_hash[-4:]
+            workflow_label_display = (
+                cfg_data.get('workflow_template') or
+                cfg_data.get('workflow_type') or
+                cfg_data.get('_workflow_template') or 'workflow'
+            )
+            width_display = cfg_data.get('width') or cfg_data.get('img_width') or '?'
+            height_display = cfg_data.get('height') or cfg_data.get('img_height') or '?'
+            size_label_display = f"{width_display} x {height_display}"
             try:
                 original_lora_tags = list(cfg_data.get("lora_prompt_tags") or [])
             except Exception:
@@ -132,6 +173,8 @@ class GenerationService:
                         total_ahead = len(running_prompts) + queue_pos
                         with self._get_user_lock(user_hash):
                             self.user_states[user_hash]["tasks"][task_id]['progress_message'] = f"Trong hàng đợi ({total_ahead} trước)..."
+                        # Dynamic generation-style progress (0%) while in queue
+                        self._render_generation_progress(user_tail, workflow_label_display, size_label_display, 0)
                     except ValueError:
                         pass # Prompt có thể đã chuyển sang running giữa hai lần check
                     time.sleep(1)
@@ -165,11 +208,15 @@ class GenerationService:
                     if msg_data.get('prompt_id') == prompt_id:
                         if msg_type == 'execution_start':
                             task['progress_message'] = "Bắt đầu xử lý..."
+                            self._render_generation_progress(user_tail, workflow_label_display, size_label_display, 0)
                         elif msg_type == 'progress':
                             v, m = msg_data.get('value',0), msg_data.get('max',1)
                             p = int(v/m*100) if m>0 else 0
                             task['progress_percent'] = p; task['progress_message'] = f"Đang tạo... {p}%"
+                            self._render_generation_progress(user_tail, workflow_label_display, size_label_display, p)
                         elif msg_type in ('executing', 'execution_done', 'execution_end') and msg_data.get('node') is None:
+                            # move to 100% visually as execution ends
+                            self._render_generation_progress(user_tail, workflow_label_display, size_label_display, 100)
                             execution_successful = True
                             break
                         elif msg_type == 'execution_error': raise Exception(f"Node error: {msg_data.get('exception_message', 'Unknown')}")
@@ -200,6 +247,8 @@ class GenerationService:
                 time.sleep(1.0)
 
             if execution_successful and image_b64:
+                # Clear progress line before final output
+                self._clear_progress_line()
                 with self._get_user_lock(user_hash):
                     self.user_states[user_hash]["tasks"][task_id]['progress_message'] = "\u0110ang x\u1eed l\u00fd k\u1ebft qu\u1ea3..."
 
@@ -214,6 +263,26 @@ class GenerationService:
                 if not new_metadata:
                     raise Exception("L\u01b0u \u1ea3nh th\u1ea5t b\u1ea1i.")
 
+                # Yuuka: console notify when generation completes
+                try:
+                    dt_str = datetime.now().strftime('%d/%m - %H:%M:%S')
+                    # user_hash tail (last 4 chars or segments separated by '-')
+                    user_tail = user_hash[-4:]
+                    cfg_gc = new_metadata.get('generationConfig', {}) or {}
+                    workflow_label = (
+                        cfg_gc.get('workflow_template') or
+                        cfg_gc.get('workflow_type') or
+                        cfg_gc.get('_workflow_template') or 'workflow'
+                    )
+                    # image size: try width/height from config, else '?' placeholders
+                    width = cfg_gc.get('width') or cfg_gc.get('img_width') or '?'
+                    height = cfg_gc.get('height') or cfg_gc.get('img_height') or '?'
+                    size_label = f"{width} x {height}"
+                    GREEN = "\033[32m"; RESET = "\033[0m"
+                    print(f"{GREEN}[{dt_str}] Art Generation: {user_tail} | {workflow_label} | {size_label} | {round(creation_duration,2)}s{RESET}")
+                except Exception:
+                    pass
+
                 self._add_event(user_hash, "IMAGE_SAVED", {"task_id": task_id, "image_data": new_metadata, "context": task.get("context")})
             else:
                 if history_error and image_b64 is None:
@@ -223,14 +292,40 @@ class GenerationService:
                 raise Exception(f"Kh\u00f4ng t\u00ecm th\u1ea5y d\u1eef li\u1ec7u \u1ea3nh base64 trong node '{output_node_id}'")
 
         except InterruptedError as e:
+             self._clear_progress_line()
              print(f"✅ [GenService Task {task_id}] Cancelled gracefully for user {user_hash}.")
         except Exception as e:
-            print(f"💥 [GenService Task {task_id}] Failed for user {user_hash}: {e}")
+            self._clear_progress_line()
+            msg = str(e)
+            # Rút gọn thông báo khi không thể kết nối tới ComfyUI
+            if msg.startswith("COMFY_CONN_REFUSED:"):
+                try:
+                    _, address, _ = msg.split(":", 2)
+                except ValueError:
+                    address = cfg_data.get('server_address', '127.0.0.1:8888')
+                print(f"[ComfyUI] Không thể kết nối tới server {address} (WinError 10061).")
+            elif msg.startswith("COMFY_CONN_ERROR:"):
+                try:
+                    _, address, reason = msg.split(":", 2)
+                except ValueError:
+                    address, reason = cfg_data.get('server_address', '127.0.0.1:8888'), msg
+                print(f"[ComfyUI] Không thể kết nối tới server {address}. {reason}")
+            else:
+                print(f"💥 [GenService Task {task_id}] Failed for user {user_hash}: {e}")
             with self._get_user_lock(user_hash):
                 task = self.user_states[user_hash]["tasks"].get(task_id)
-                if task: task['error_message'] = f"Lỗi: {str(e)}"
+                if task:
+                    # Lưu thông điệp lỗi gọn
+                    if msg.startswith("COMFY_CONN_REFUSED:"):
+                        task['error_message'] = f"Lỗi: Không thể kết nối tới ComfyUI tại {cfg_data.get('server_address', '127.0.0.1:8888')} (10061)"
+                    elif msg.startswith("COMFY_CONN_ERROR:"):
+                        task['error_message'] = f"Lỗi: Không thể kết nối tới ComfyUI tại {cfg_data.get('server_address', '127.0.0.1:8888')}"
+                    else:
+                        task['error_message'] = f"Lỗi: {str(e)}"
         finally:
             if ws: ws.close()
             with self._get_user_lock(user_hash):
                 task = self.user_states[user_hash]["tasks"].get(task_id)
                 if task: task['is_running'] = False
+            # Ensure any lingering progress line is cleared
+            self._clear_progress_line()

@@ -10,4 +10,5 @@
     namespace.stores = namespace.stores || {};
     namespace.components = namespace.components || {};
     namespace.modals = namespace.modals || {};
+    namespace.controllers = namespace.controllers || {};
 })(window);

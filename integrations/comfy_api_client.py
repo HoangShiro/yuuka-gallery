@@ -18,8 +18,17 @@ def get_all_nodes_info_sync(server_address: str) -> Optional[Dict[str, Any]]:
             else:
                 print(f"[API Client] Lỗi khi lấy object_info: Status {response.status}")
                 return None
-    except Exception as e:
-        print(f"[API Client] Lỗi nghiêm trọng khi lấy toàn bộ object_info: {e}")
+    except urllib.error.URLError as e:
+        reason = getattr(e, 'reason', e)
+        reason_str = str(reason)
+        if '10061' in reason_str:
+            print(f"[ComfyUI] Không thể kết nối tới server {server_address} (WinError 10061).")
+        else:
+            print(f"[ComfyUI] Không thể kết nối tới server {server_address}. {reason_str}")
+        return None
+    except Exception:
+        # Giữ thông báo ngắn gọn cho các lỗi khác
+        print(f"[ComfyUI] Không thể lấy object_info từ {server_address}.")
         return None
 
 def _extract_choices_from_info(
@@ -50,11 +59,10 @@ def get_full_object_info(server_address: str) -> Dict[str, List[str]]:
     Lấy tất cả các danh sách lựa chọn cần thiết (LoRA, checkpoints, samplers, etc.)
     từ ComfyUI API để điền vào các dropdown trong giao diện.
     """
-    print("[API Client] Đang lấy thông tin các lựa chọn từ ComfyUI (single call)...")
     all_nodes_info = get_all_nodes_info_sync(server_address)
 
     if not all_nodes_info:
-        print("[API Client] Không thể lấy thông tin từ ComfyUI. Trả về danh sách trống.")
+        # Trả về danh sách trống mà không in thêm log để tránh trùng lặp thông báo.
         return {
             "loras": [], "checkpoints": [], "samplers": [], "schedulers": []
         }
@@ -71,7 +79,7 @@ def get_full_object_info(server_address: str) -> Dict[str, List[str]]:
     # Loại bỏ các giá trị không hợp lệ nếu có
     info["checkpoints"] = [name for name in info["checkpoints"] if name != "None"]
     
-    print(f"[API Client] Lấy thông tin thành công: {len(info['loras'])} LoRAs, {len(info['checkpoints'])} Checkpoints...")
+    #print(f"[API Client] Lấy thông tin thành công: {len(info['loras'])} LoRAs, {len(info['checkpoints'])} Checkpoints...")
     return info
 
 def queue_prompt(prompt_workflow: dict, client_id: str, server_address: str) -> dict:
@@ -92,7 +100,12 @@ def queue_prompt(prompt_workflow: dict, client_id: str, server_address: str) -> 
             error_msg += f" Details: {error_body[:500]}"
             raise ConnectionError(error_msg) from e
     except urllib.error.URLError as e:
-        raise ConnectionError(f"Could not connect to ComfyUI API at {server_address} to queue prompt. ({e.reason})") from e
+        # Rút gọn thông báo lỗi khi không kết nối được
+        reason = getattr(e, 'reason', e)
+        reason_str = str(reason)
+        if '10061' in reason_str:
+            raise ConnectionError(f"COMFY_CONN_REFUSED:{server_address}:WinError 10061") from e
+        raise ConnectionError(f"COMFY_CONN_ERROR:{server_address}:{reason_str}") from e
     except json.JSONDecodeError as e:
         raise ValueError("Invalid JSON response from ComfyUI API during queueing.") from e
 

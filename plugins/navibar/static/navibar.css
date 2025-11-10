@@ -1,43 +1,61 @@
 /* --- MODIFIED FILE: plugins/navibar/static/navibar.css --- */
+/* Reserve space for scrollbars to avoid layout shift when they appear/disappear */
+html { 
+    scrollbar-gutter: stable both-edges; 
+}
+
 #main-nav { 
     position: fixed; 
-    bottom: var(--spacing-3); 
-    left: 50%;
-    transform: translateX(-50%);
-    width: auto;
-    max-width: 90vw;
+    /* Span the visual viewport width so page scrollbars don't shift centering */
+    left: 0;
+    right: 0;
+    bottom: var(--spacing-3);
+    transform: none;
+    width: 100%;
+    max-width: none;
     z-index: 1600;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: var(--spacing-2);
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 #navibar-search-bar {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    width: 100%;
-    max-width: 380px;
+    /* Collapsed by default like dock */
+    width: 0;
+    max-width: 0;
     padding: 0;
     box-sizing: border-box;
-    margin: 0 auto;
+    margin: 0;
     overflow: hidden;
+    gap: 0;
     max-height: 0;
     opacity: 0;
     transform: translateY(16px);
     pointer-events: none;
-    transition: max-height 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), opacity 0.24s ease, transform 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), padding 0.28s ease;
+    transition: max-height 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), opacity 0.24s ease, transform 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), padding 0.28s ease, max-width 0.32s cubic-bezier(0.21, 0.8, 0.35, 1);
 }
 
 #navibar-search-bar .navibar-search-wrapper {
-    display: flex;
+    /* Composer-like layout for search bar, mirroring dock composer */
+    display: grid;
+    grid-template-columns: auto 1fr auto;
     align-items: center;
-    gap: var(--spacing-2);
+    gap: var(--spacing-1);
     width: 100%;
     opacity: 0;
     transform: translateY(10px);
     transition: opacity 0.24s ease, transform 0.32s cubic-bezier(0.21, 0.8, 0.35, 1);
+    border-radius: var(--rounded-lg);
+    background: none;
+    border: none;
+    box-shadow: none;
 }
 
 #navibar-tray.is-search-active #navibar-search-bar .navibar-search-wrapper {
@@ -49,33 +67,53 @@
 #navibar-search-bar .navibar-search-form {
     flex: 1;
     width: 100%;
+    min-height: 24px;
+    max-height: 190px;
+    border: none;
+    background: transparent;
+    resize: none;
+    color: var(--color-primary-text);
+    font-size: 15px;
+    line-height: 1.4;
+    font-family: inherit;
+    outline: none;
+    padding: 0;
 }
 
 #navibar-dock {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    width: 100%;
-    max-width: clamp(380px, 75vw, 1024px);
-    padding: var(--spacing-1);
-    margin: 0 auto;
+    /* When inactive, dock should not affect tray's size */
+    width: 0;
+    max-width: 0;
+    padding: 0;
+    margin: 0;
     box-sizing: border-box;
-    gap: var(--spacing-2);
+    gap: 0;
     max-height: 0;
     opacity: 0;
     transform: translateY(16px);
     pointer-events: none;
+    overflow: hidden;
     transition: max-height 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), opacity 0.24s ease, transform 0.32s cubic-bezier(0.21, 0.8, 0.35, 1), padding 0.28s ease, max-width 0.32s cubic-bezier(0.21, 0.8, 0.35, 1);
 }
 
 #navibar-search-bar .navibar-search-return {
-    width: 52px;
-    height: 52px;
+    width: 36px;
+    height: 36px;
     flex-shrink: 0;
 }
 
 #navibar-search-bar .navibar-search-return .material-symbols-outlined {
     font-size: 28px;
+}
+
+#navibar-search-bar .navibar-search-form::placeholder {
+    color: rgba(0, 0, 0, 0.45);
+}
+html.dark-mode #navibar-search-bar .navibar-search-form::placeholder {
+    color: rgba(255, 255, 255, 0.45);
 }
 
 #navibar-tray {
@@ -90,6 +128,23 @@
     border-radius: var(--rounded-lg);
     gap: 0;
     transition: border-radius 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.28s ease, gap 0.24s ease;
+}
+
+/* Global scroll lock when dragging on touch devices */
+html.yuuka-navibar--scroll-lock,
+body.yuuka-navibar--scroll-lock {
+    overflow: hidden !important;
+    touch-action: none !important;
+    overscroll-behavior: none !important;
+}
+
+/* On touch devices, disable page scrolling gestures when starting on navibar interactive areas */
+#navibar-tray.is-touch #navibar-main-bar,
+#navibar-tray.is-touch #navibar-sub-grid,
+#navibar-tray.is-touch .navibar-function-buttons,
+#navibar-tray.is-touch .navibar-main-buttons {
+    touch-action: none;
+    -ms-touch-action: none;
 }
 
 #navibar-main-view {
@@ -122,10 +177,15 @@
 
 #navibar-tray.is-search-active #navibar-search-bar {
     padding: var(--spacing-2);
-    max-height: 220px;
+    max-height: 360px; /* match dock */
     opacity: 1;
     transform: translateY(0);
     pointer-events: auto;
+    width: 100%;
+    /* Use container-relative sizing to avoid vw jitter with scrollbars */
+    max-width: min(1024px, calc(100% - var(--spacing-2) * 2));
+    margin: 0 auto;
+    gap: var(--spacing-2);
 }
 
 #navibar-tray.is-dock-active #navibar-dock {
@@ -135,6 +195,10 @@
     transform: translateY(0);
     pointer-events: auto;
     width: 100%;
+    /* Use container-relative sizing to avoid vw jitter with scrollbars */
+    max-width: min(1024px, calc(100% - var(--spacing-2) * 2));
+    margin: 0 auto;
+    gap: var(--spacing-2);
 }
 
 html.dark-mode #navibar-tray {
@@ -147,10 +211,55 @@ html.dark-mode #navibar-tray {
     gap: var(--spacing-2);
     width: auto;
     padding: var(--spacing-2);
+    align-items: stretch;
 }
+
+/* Function buttons container: holds menu + tool slots + tools, visually grouped */
+.navibar-function-buttons {
+    display: flex;
+    gap: var(--spacing-1);
+    padding: 0;
+    border-radius: var(--rounded-lg);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    background: rgba(0,0,0,0.05);
+    border: none;
+    margin-left: auto; /* push to the right */
+    order: 2; /* appear after main buttons */
+    align-items: center;
+}
+html.dark-mode .navibar-function-buttons {
+    background: rgba(255,255,255,0.05);
+    border: none;
+}
+
+/* Ensure function area buttons use same corner radius as main bar for hover/active highlight */
+.navibar-function-buttons .nav-btn,
+.navibar-function-buttons .main-bar-slot {
+    border-radius: var(--rounded-lg);
+    -webkit-user-select: none;
+    user-select: none;
+}
+.navibar-function-buttons .nav-btn.active {
+    border-radius: var(--rounded-lg);
+}
+
+.navibar-main-buttons {
+    display: flex;
+    gap: var(--spacing-2);
+    order: 1;
+}
+
+.navibar-function-buttons .nav-btn, .navibar-function-buttons .main-bar-slot {
+    width: 44px;
+    height: 44px;
+}
+
 #navibar-main-bar .nav-btn, #navibar-main-bar .main-bar-slot {
     width: 52px; 
     height: 52px; 
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 
@@ -306,6 +415,9 @@ html.dark-mode .navibar-composer__input::placeholder {
     transition: all 0.2s ease;
     padding: 0;
     flex-shrink: 0;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: manipulation;
 }
 
 .nav-btn.navibar-btn-enter {
@@ -466,12 +578,28 @@ html.dark-mode .nav-btn.is-tool-placeholder {
     #navibar-main-bar {
         justify-content: space-around;
         padding: var(--spacing-1);
+        flex-wrap: wrap;
+        gap: var(--spacing-1);
+    }
+
+    .navibar-function-buttons {
+        order: 2;
+        margin-left: auto;
+    }
+    .navibar-main-buttons {
+        order: 1;
+        flex-wrap: wrap;
+        gap: var(--spacing-1);
     }
     
     #navibar-sub-grid {
         max-width: 100%;
     }
     
+    .navibar-function-buttons .nav-btn, .navibar-function-buttons .main-bar-slot {
+        width: 40px;
+        height: 40px;
+    }
     #navibar-main-bar .nav-btn, #navibar-main-bar .main-bar-slot {
         width: 44px;
         height: 44px;
@@ -490,6 +618,12 @@ html.dark-mode .nav-btn.is-tool-placeholder {
     .nav-btn--minimal {
         width: 40px;
         height: 40px;
+    }
+
+    /* Force initial composer input height to a single row on mobile */
+    .navibar-composer__input {
+        height: 24px; /* one line */
+        overflow: auto; /* allow scrolling when content exceeds one line */
     }
 }
 
