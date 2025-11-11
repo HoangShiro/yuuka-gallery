@@ -16,6 +16,8 @@ class LoraDownloaderService {
             tasks: [],
             models: [],
             defaultServer: '',
+            searchQuery: '',
+            remoteResults: [],
         };
         this._userPrefKey = null;
         this._knownStoredTaskIds = new Set();
@@ -38,13 +40,20 @@ class LoraDownloaderService {
         this.isOpen = true;
         this._buildOverlay();
         await this._loadInitialData();
-        this._startPolling();
+        // Evaluate whether we should start polling based on current tasks
+        this._evaluatePolling();
     }
 
     close() {
         if (!this.isOpen) return;
         this.isOpen = false;
         this._stopPolling();
+        if (this._searchDebounceTimer) {
+            clearTimeout(this._searchDebounceTimer);
+            this._searchDebounceTimer = null;
+        }
+        this.state.searchQuery = '';
+        this.state.remoteResults = [];
         if (this.overlay) {
             this.overlay.removeEventListener('click', this.handleBackdropClick);
             this.overlay.remove();
@@ -91,7 +100,7 @@ class LoraDownloaderService {
                                 <div class="lora-downloader-form-row lora-downloader-form-row--primary">
                                     <label class="lora-form-field lora-form-field--url">
                                         <span>URL Civitai</span>
-                                        <input type="text" name="civitai_url" placeholder="https://civitai.com/models/... hoặc dán danh sách ID" required>
+                                        <input type="text" name="civitai_url" placeholder="Dán URL/ID để tải, hoặc nhập tên để tìm" required>
                                     </label>
                                     <div class="lora-downloader-form-actions">
                                         <button type="submit" class="lora-form-action lora-form-action--download" title="Tải LoRA" aria-label="Tải LoRA">
@@ -123,7 +132,7 @@ class LoraDownloaderService {
                     <section class="lora-downloader-section lora-downloader-activity-section">
                         <header class="lora-downloader-subheader">
                             <div>
-                                <h3>Danh sách LoRA</h3>
+                                <h3 class="lora-list-title">Danh sách LoRA</h3>
                                 <p>Theo dõi tiến trình tải và các LoRA đã lưu.</p>
                             </div>
                             <div class="lora-downloader-subheader-actions">
@@ -149,6 +158,8 @@ class LoraDownloaderService {
         this.serverInput = overlay.querySelector('input[name="server_address"]');
         this.urlInput = overlay.querySelector('input[name="civitai_url"]');
         this.apiKeyInput = overlay.querySelector('input[name="api_key"]');
+        this._searchDebounceTimer = null;
+        this._latestSearchToken = 0;
 
         const closeBtn = overlay.querySelector('.lora-downloader-close');
         if (closeBtn) {
@@ -185,7 +196,8 @@ class LoraDownloaderService {
                 toggleBtn.setAttribute('title', label);
                 toggleBtn.setAttribute('aria-label', label);
             };
-            updateToggleState(false);
+            // Default to collapsed state on open
+            updateToggleState(true);
             toggleBtn.addEventListener('click', (event) => {
                 event.preventDefault();
                 const collapsed = !formCard.classList.contains('is-collapsed');
@@ -212,6 +224,11 @@ class LoraDownloaderService {
                 event.preventDefault();
                 this._submitDownloadForm();
             });
+        }
+
+        if (this.urlInput) {
+            // Unified input: search when keyword-like, skip when download-like
+            this.urlInput.addEventListener('input', () => this._handleUnifiedInput());
         }
 
         this._userPrefKey = this._resolveUserPrefKey();
@@ -354,6 +371,22 @@ class LoraDownloaderService {
             return;
         }
 
+        // Guard: if input looks like a search keyword (not URL/ID), prevent accidental downloads
+        if (!this._isDownloadLikeInput(civitaiInput)) {
+            this.state.searchQuery = civitaiInput;
+            await (async () => {
+                // kick off a remote search immediately for better UX
+                const token = ++this._latestSearchToken;
+                const remote = await this._performRemoteSearch(civitaiInput);
+                if (token === this._latestSearchToken) {
+                    this.state.remoteResults = remote;
+                }
+                this._renderActivity();
+            })();
+            showError('Chuỗi nhập giống tìm kiếm. Hãy nhập URL hoặc ID (có thể nhiều) để tải.');
+            return;
+        }
+
         const civitaiTargets = this._parseCivitaiInput(civitaiInput);
         if (!civitaiTargets.length) {
             showError('Định dạng URL/ID Civitai không hợp lệ.');
@@ -389,6 +422,10 @@ class LoraDownloaderService {
 
             this._persistFormState();
             this.urlInput.select();
+            // If we just enqueued tasks, begin polling immediately
+            if (successCount > 0) {
+                this._startPolling();
+            }
             await this.refreshTasks(true);
         } catch (err) {
             showError(`Lỗi tải LoRA: ${err.message}`);
@@ -396,6 +433,22 @@ class LoraDownloaderService {
             this.submitButton.disabled = false;
             this.submitButton.classList.remove('is-loading');
         }
+    }
+    
+    // Decide when input should be treated as a direct download (URL or list of numeric IDs)
+    _isDownloadLikeInput(rawInput) {
+        const s = (rawInput || '').trim();
+        if (!s) return false;
+        // Any URL anywhere implies download-like
+        if (/https?:\/\//i.test(s)) return true;
+        const tokens = s.split(/[\s,;]+/).map(t => t.trim()).filter(Boolean);
+        if (!tokens.length) return false;
+        // All tokens must be numeric IDs to qualify
+        const allNumeric = tokens.every(t => /^\d+$/.test(t));
+        if (allNumeric) return true;
+        // Mixed tokens: if any token is non-numeric and not a URL, treat as search-like
+        // This avoids turning arbitrary words into civitai URLs
+        return false;
     }
     _resolveUserPrefKey() {
         try {
@@ -553,6 +606,9 @@ class LoraDownloaderService {
             this.state.defaultServer = response.default_server_address || this.state.defaultServer;
             this._renderActivity();
 
+            // Start or stop polling depending on whether there are active tasks
+            this._evaluatePolling();
+
             if (hasNewStored) {
                 await this.refreshModelData(false);
             }
@@ -601,6 +657,34 @@ class LoraDownloaderService {
     }
 
     // ---------------------------------------------------------------------
+    // Polling control helpers
+    // ---------------------------------------------------------------------
+
+    _hasActiveTasks() {
+        try {
+            const tasks = Array.isArray(this.state.tasks) ? this.state.tasks : [];
+            return tasks.some(t => t && ['queued', 'running'].includes(t.status));
+        } catch {
+            return false;
+        }
+    }
+
+    _evaluatePolling() {
+        // Only poll while the panel is open and there are active tasks
+        if (!this.isOpen) {
+            this._stopPolling();
+            return;
+        }
+        if (this._hasActiveTasks()) {
+            if (!this.taskPollTimer) {
+                this._startPolling();
+            }
+        } else {
+            this._stopPolling();
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Rendering helpers
     // ---------------------------------------------------------------------
 
@@ -610,41 +694,75 @@ class LoraDownloaderService {
         const tasks = Array.isArray(this.state.tasks) ? this.state.tasks.filter(Boolean) : [];
         const models = Array.isArray(this.state.models) ? this.state.models.filter(Boolean) : [];
 
-        const hasTasks = tasks.length > 0;
-        const hasModels = models.length > 0;
+    const query = (this.state.searchQuery || '').trim();
+    const isSearching = query.length > 0 && !this._isDownloadLikeInput(query);
+    const filteredModels = isSearching ? models.filter((m) => this._matchesQuery(m, query)) : models;
+    const remote = Array.isArray(this.state.remoteResults) ? this.state.remoteResults : [];
+
+    const hasTasks = !isSearching && tasks.length > 0;
+    const hasModels = filteredModels.length > 0 || (isSearching && remote.length > 0);
 
         this.activityContainer.classList.toggle('has-models', hasModels);
         this.activityContainer.classList.toggle('has-tasks', hasTasks);
 
-        if (!hasTasks && !hasModels) {
+        if (!hasTasks && !hasModels && (!isSearching || !(this.state.remoteResults && this.state.remoteResults.length))) {
             this.activityContainer.innerHTML = `<div class="lora-downloader-empty">Chưa có LoRA nào được tải hoặc lưu.</div>`;
+            this._updateTitleCount(isSearching, 0, models.length);
             return;
         }
 
-        const entries = [
-            ...tasks.map((task) => ({
-                type: 'task',
-                updated: task.updated_at || task.created_at || 0,
-                payload: task,
-            })),
-            ...models.map((model) => ({
-                type: 'model',
-                updated: model.updated_at || 0,
-                payload: model,
-            })),
-        ].sort((a, b) => (b.updated || 0) - (a.updated || 0));
+        let entries = [];
+        if (isSearching) {
+            entries = [
+                ...filteredModels.map((model) => ({ type: 'model', updated: model.updated_at || 0, payload: model })),
+            ];
+            entries.push(...remote.slice(0, 9).map((rm) => ({ type: 'remote', updated: 0, payload: rm })));
+        } else {
+            entries = [
+                ...tasks.map((task) => ({
+                    type: 'task',
+                    updated: task.updated_at || task.created_at || 0,
+                    payload: task,
+                })),
+                ...models.map((model) => ({
+                    type: 'model',
+                    updated: model.updated_at || 0,
+                    payload: model,
+                })),
+            ].sort((a, b) => (b.updated || 0) - (a.updated || 0));
+        }
 
         const fragment = document.createDocumentFragment();
         entries.forEach((entry) => {
             if (entry.type === 'task') {
                 fragment.appendChild(this._createTaskEntry(entry.payload));
-            } else {
+            } else if (entry.type === 'model') {
                 fragment.appendChild(this._createModelEntry(entry.payload));
+            } else if (entry.type === 'remote') {
+                fragment.appendChild(this._createRemoteModelEntry(entry.payload));
             }
         });
 
         this.activityContainer.innerHTML = '';
         this.activityContainer.appendChild(fragment);
+
+        // Update title counts
+        const displayedRemoteCount = isSearching ? Math.min(remote.length, 9) : 0;
+        const displayedLocalCount = isSearching ? filteredModels.length : models.length;
+        const totalDisplayed = isSearching ? (displayedLocalCount + displayedRemoteCount) : displayedLocalCount;
+        this._updateTitleCount(isSearching, totalDisplayed, models.length);
+    }
+
+    _updateTitleCount(isSearching, displayed, totalDownloaded) {
+        try {
+            const titleEl = this.overlay?.querySelector('.lora-list-title');
+            if (!titleEl) return;
+            if (isSearching) {
+                titleEl.textContent = `Danh sách LoRA (${displayed})`;
+            } else {
+                titleEl.textContent = `Danh sách LoRA (${totalDownloaded})`;
+            }
+        } catch {}
     }
 
     _createTaskEntry(task) {
@@ -856,6 +974,204 @@ class LoraDownloaderService {
         }
 
         return item;
+    }
+
+    _createRemoteModelEntry(remote) {
+        const url = remote?.civitai_url || '';
+        const thumb = remote?.thumbnail || '';
+        const name = remote?.name || '(Không tên)';
+        const id = remote?.id != null ? String(remote.id) : '';
+        const baseModel = (remote?.base_model || '').trim();
+
+        const item = document.createElement('article');
+        item.className = 'lora-entry lora-entry--model lora-entry--remote';
+        item.innerHTML = `
+            <div class="lora-model-row">
+                <div class="lora-model-main">
+                    <div class="lora-model-thumb-wrapper">
+                        ${thumb ? `<img class="lora-model-thumb lora-model-preview-trigger" src="${this._escapeAttr(thumb)}" alt="${this._escapeAttr(name)}" loading="lazy">` : `
+                        <div class="lora-model-thumb-placeholder lora-model-preview-trigger">
+                            <span class="material-symbols-outlined">image</span>
+                        </div>`}
+                        ${baseModel ? `<span class="lora-model-base-mobile">${this._escapeHtml(baseModel)}</span>` : ''}
+                    </div>
+                    <div class="lora-model-text">
+                        <strong class="lora-model-preview-trigger" title="${this._escapeAttr(name)}">${this._escapeHtml(name)}</strong>
+                        <span class="lora-model-updated-inline">Civitai ID: ${this._escapeHtml(id)}</span>
+                    </div>
+                </div>
+                <div class="lora-model-controls">
+                    ${baseModel ? `<span class="lora-model-base">${this._escapeHtml(baseModel)}</span>` : ''}
+                    <div class="lora-model-actions">
+                        ${url ? `<button type="button" class="lora-model-action lora-model-action--download" data-url="${this._escapeAttr(url)}" title="Tải LoRA" aria-label="Tải LoRA">
+                            <span class="material-symbols-outlined">cloud_download</span>
+                        </button>` : ''}
+                        ${url ? `<a class="lora-model-action" href="${this._escapeAttr(url)}" target="_blank" rel="noopener" title="Mở trên Civitai" aria-label="Mở trên Civitai">
+                            <span class="material-symbols-outlined">link</span>
+                        </a>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const dlBtn = item.querySelector('.lora-model-action--download');
+        if (dlBtn && url) {
+            dlBtn.addEventListener('click', async () => {
+                dlBtn.disabled = true;
+                dlBtn.classList.add('is-busy');
+                try {
+                    // Reset search immediately so list returns to default view
+                    this._resetSearch();
+                    await this._enqueueSingleDownload(url);
+                } finally {
+                    dlBtn.disabled = false;
+                    dlBtn.classList.remove('is-busy');
+                }
+            });
+        }
+
+        // Preview support for remote items using images in model_data.modelVersions[0]
+        const previewTargets = item.querySelectorAll('.lora-model-preview-trigger');
+        if (previewTargets.length && remote?.model_data?.modelVersions) {
+            const handlePreview = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const images = [];
+                try {
+                    const versions = remote.model_data.modelVersions;
+                    if (Array.isArray(versions)) {
+                        versions.forEach(v => {
+                            if (Array.isArray(v.images)) {
+                                v.images.forEach(img => {
+                                    const urlCandidate = img?.url || img?.imageUrl;
+                                    if (typeof urlCandidate === 'string' && urlCandidate.trim()) {
+                                        images.push({ imageUrl: urlCandidate.trim(), title: remote?.name || 'Preview' });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                } catch {}
+                if (!images.length) {
+                    showError('Remote LoRA không có ảnh preview.');
+                    return;
+                }
+                const viewer = window?.Yuuka?.plugins?.simpleViewer;
+                if (!viewer || typeof viewer.open !== 'function') {
+                    showError('Simple viewer chưa sẵn sàng.');
+                    return;
+                }
+                viewer.open({ items: images, startIndex: 0 });
+            };
+            previewTargets.forEach(el => el.addEventListener('click', handlePreview));
+        }
+
+        return item;
+    }
+
+    async _enqueueSingleDownload(url) {
+        if (!url) return;
+        if (!this.serverInput || !this.urlInput) return;
+        const prev = this.urlInput.value;
+        try {
+            this.urlInput.value = url;
+            await this._submitDownloadForm();
+        } finally {
+            this.urlInput.value = prev;
+        }
+    }
+
+    _resetSearch() {
+        if (this._searchDebounceTimer) {
+            clearTimeout(this._searchDebounceTimer);
+            this._searchDebounceTimer = null;
+        }
+        this._latestSearchToken = (this._latestSearchToken || 0) + 1;
+        this.state.searchQuery = '';
+        this.state.remoteResults = [];
+        // Do not clear urlInput content automatically; user may be preparing batch download
+        this._renderActivity();
+    }
+
+    _matchesQuery(model, query) {
+        const q = (query || '').trim().toLowerCase();
+        if (!q) return true;
+        const name = (model?.name || model?.filename || '').toLowerCase();
+        if (name.includes(q)) return true;
+        const id = (this._extractLoraId(model) || '').toLowerCase();
+        if (id && id.includes(q)) return true;
+        try {
+            const tags = this._extractModelTags(model) || [];
+            if (tags.some(t => (t || '').toLowerCase().includes(q))) return true;
+        } catch {}
+        return false;
+    }
+
+    _handleUnifiedInput() {
+        const raw = (this.urlInput?.value || '').trim();
+        if (!raw) {
+            this._resetSearch();
+            return;
+        }
+        // If input is download-like, suppress search mode & clear previous search results
+        if (this._isDownloadLikeInput(raw)) {
+            if (this.state.searchQuery || this.state.remoteResults.length) {
+                this._resetSearch();
+            }
+            return; // leave value for download submit
+        }
+        // Otherwise treat as search query
+        this.state.searchQuery = raw;
+        this._renderActivity(); // immediate local filter
+        if (this._searchDebounceTimer) clearTimeout(this._searchDebounceTimer);
+        const token = ++this._latestSearchToken;
+        this._searchDebounceTimer = setTimeout(async () => {
+            const remote = await this._performRemoteSearch(raw);
+            if (token !== this._latestSearchToken) return;
+            this.state.remoteResults = remote;
+            this._renderActivity();
+        }, 300);
+    }
+
+    async _performRemoteSearch(query) {
+        try {
+            const searchApi = (typeof window !== 'undefined' && window.Yuuka && window.Yuuka.loraSearch && window.Yuuka.loraSearch.searchModelsRaw)
+                ? window.Yuuka.loraSearch.searchModelsRaw
+                : null;
+            let items = [];
+            if (searchApi) {
+                items = await searchApi(query, 'LORA');
+            } else {
+                const url = new URL('https://civitai.com/api/v1/models');
+                url.searchParams.append('query', query);
+                url.searchParams.append('types', 'LORA');
+                const res = await fetch(url.toString());
+                if (res.ok) {
+                    const data = await res.json();
+                    items = Array.isArray(data?.items) ? data.items : [];
+                }
+            }
+            const knownIds = new Set(
+                (Array.isArray(this.state.models) ? this.state.models : [])
+                    .map((m) => this._extractLoraId(m))
+                    .filter(Boolean)
+                    .map(String)
+            );
+            const remotes = items
+                .filter(it => it && !knownIds.has(String(it.id)))
+                .map(it => ({
+                    id: it.id,
+                    name: it.name,
+                    civitai_url: `https://civitai.com/models/${encodeURIComponent(it.id)}`,
+                    thumbnail: (it.modelVersions && it.modelVersions[0] && it.modelVersions[0].images && it.modelVersions[0].images[0]) ? it.modelVersions[0].images[0].url : '',
+                    base_model: (it.modelVersions && it.modelVersions[0] && (it.modelVersions[0].baseModel || it.modelVersions[0].base_model)) ? (it.modelVersions[0].baseModel || it.modelVersions[0].base_model) : '',
+                    model_data: it, // attach full item as model_data-like for preview consumption
+                }));
+            return remotes;
+        } catch (err) {
+            console.warn('Remote search failed:', err);
+            return [];
+        }
     }
 
     _formatStatus(status) {
@@ -1342,6 +1658,8 @@ class LoraDownloaderService {
         try {
             await this.api['lora-downloader'].post('/download', payload);
             showError('Đã gửi yêu cầu tải lại LoRA.');
+            // Ensure polling resumes to track the redownload task
+            this._startPolling();
             await this.refreshTasks(false);
         } catch (err) {
             console.error('[LoraDownloader] Redownload failed:', err);

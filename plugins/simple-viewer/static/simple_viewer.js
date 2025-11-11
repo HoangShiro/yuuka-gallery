@@ -108,13 +108,44 @@ window.Yuuka.plugins.simpleViewer = (() => {
      * @returns {Promise<void>}
      */
     function waitForImageElement(imgElement) {
+        // If image has already finished loading successfully
         if (imgElement.complete && imgElement.naturalWidth !== 0) {
             return Promise.resolve();
         }
+        // If image has already finished with an error (race condition)
+        if (imgElement.complete && imgElement.naturalWidth === 0) {
+            return Promise.reject(new Error('Image failed to load'));
+        }
 
         return new Promise((resolve, reject) => {
-            imgElement.addEventListener('load', resolve, { once: true });
-            imgElement.addEventListener('error', reject, { once: true });
+            const onLoad = () => {
+                cleanup();
+                resolve();
+            };
+            const onError = () => {
+                cleanup();
+                reject(new Error('Image failed to load'));
+            };
+            const cleanup = () => {
+                imgElement.removeEventListener('load', onLoad);
+                imgElement.removeEventListener('error', onError);
+            };
+
+            imgElement.addEventListener('load', onLoad, { once: true });
+            imgElement.addEventListener('error', onError, { once: true });
+
+            // Handle the case where the image finishes loading/errored
+            // between the initial checks above and the listeners attaching.
+            if (imgElement.complete) {
+                // Microtask to allow layout to update the intrinsic size
+                Promise.resolve().then(() => {
+                    if (imgElement.naturalWidth !== 0) {
+                        onLoad();
+                    } else {
+                        onError();
+                    }
+                });
+            }
         });
     }
 

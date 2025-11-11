@@ -235,6 +235,8 @@
     gap: var(--spacing-2);
 }
 
+/* removed: legacy search field styles (.lora-downloader-subheader-search, .lora-search-input) */
+
 .lora-downloader-subheader h3 {
     margin: 0;
     font-size: 1.1rem;
@@ -717,6 +719,8 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: var(--spacing-3);
     }
+
+    /* removed: legacy search field layout override */
 
     .lora-model-row {
         flex-direction: column;
