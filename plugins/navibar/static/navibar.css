@@ -45,7 +45,7 @@ html {
 #navibar-search-bar .navibar-search-wrapper {
     /* Composer-like layout for search bar, mirroring dock composer */
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: 1fr auto;
     align-items: center;
     gap: var(--spacing-1);
     width: 100%;
@@ -56,6 +56,13 @@ html {
     background: none;
     border: none;
     box-shadow: none;
+}
+
+/* Container that groups both search buttons (return + submit) */
+#navibar-search-bar .navibar-search-buttons {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
 }
 
 #navibar-tray.is-search-active #navibar-search-bar .navibar-search-wrapper {
@@ -109,11 +116,28 @@ html {
     font-size: 28px;
 }
 
+#navibar-search-bar .navibar-search-submit {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+}
+
+#navibar-search-bar .navibar-search-submit .material-symbols-outlined {
+    font-size: 22px;
+}
+
 #navibar-search-bar .navibar-search-form::placeholder {
     color: rgba(0, 0, 0, 0.45);
 }
 html.dark-mode #navibar-search-bar .navibar-search-form::placeholder {
     color: rgba(255, 255, 255, 0.45);
+}
+
+/* Hide any submit controls when the form is shown inside navibar */
+#navibar-search-bar .navibar-search-form button[type="submit"],
+#navibar-search-bar .navibar-search-form input[type="submit"],
+#navibar-search-bar .navibar-search-submit {
+    display: none !important;
 }
 
 #navibar-tray {
@@ -222,14 +246,14 @@ html.dark-mode #navibar-tray {
     border-radius: var(--rounded-lg);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
-    background: rgba(0,0,0,0.05);
+    background: rgba(0,0,0,0.01);
     border: none;
     margin-left: auto; /* push to the right */
     order: 2; /* appear after main buttons */
     align-items: center;
 }
 html.dark-mode .navibar-function-buttons {
-    background: rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.01);
     border: none;
 }
 
@@ -564,6 +588,15 @@ html.dark-mode .nav-btn.is-tool-placeholder {
     }
 
     #navibar-tray.is-search-active #navibar-search-bar .navibar-search-return .material-symbols-outlined {
+        font-size: 24px;
+    }
+
+    #navibar-tray.is-search-active #navibar-search-bar .navibar-search-submit {
+        width: 44px;
+        height: 44px;
+    }
+
+    #navibar-tray.is-search-active #navibar-search-bar .navibar-search-submit .material-symbols-outlined {
         font-size: 24px;
     }
     

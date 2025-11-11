@@ -102,11 +102,8 @@ class NavibarComponent {
 
             const top3 = sortedMainButtonIds.slice(0, 3);
             const rest = sortedMainButtonIds.slice(3);
-            this._functionButtonsLayout = [
-                'tool-slot-1',
-                'tool-slot-2',
-                'navibar-menu'
-            ];
+            // Default order requested: tools_1 -> tools_2 -> menu
+            this._functionButtonsLayout = [ 'tool-slot-1', 'tool-slot-2', 'navibar-menu' ];
             this._mainBarLayout = [...top3];
             this._subGridLayout = [...rest];
         }
@@ -378,16 +375,34 @@ class NavibarComponent {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'navibar-search-wrapper';
 
+                // Mark the provided element as the search input area
                 searchElement.classList.add('navibar-search-form');
-                wrapper.appendChild(searchElement);
 
+                // Actions container holds BOTH buttons, separate from the search form
+                const actions = document.createElement('div');
+                actions.className = 'navibar-search-buttons';
+
+                // Return button
                 const returnBtn = document.createElement('button');
                 returnBtn.type = 'button';
-                returnBtn.className = 'nav-btn navibar-search-return';
+                returnBtn.className = 'nav-btn nav-btn--minimal navibar-search-return';
                 returnBtn.title = 'Trở về';
                 returnBtn.innerHTML = '<span class="material-symbols-outlined">chevron_forward</span>';
                 returnBtn.addEventListener('click', () => this.showSearchBar(null));
-                wrapper.appendChild(returnBtn);
+
+                actions.appendChild(returnBtn);
+
+                // Reuse existing submit control inside the form if present instead of creating a duplicate
+                // REQUIREMENT: Remove submit button entirely from navibar search UI.
+                // Strip any existing submit controls inside the provided form.
+                searchElement.querySelectorAll('button[type="submit"], input[type="submit"], .search-submit').forEach(el => {
+                    try { el.remove(); } catch {}
+                });
+
+                // Layout: form/input area first, then the button group
+                wrapper.appendChild(searchElement);
+                // Only return button stays; no submit button.
+                wrapper.appendChild(actions);
 
                 this._searchBarContainer.appendChild(wrapper);
             } else {
@@ -704,7 +719,7 @@ class NavibarComponent {
         }
         // Back-compat: migrate function ids out of main bar if needed
         if (!savedFunction && this._functionButtonsLayout.length === 0) {
-            const functionIds = ['navibar-menu', 'tool-slot-1', 'tool-slot-2'];
+            const functionIds = ['tool-slot-1', 'tool-slot-2', 'navibar-menu'];
             const legacy = new Set(this._mainBarLayout);
             this._functionButtonsLayout = functionIds.filter(id => legacy.has(id));
             this._mainBarLayout = this._mainBarLayout.filter(id => !functionIds.includes(id));
@@ -729,7 +744,8 @@ class NavibarComponent {
         this._functionButtonsLayout = this._functionButtonsLayout.filter(id => allKnownIds.has(id));
 
         // Ensure function ids live only in function layout
-        const functionIds = ['navibar-menu', 'tool-slot-1', 'tool-slot-2'];
+    // Function role ids; default order should be tools_1 -> tools_2 -> menu
+    const functionIds = ['tool-slot-1', 'tool-slot-2', 'navibar-menu'];
         const purge = (arr) => {
             const len = arr.length;
             const filtered = arr.filter(id => !functionIds.includes(id));

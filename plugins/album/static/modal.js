@@ -482,9 +482,9 @@
                 </div>
             `;
 
+            // Removed <h3> title per user request; keep accessible label via aria-label
             dialog.innerHTML = `
-                <div class="modal-header">
-                    <h3>${options.title}</h3>
+                <div class="modal-header" aria-label="${escapeAttr(options.title)}">
                     <div class="album-settings-tabs"></div>
                 </div>
                 <div class="settings-form-container album-settings-container">

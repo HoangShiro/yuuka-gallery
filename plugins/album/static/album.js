@@ -11,6 +11,7 @@ class AlbumComponent {
             promptClipboard: null,
             isComfyUIAvaidable: false,
             cachedComfyGlobalChoices: null, // Yuuka: comfyui fetch optimization v1.0
+            cachedComfySettings: null, // Yuuka: preloaded comfy settings (last_config + global_choices)
         };
         this.viewer = window.Yuuka.plugins.simpleViewer;
         this.clipboardService = this._ensureClipboardService();
@@ -238,6 +239,8 @@ class AlbumComponent {
         try {
             this.updateUI('loading', `Đang tải album của ${this.state.selectedCharacter.name}...`);
             await this._refreshAlbumAndPlaceholders(); // Yuuka: Sử dụng hàm làm mới an toàn
+            // Yuuka: Preload Comfy settings for instant settings modal
+            this._preloadComfySettings();
         } catch(e) {
             this.updateUI('error', `Lỗi tải album: ${e.message}`);
         }
@@ -607,6 +610,7 @@ class AlbumComponent {
         this._updateNav();
         this.state.selectedCharacter = null;
         this.state.cachedComfyGlobalChoices = null; // Yuuka: comfyui fetch optimization v1.0
+        this.state.cachedComfySettings = null; // Yuuka: reset preloaded comfy settings
         this.updateUI('loading', 'Đang tải danh sách album...');
         try {
             const albums = await this.api.album.get('/albums');
@@ -663,6 +667,7 @@ class AlbumComponent {
         card.addEventListener('click', async () => {
             this.state.selectedCharacter = { hash: album.hash, name: displayName, isCustom: !!album.is_custom };
             this.state.cachedComfyGlobalChoices = null;
+            this.state.cachedComfySettings = null;
             this.state.allImageData = [];
             this.state.viewMode = 'album';
             await this.loadAndDisplayCharacterAlbum();
@@ -706,6 +711,7 @@ class AlbumComponent {
         };
         this.state.allImageData = [];
         this.state.cachedComfyGlobalChoices = null;
+        this.state.cachedComfySettings = null;
         this.state.viewMode = 'album';
         await this.loadAndDisplayCharacterAlbum();
         this._updateNav();
@@ -714,6 +720,26 @@ class AlbumComponent {
     renderCharacterAlbumView() { 
         this.contentArea.innerHTML = `<div class="plugin-album__grid image-grid"></div>`;
         this._renderImageGrid();
+    }
+    
+    // --- Yuuka: Preload comfy settings (last_config + global_choices) so modal opens instantly ---
+    async _preloadComfySettings(force = false) {
+        if (!this.state?.selectedCharacter?.hash) return;
+        if (!force && this.state.cachedComfySettings) return; // Already loaded
+        try {
+            const data = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}`);
+            if (data && (data.last_config || data.global_choices)) {
+                this.state.cachedComfySettings = {
+                    last_config: data.last_config || {},
+                    global_choices: data.global_choices || null
+                };
+                if (data.global_choices) {
+                    this.state.cachedComfyGlobalChoices = data.global_choices;
+                }
+            }
+        } catch (err) {
+            console.warn('[Album] Preload comfy settings failed:', err);
+        }
     }
     
     _renderImageGrid() {
@@ -1033,11 +1059,21 @@ class AlbumComponent {
             return;
         }
         const currentClipboard = this._getPromptClipboard();
+        // Ensure settings are preloaded; if not, this will fetch once here
+        await this._preloadComfySettings();
         await modalApi.openSettingsModal({
             title: `Cấu hình cho ${this.state.selectedCharacter.name}`,
             modalClass: 'plugin-album__settings-modal',
             // Yuuka: comfyui fetch optimization v1.0
             fetchInfo: async () => {
+                // Prefer fully preloaded settings (no network call)
+                if (this.state.cachedComfySettings) {
+                    const info = { ...this.state.cachedComfySettings };
+                    if (info.last_config && this.state.selectedCharacter) {
+                        info.last_config.character = this.state.selectedCharacter.name;
+                    }
+                    return info;
+                }
                 let finalInfo = {};
                 if (this.state.cachedComfyGlobalChoices) {
                     const configData = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}&no_choices=true`);
@@ -1051,6 +1087,13 @@ class AlbumComponent {
                         this.state.cachedComfyGlobalChoices = fullData.global_choices;
                     }
                     finalInfo = fullData;
+                }
+                // Store to preload cache for subsequent opens
+                if (finalInfo && (finalInfo.last_config || finalInfo.global_choices)) {
+                    this.state.cachedComfySettings = {
+                        last_config: finalInfo.last_config || {},
+                        global_choices: finalInfo.global_choices || this.state.cachedComfyGlobalChoices || null
+                    };
                 }
                 if (finalInfo.last_config && this.state.selectedCharacter) {
                     finalInfo.last_config.character = this.state.selectedCharacter.name;
@@ -1069,6 +1112,11 @@ class AlbumComponent {
                 } else {
                     updatedConfig.character = this.state.selectedCharacter?.name || '';
                 }
+                // Update preload cache after saving so next open is instant and up to date
+                this.state.cachedComfySettings = {
+                    last_config: { ...(this.state.cachedComfySettings?.last_config || {}), ...updatedConfig },
+                    global_choices: this.state.cachedComfyGlobalChoices || this.state.cachedComfySettings?.global_choices || null
+                };
             },
             onGenerate: async (updatedConfig) => {
                 await this._startGeneration(updatedConfig);
@@ -1082,7 +1130,9 @@ class AlbumComponent {
                 btn.disabled = true;
                 try {
                     await this.api.server.checkComfyUIStatus(address);
-                    this.state.cachedComfyGlobalChoices = null; // Xóa cache
+                    // Xóa toàn bộ cache để nạp lại từ server mới
+                    this.state.cachedComfyGlobalChoices = null;
+                    this.state.cachedComfySettings = null;
                     close(); // Đóng modal hiện tại
                     await this.openSettings(); // Mở lại để tải lại dữ liệu mới
                 } catch (e) {
@@ -1100,6 +1150,7 @@ class AlbumComponent {
                 this.state.selectedCharacter = null;
                 this.state.allImageData = [];
                 this.state.cachedComfyGlobalChoices = null;
+                this.state.cachedComfySettings = null;
                 this.state.viewMode = 'grid';
                 await this.showCharacterSelectionGrid();
                 this._updateNav();

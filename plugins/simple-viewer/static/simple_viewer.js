@@ -9,10 +9,27 @@ window.Yuuka.plugins.simpleViewer = (() => {
     let items = [];
     let currentIndex = -1;
     let options = {};
+    // Token to invalidate stale preload tasks when user navigates quickly
+    let loadGeneration = 0;
     let navHideTimeout;
     const imageCache = new Map();
     const MAX_PRELOAD_FORWARD = 5;
     const MAX_PRELOAD_BACKWARD = 3;
+
+    /**
+     * Resolve preload configuration from options with sensible defaults.
+     */
+    function getPreloadConfig() {
+        const p = options?.preload || {};
+        return {
+            forward: Number.isInteger(p.forward) ? Math.max(0, p.forward) : MAX_PRELOAD_FORWARD,
+            backward: Number.isInteger(p.backward) ? Math.max(0, p.backward) : MAX_PRELOAD_BACKWARD,
+            // Optional small delay to give main image UI a breath; 0 by default
+            delayMs: Number.isInteger(p.delayMs) ? Math.max(0, p.delayMs) : 0,
+            // If true, preload sequentially to be gentler on bandwidth
+            sequential: !!p.sequential,
+        };
+    }
 
     /**
      * Preload an image and keep its state cached.
@@ -55,40 +72,69 @@ window.Yuuka.plugins.simpleViewer = (() => {
      * Queue preload for images around the current index to keep navigation smooth.
      * @param {number} index
      */
-    function preloadAroundIndex(index) {
+    function preloadAroundIndex(index, cfg) {
         if (!Array.isArray(items) || items.length === 0) return;
+        const config = cfg || getPreloadConfig();
+
+        // Guard against stale invocations when user navigates quickly
+        const myGen = loadGeneration;
+
         const allowedUrls = new Set();
         const currentItem = items[index];
         if (currentItem?.imageUrl) {
             allowedUrls.add(currentItem.imageUrl);
         }
-        for (let offset = 1; offset <= MAX_PRELOAD_FORWARD && offset < items.length; offset++) {
+        const forwardUrls = [];
+        for (let offset = 1; offset <= config.forward && offset < items.length; offset++) {
             const nextIndex = (index + offset) % items.length;
             const nextItem = items[nextIndex];
             if (nextItem?.imageUrl) {
                 allowedUrls.add(nextItem.imageUrl);
-                const preloadPromise = preloadImage(nextItem.imageUrl);
-                if (preloadPromise) {
-                    preloadPromise.catch(() => {});
-                }
+                forwardUrls.push(nextItem.imageUrl);
             }
         }
-        for (let offset = 1; offset <= MAX_PRELOAD_BACKWARD && offset < items.length; offset++) {
+        const backwardUrls = [];
+        for (let offset = 1; offset <= config.backward && offset < items.length; offset++) {
             const prevIndex = (index - offset + items.length) % items.length;
             const prevItem = items[prevIndex];
             if (prevItem?.imageUrl) {
                 allowedUrls.add(prevItem.imageUrl);
-                const preloadPromise = preloadImage(prevItem.imageUrl);
-                if (preloadPromise) {
-                    preloadPromise.catch(() => {});
-                }
+                backwardUrls.push(prevItem.imageUrl);
             }
         }
-        imageCache.forEach((_, url) => {
-            if (!allowedUrls.has(url)) {
-                imageCache.delete(url);
+
+        const queue = [...forwardUrls, ...backwardUrls];
+
+        const startPreloads = () => {
+            // If another navigation happened, abandon this batch
+            if (myGen !== loadGeneration) return;
+
+            if (config.sequential) {
+                queue.reduce((p, url) => p.then(() => {
+                    if (myGen !== loadGeneration) return Promise.resolve();
+                    const pre = preloadImage(url);
+                    return pre ? pre.catch(() => {}) : Promise.resolve();
+                }), Promise.resolve());
+            } else {
+                queue.forEach((url) => {
+                    const pre = preloadImage(url);
+                    if (pre) pre.catch(() => {});
+                });
             }
-        });
+
+            // Prune cache entries that are no longer near the current index
+            imageCache.forEach((_, url) => {
+                if (!allowedUrls.has(url)) {
+                    imageCache.delete(url);
+                }
+            });
+        };
+
+        if (config.delayMs > 0) {
+            setTimeout(startPreloads, config.delayMs);
+        } else {
+            startPreloads();
+        }
     }
 
     /**
@@ -311,11 +357,19 @@ window.Yuuka.plugins.simpleViewer = (() => {
 
         newImgElement.src = newItem.imageUrl;
 
+        const myGen = ++loadGeneration; // increment token for this navigation
+
         waitForImageElement(newImgElement)
-            .then(activateImage)
-            .catch(handleImageError);
-        
-        preloadAroundIndex(currentIndex);
+            .then(() => {
+                if (myGen !== loadGeneration) return; // stale
+                activateImage();
+                // Only start preloading AFTER the current image is fully displayed
+                preloadAroundIndex(currentIndex, getPreloadConfig());
+            })
+            .catch((err) => {
+                if (myGen !== loadGeneration) return; // stale
+                handleImageError(err);
+            });
         
         renderActionButtons(newItem);
 

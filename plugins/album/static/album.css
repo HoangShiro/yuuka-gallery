@@ -198,7 +198,7 @@
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: 2500;
+    z-index: 1700;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -272,7 +272,6 @@
     gap: var(--spacing-3);
     padding: var(--spacing-3) var(--spacing-4);
     background-color: var(--color-card-bg);
-    border-top: 1px solid var(--color-border);
     border-radius: 0 0 var(--rounded-lg) var(--rounded-lg);
 }
 
@@ -767,9 +766,20 @@
     margin-bottom: 12px;
 }
 
+/* Two-stage layout: always keep 2 columns side-by-side, even on narrow screens */
 .stage-config-grid.is-hires {
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+
+/* In two-stage (hires) mode, show Upscale Model & Method side-by-side */
+.stage-config-grid.is-hires ~ [data-hires-only] {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+/* Ensure selects stretch nicely */
+[data-hires-only] .form-group { margin-bottom: 0; }
 
 .stage-config-grid:not(.is-hires) {
     grid-template-columns: 1fr;
@@ -795,9 +805,18 @@
     display: none;
 }
 
+/* Single-stage layout: arrange main controls in two columns */
 .stage-config-grid:not(.is-hires) .stage-config-column {
     background: transparent;
     padding: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+}
+
+/* Ensure Stage 1 Denoise (wrapper) spans full width under the paired rows */
+.stage-config-grid:not(.is-hires) [data-stage1-denoise] {
+    grid-column: 1 / -1;
 }
 /* Album settings modal layout overrides */
 .plugin-album__settings-modal .modal-dialog {
@@ -805,7 +824,6 @@
     max-height: 90vh;
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-4);
 }
 
 .plugin-album__settings-modal.is-mobile .modal-dialog {
@@ -820,7 +838,6 @@
     flex-direction: column;
     gap: var(--spacing-3);
     padding-bottom: var(--spacing-3);
-    border-bottom: 1px solid var(--color-border);
 }
 
 .plugin-album__settings-modal .modal-header h3 {
@@ -865,7 +882,6 @@
     flex: 1 1 auto;
     min-height: 0;
     background: var(--color-primary-bg);
-    border: 1px solid var(--color-border);
     border-radius: var(--rounded-lg);
     box-shadow: 0 12px 28px -18px var(--color-shadow);
     padding: var(--spacing-4);
@@ -947,4 +963,12 @@
 
 .plugin-album__settings-modal.is-mobile .album-settings-section__body {
     overflow-y: auto;
+}
+
+/* Hide large headers on narrow screens to save space */
+@media (max-width: 768px) {
+    .plugin-album__settings-modal .modal-header h3,
+    .plugin-album__settings-modal .album-settings-section > h4 {
+        display: none;
+    }
 }
