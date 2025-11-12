@@ -40,6 +40,8 @@ class AlbumComponent {
 
         // Yuuka: navibar v2.0 integration - Đăng ký button một lần
         this._registerNavibarButtons();
+    // Prefetch global tag dataset early (non-blocking) so settings modal opens instantly.
+    this._prefetchTags();
 
         const initialState = window.Yuuka.initialPluginState.album;
         if (initialState) {
@@ -763,6 +765,21 @@ class AlbumComponent {
     renderCharacterAlbumView() { 
         this.contentArea.innerHTML = `<div class="plugin-album__grid image-grid"></div>`;
         this._renderImageGrid();
+    }
+
+    // --- Global tag dataset prefetch (runs once per app load) ---
+    _prefetchTags() {
+        try {
+            window.Yuuka = window.Yuuka || {}; window.Yuuka.services = window.Yuuka.services || {};
+            const svc = window.Yuuka.services.tagDataset;
+            if (!svc || typeof svc.prefetch !== 'function') return;
+            const apiObj = (typeof api !== 'undefined') ? api : this.api; // prefer global api if defined
+            if (apiObj && typeof apiObj.getTags === 'function') {
+                svc.prefetch(apiObj); // fire & forget
+            }
+        } catch (err) {
+            console.warn('[Album] Tag prefetch skipped:', err);
+        }
     }
     
     // --- Yuuka: Preload comfy settings (last_config + global_choices) so modal opens instantly ---

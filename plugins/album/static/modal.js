@@ -347,19 +347,68 @@
                 normalizedLoraChain = deriveNormalizedChain(last_config || {});
             }
             const loraNamesFromInfo = Array.isArray(infoPayload?.lora_names) ? infoPayload.lora_names : [];
-            const tagPredictions = await api.getTags().catch(() => []);
-
-            let loraMetadataMap = {};
-            try {
-                if (api['lora-downloader'] && typeof api['lora-downloader'].get === 'function') {
-                    const loraResponse = await api['lora-downloader'].get('/lora-data');
-                    if (loraResponse && typeof loraResponse.models === 'object') {
-                        loraMetadataMap = loraResponse.models;
-                    }
+            // --- Tag dataset global cache (non-blocking) ---
+            const tagService = (() => {
+                window.Yuuka = window.Yuuka || {}; window.Yuuka.services = window.Yuuka.services || {};
+                if (!window.Yuuka.services.tagDataset) {
+                    window.Yuuka.services.tagDataset = {
+                        data: null,
+                        promise: null,
+                        lastFetched: 0,
+                        ttl: 1000 * 60 * 60 * 6, // 6h default (rarely changes per user requirement)
+                        prefetch(apiObj) {
+                            if (this.data && (Date.now() - this.lastFetched) < this.ttl) return Promise.resolve(this.data);
+                            if (this.promise) return this.promise;
+                            if (!apiObj || typeof apiObj.getTags !== 'function') {
+                                this.promise = Promise.resolve([]);
+                                return this.promise;
+                            }
+                            this.promise = apiObj.getTags()
+                                .then(arr => {
+                                    if (Array.isArray(arr)) {
+                                        this.data = arr;
+                                        this.lastFetched = Date.now();
+                                    } else {
+                                        this.data = [];
+                                    }
+                                    return this.data;
+                                })
+                                .catch(err => { console.warn('[AlbumModal] tag prefetch failed:', err); return this.data || []; })
+                                .finally(() => { this.promise = null; });
+                            return this.promise;
+                        },
+                        get() { return Array.isArray(this.data) ? this.data : []; },
+                        clear() { this.data = null; this.lastFetched = 0; }
+                    };
                 }
-            } catch (err) {
-                console.warn('[AlbumModal] Unable to fetch LoRA metadata:', err);
+                return window.Yuuka.services.tagDataset;
+            })();
+            // Immediate (possibly empty) tags; don't block modal render
+            let tagPredictions = tagService.get();
+            if (!tagPredictions.length) {
+                // Fire prefetch in background; when done, re-init autocomplete if present
+                tagService.prefetch(api).then(fresh => {
+                    if (window.Yuuka?.ui?._initTagAutocomplete && dialog) {
+                        try { window.Yuuka.ui._initTagAutocomplete(dialog, fresh); } catch(_) {}
+                    }
+                });
             }
+
+            // --- Lazy LoRA metadata (load only when panel/cards need it) ---
+            let loraMetadataMap = {}; // initially empty
+            let loraMetadataPromise = null;
+            const ensureLoraMetadata = () => {
+                if (Object.keys(loraMetadataMap).length) return Promise.resolve(loraMetadataMap);
+                if (loraMetadataPromise) return loraMetadataPromise;
+                if (api['lora-downloader'] && typeof api['lora-downloader'].get === 'function') {
+                    loraMetadataPromise = api['lora-downloader'].get('/lora-data')
+                        .then(resp => { if (resp && typeof resp.models === 'object') loraMetadataMap = resp.models; return loraMetadataMap; })
+                        .catch(err => { console.warn('[AlbumModal] Unable to fetch LoRA metadata (lazy):', err); return loraMetadataMap; });
+                } else {
+                    loraMetadataPromise = Promise.resolve(loraMetadataMap);
+                }
+                return loraMetadataPromise;
+            };
 
             const dialog = modal.querySelector('.modal-dialog');
             const loraOptions = (global_choices && Array.isArray(global_choices.loras) && global_choices.loras.length > 0)
@@ -702,7 +751,8 @@
                     if (!option) return;
                     const value = option.value ?? option.name ?? '';
                     if (typeof value !== 'string') return;
-                    const metadata = value === 'None' ? null : findLoraMetadata(value);
+                    // Metadata may not be loaded yet; attempt local lookup only
+                    const metadata = (Object.keys(loraMetadataMap).length && value !== 'None') ? findLoraMetadata(value) : null;
                     // Hide 'None' option from panel (user can remove wrapper to clear)
                     if (value === 'None') return; 
                     let displayName = resolveLoraCharacterName(metadata, option.name || value);
@@ -895,8 +945,17 @@
                 };
                 const ctx = { select: selectLoRA };
                 if (cardGrid && !cardGrid.dataset.built) {
-                    buildLoraCards(cardGrid, ctx);
+                    buildLoraCards(cardGrid, ctx); // initial quick build (no metadata thumbnails maybe)
                     cardGrid.dataset.built = 'true';
+                    // Lazy metadata fetch then rebuild for thumbnails & tags
+                    ensureLoraMetadata().then(() => {
+                        buildLoraCards(cardGrid, ctx);
+                        // Re-render tags for current selection after metadata arrives
+                        const currentVal = hiddenInput?.value;
+                        if (currentVal && currentVal !== 'None') {
+                            renderWrapperTags(tagsWrapper, currentVal);
+                        }
+                    });
                 }
                 // Ensure initial thumbnail & tags are rendered for every wrapper (previously only first got updated via legacy logic)
                 if (hiddenInput && typeof hiddenInput.value === 'string') {
@@ -1086,7 +1145,7 @@
             // Legacy single-LoRA search panel and global tag toggles removed; selection is managed per-wrapper.
 
             if (window.Yuuka?.ui?._initTagAutocomplete) {
-                window.Yuuka.ui._initTagAutocomplete(dialog, tagPredictions);
+                try { window.Yuuka.ui._initTagAutocomplete(dialog, tagPredictions); } catch(_) {}
             }
             dialog.querySelectorAll('textarea').forEach(t => {
                 const autoResize = () => {
