@@ -1,0 +1,36 @@
+{
+  "id": "maid-chan",
+  "name": "Maid-chan",
+  "version": "0.1.0",
+  "author": "Yuuka",
+  "description": "A floating round bubble assistant with customizable avatar and minimal modal.",
+  "static_folder": "static",
+  "entry_points": {
+    "backend": "backend:MaidChanPlugin",
+    "frontend_component": "MaidChanComponent"
+  },
+  "assets": {
+    "js": [
+      "settings/avatar.js",
+      "main/prompt_suggest.js",
+      "main/index.js",
+      "modal.js",
+      "maid_chan.js"
+    ],
+    "css": ["maid_chan.css"]
+  },
+  "dependencies": {
+    "python": []
+  },
+  "ui": {
+    "is_singleton": true,
+    "needs_generation_poller": false,
+    "tab": {
+      "id": "maid-chan",
+      "icon": "digital_wellbeing",
+      "label": "Maid-chan",
+      "is_service_launcher": true
+    },
+    "order": 35
+  }
+}

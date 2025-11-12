@@ -22,6 +22,10 @@ class AlbumComponent {
         this.handleTaskEnded = this.handleTaskEnded.bind(this);
         this.handleGenerationUpdate = this.handleGenerationUpdate.bind(this);
         this.handleImageDeleted = this.handleImageDeleted.bind(this); // Yuuka: event bus v1.0
+    this.handleTaskCreatedLocally = this.handleTaskCreatedLocally.bind(this); // external start
+    this.handleExternalRefresh = this.handleExternalRefresh.bind(this); // external refresh
+        // Bind helpers
+        this._syncDOMSelection = this._syncDOMSelection.bind(this);
     }
 
     async init() {
@@ -37,13 +41,20 @@ class AlbumComponent {
         Yuuka.events.on('generation:task_ended', this.handleTaskEnded);
         Yuuka.events.on('generation:update', this.handleGenerationUpdate);
         Yuuka.events.on('image:deleted', this.handleImageDeleted); // Yuuka: event bus v1.0
+    // Listen to cross-plugin signals
+    Yuuka.events.on('generation:task_created_locally', this.handleTaskCreatedLocally);
+    Yuuka.events.on('album:request_refresh', this.handleExternalRefresh);
 
         // Yuuka: navibar v2.0 integration - Đăng ký button một lần
         this._registerNavibarButtons();
     // Prefetch global tag dataset early (non-blocking) so settings modal opens instantly.
     this._prefetchTags();
 
-        const initialState = window.Yuuka.initialPluginState.album;
+    // Expose global instance for cross-plugin discovery
+    window.Yuuka = window.Yuuka || {}; window.Yuuka.instances = window.Yuuka.instances || {};
+    window.Yuuka.instances.AlbumComponent = this;
+
+    const initialState = window.Yuuka.initialPluginState.album;
         if (initialState) {
             const initialCharacter = initialState.character;
             const shouldOpenSettings = Boolean(initialState.openSettings);
@@ -53,6 +64,7 @@ class AlbumComponent {
             delete window.Yuuka.initialPluginState.album;
             this.state.viewMode = 'album';
             await this.loadAndDisplayCharacterAlbum();
+            this._syncDOMSelection();
             if (regenConfig) this._startGeneration(regenConfig);
             if (shouldOpenSettings) {
                 try {
@@ -76,6 +88,8 @@ class AlbumComponent {
         Yuuka.events.off('generation:task_ended', this.handleTaskEnded);
         Yuuka.events.off('generation:update', this.handleGenerationUpdate);
         Yuuka.events.off('image:deleted', this.handleImageDeleted); // Yuuka: event bus v1.0
+    Yuuka.events.off('generation:task_created_locally', this.handleTaskCreatedLocally);
+    Yuuka.events.off('album:request_refresh', this.handleExternalRefresh);
         
         const navibar = window.Yuuka.services.navibar;
         if (navibar) {
@@ -184,6 +198,35 @@ class AlbumComponent {
         }
     }
 
+    // Triggered by other plugins when a generation task has just been created
+    handleTaskCreatedLocally(payload) {
+        try{
+            const taskId = payload?.task_id;
+            const charHash = payload?.character_hash;
+            if(!taskId || !charHash) return;
+            // If we're in album view of that character, add a placeholder immediately
+            if (this.state.viewMode === 'album' && this.state.selectedCharacter?.hash === charHash) {
+                const grid = this.contentArea.querySelector('.plugin-album__grid');
+                if (grid && !document.getElementById(taskId)) {
+                    const placeholder = this._createPlaceholderCard(taskId);
+                    grid.prepend(placeholder);
+                    const emptyMsg = grid.querySelector('.plugin-album__empty-msg');
+                    if (emptyMsg) emptyMsg.style.display = 'none';
+                }
+                this._updateNav();
+            }
+        }catch(err){ console.warn('[Album] handleTaskCreatedLocally error:', err); }
+    }
+
+    // Allow external plugins to request a UI refresh (placeholders + image list)
+    async handleExternalRefresh() {
+        try{
+            if (this.state.viewMode === 'album' && this.state.selectedCharacter) {
+                await this._refreshAlbumAndPlaceholders();
+            }
+        }catch(err){ console.warn('[Album] handleExternalRefresh error:', err); }
+    }
+
     // --- END OF REFACTORED HANDLERS ---
     
     // Yuuka: navibar v2.0 integration
@@ -233,6 +276,8 @@ class AlbumComponent {
         if (!navibar) return;
         // Chỉ cần báo cho navibar biết plugin nào đang hoạt động
         navibar.setActivePlugin(this.state.viewMode === 'album' ? 'album' : null);
+        // Sync DOM data attributes for external detection
+        this._syncDOMSelection();
     }
     
     async checkComfyUIStatus() { try{const s=await this.api.album.get('/comfyui/info').catch(()=>({}));const t=s?.last_config?.server_address||'127.0.0.1:8888';await this.api.server.checkComfyUIStatus(t);this.state.isComfyUIAvaidable=true;}catch(e){this.state.isComfyUIAvaidable=false;showError("Album: Không thể kết nối ComfyUI.");}}
@@ -243,6 +288,7 @@ class AlbumComponent {
             await this._refreshAlbumAndPlaceholders(); // Yuuka: Sử dụng hàm làm mới an toàn
             // Yuuka: Preload Comfy settings for instant settings modal
             this._preloadComfySettings();
+            this._syncDOMSelection();
         } catch(e) {
             this.updateUI('error', `Lỗi tải album: ${e.message}`);
         }
@@ -657,6 +703,7 @@ class AlbumComponent {
         this.state.cachedComfyGlobalChoices = null; // Yuuka: comfyui fetch optimization v1.0
         this.state.cachedComfySettings = null; // Yuuka: reset preloaded comfy settings
         this.updateUI('loading', 'Đang tải danh sách album...');
+        this._syncDOMSelection();
         try {
             const albums = await this.api.album.get('/albums');
             this.contentArea.innerHTML = `<div class="plugin-album__grid"></div>`;
@@ -715,6 +762,7 @@ class AlbumComponent {
             this.state.cachedComfySettings = null;
             this.state.allImageData = [];
             this.state.viewMode = 'album';
+            this._syncDOMSelection();
             await this.loadAndDisplayCharacterAlbum();
             this._updateNav();
         });
@@ -758,6 +806,7 @@ class AlbumComponent {
         this.state.cachedComfyGlobalChoices = null;
         this.state.cachedComfySettings = null;
         this.state.viewMode = 'album';
+        this._syncDOMSelection();
         await this.loadAndDisplayCharacterAlbum();
         this._updateNav();
     }
@@ -1257,6 +1306,22 @@ class AlbumComponent {
                 this._updateNav();
             }
         });
+    }
+
+    // Publish current selection to DOM for cross-plugin discovery
+    _syncDOMSelection() {
+        try {
+            if (!this.container) return;
+            if (this.state.viewMode === 'album' && this.state.selectedCharacter?.hash) {
+                this.container.setAttribute('data-character-hash', this.state.selectedCharacter.hash);
+                this.container.setAttribute('data-character-name', this.state.selectedCharacter.name || '');
+            } else {
+                this.container.removeAttribute('data-character-hash');
+                this.container.removeAttribute('data-character-name');
+            }
+        } catch (e) {
+            console.warn('[Album] _syncDOMSelection failed:', e);
+        }
     }
 }
 
