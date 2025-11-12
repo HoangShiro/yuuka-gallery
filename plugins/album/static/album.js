@@ -404,6 +404,45 @@ class AlbumComponent {
             
             const { last_config } = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}`);
             const payload = { ...last_config, ...configOverrides, character: this.state.selectedCharacter.name };
+            // --- Multi-LoRA payload normalization v1.0 ---
+            // Prefer lora_chain if present, otherwise accept lora_names; keep single lora_name for backward-compat.
+            const incomingChain = Array.isArray(configOverrides?.lora_chain)
+                ? configOverrides.lora_chain
+                : (Array.isArray(payload.lora_chain) ? payload.lora_chain : null);
+            if (incomingChain && incomingChain.length) {
+                const cleanedChain = incomingChain
+                    .map(entry => {
+                        if (!entry) return null;
+                        const name = String(entry.lora_name || entry.name || '').trim();
+                        if (!name || name.toLowerCase() === 'none') return null;
+                        const toNum = (v, d) => {
+                            const n = Number(v);
+                            return Number.isFinite(n) ? n : d;
+                        };
+                        const sm = toNum(entry.strength_model ?? entry.lora_strength_model ?? payload.lora_strength_model, 1.0);
+                        const sc = toNum(entry.strength_clip ?? entry.lora_strength_clip ?? payload.lora_strength_clip, 1.0);
+                        return { lora_name: name, strength_model: sm, strength_clip: sc };
+                    })
+                    .filter(Boolean);
+                if (cleanedChain.length) {
+                    payload.lora_chain = cleanedChain;
+                    payload.lora_names = cleanedChain.map(c => c.lora_name);
+                    if (cleanedChain.length === 1) {
+                        payload.lora_name = cleanedChain[0].lora_name;
+                        payload.lora_strength_model = cleanedChain[0].strength_model;
+                        payload.lora_strength_clip = cleanedChain[0].strength_clip;
+                    } else {
+                        payload.lora_name = 'None';
+                    }
+                }
+            } else if (Array.isArray(configOverrides?.lora_names) && configOverrides.lora_names.length) {
+                const names = configOverrides.lora_names.map(n => String(n).trim()).filter(n => n && n.toLowerCase() !== 'none');
+                if (names.length) {
+                    payload.lora_names = names;
+                    payload.lora_name = names.length === 1 ? names[0] : 'None';
+                }
+            }
+            // --- End Multi-LoRA normalization ---
             if (configOverrides.seed === undefined) payload.seed = 0;
             if (Array.isArray(payload.lora_prompt_tags)) {
                 payload.lora_prompt_tags = payload.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean);
@@ -427,7 +466,8 @@ class AlbumComponent {
                     payload.hires_base_height = analysis.baseHeight;
                 }
             }
-            if (analysis.workflowType && !payload.workflow_type) {
+            // Always (re)compute workflow_type to avoid stale *_lora after removing LoRA
+            if (analysis.workflowType) {
                 payload.workflow_type = analysis.workflowType;
             }
             if (analysis.workflowTemplate && !payload.workflow_template) {
@@ -440,6 +480,9 @@ class AlbumComponent {
                 payload._workflow_type = 'sdxl_lora';
             } else {
                 delete payload._workflow_type;
+                if (typeof payload.workflow_type === 'string' && /_lora$/.test(payload.workflow_type) && !analysis.hasLoRA) {
+                    payload.workflow_type = 'standard';
+                }
             }
             const response = await this.api.generation.start(this.state.selectedCharacter.hash, payload);
             
@@ -829,10 +872,15 @@ class AlbumComponent {
             const resolveWorkflowDisplay = () => {
                 const normalize = (value) => String(value || '').trim().toLowerCase();
                 const workflowTemplate = String(cfg.workflow_template || '').trim();
-                const workflowType = normalize(cfg.workflow_type);
-                const hasLoRA = typeof cfg.lora_name === 'string'
-                    && cfg.lora_name.trim()
-                    && cfg.lora_name.trim().toLowerCase() !== 'none';
+                let workflowType = normalize(cfg.workflow_type);
+                const hasLoRAName = typeof cfg.lora_name === 'string' && cfg.lora_name.trim() && cfg.lora_name.trim().toLowerCase() !== 'none';
+                const hasLoRAChain = Array.isArray(cfg.lora_chain) && cfg.lora_chain.length > 0;
+                const hasLoRANames = Array.isArray(cfg.lora_names) && cfg.lora_names.filter(n => String(n).trim().toLowerCase() !== 'none').length > 0;
+                const hasAnyLoRA = hasLoRAName || hasLoRAChain || hasLoRANames;
+                // If stale *_lora type but no LoRA now, strip suffix
+                if (workflowType.endsWith('_lora') && !hasAnyLoRA) {
+                    workflowType = workflowType.replace(/_lora$/, '');
+                }
                 const labelMap = {
                     'hires_lora': 'Hires Fix + LoRA',
                     'hires': 'Hires Fix',
@@ -846,16 +894,16 @@ class AlbumComponent {
                 if (!label && workflowType.endsWith('_lora')) {
                     const baseType = workflowType.replace(/_lora$/, '');
                     if (labelMap[baseType]) {
-                        label = `${labelMap[baseType]} + LoRA`;
+                        label = hasAnyLoRA ? `${labelMap[baseType]} + LoRA` : labelMap[baseType];
                     }
                 }
                 if (!label) {
                     const templateLower = workflowTemplate.toLowerCase();
                     if (templateLower.includes('hiresfix') && templateLower.includes('input_image')) {
-                        label = templateLower.includes('lora') || hasLoRA ? 'Hires Input Image + LoRA' : 'Hires Input Image';
+                        label = (templateLower.includes('lora') && hasAnyLoRA) ? 'Hires Input Image + LoRA' : 'Hires Input Image';
                     } else if (templateLower.includes('hiresfix')) {
-                        label = templateLower.includes('lora') || hasLoRA ? 'Hires Fix + LoRA' : 'Hires Fix';
-                    } else if (templateLower.includes('lora')) {
+                        label = (templateLower.includes('lora') && hasAnyLoRA) ? 'Hires Fix + LoRA' : 'Hires Fix';
+                    } else if (templateLower.includes('lora') && hasAnyLoRA) {
                         label = 'SDXL + LoRA';
                     }
                 }
@@ -869,11 +917,11 @@ class AlbumComponent {
                     const noBaseData = (!Number.isFinite(baseWidth) || baseWidth <= 0) && (!Number.isFinite(baseHeight) || baseHeight <= 0);
                     const bigDimension = (Number.isFinite(width) && width >= 1536) || (Number.isFinite(height) && height >= 1536);
                     if (widthHires || heightHires || (noBaseData && bigDimension)) {
-                        label = hasLoRA ? 'Hires Fix + LoRA' : 'Hires Fix';
+                        label = hasAnyLoRA ? 'Hires Fix + LoRA' : 'Hires Fix';
                     }
                 }
                 if (!label) {
-                    label = hasLoRA ? 'SDXL + LoRA' : '';
+                    label = hasAnyLoRA ? 'SDXL + LoRA' : 'Standard';
                 }
                 if (workflowTemplate && workflowTemplate.toLowerCase() !== 'standard') {
                     return label ? `${label} (${workflowTemplate})` : workflowTemplate;
@@ -897,13 +945,49 @@ class AlbumComponent {
             }${
                 buildRow('CFG', cfg.cfg)
             }${
-                buildRow('LoRA', cfg.lora_name)
+                (() => {
+                    const displayLoRA = () => {
+                        if (Array.isArray(cfg.lora_chain) && cfg.lora_chain.length) {
+                            return cfg.lora_chain.map(item => {
+                                const n = String(item.lora_name || item.name || '').trim();
+                                if (!n) return null;
+                                const sm = item.strength_model ?? item.lora_strength_model;
+                                const sc = item.strength_clip ?? item.lora_strength_clip;
+                                if (sm != null && sc != null && Number.isFinite(Number(sm)) && Number.isFinite(Number(sc))) {
+                                    return `${n}(${Number(sm).toFixed(2)}/${Number(sc).toFixed(2)})`;
+                                }
+                                return n;
+                            }).filter(Boolean).join(', ');
+                        }
+                        if (Array.isArray(cfg.lora_names) && cfg.lora_names.length) {
+                            return cfg.lora_names.join(', ');
+                        }
+                        return cfg.lora_name;
+                    };
+                    return buildRow('LoRA', displayLoRA());
+                })()
             }${
                 buildRow('Workflow', resolveWorkflowDisplay())
             }</div>`;
-            const loraTags = Array.isArray(cfg.lora_prompt_tags)
-                ? cfg.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean).join(', ')
-                : '';
+            const loraTags = (() => {
+                // Prefer structured multi-LoRA groups if present
+                if (Array.isArray(cfg.multi_lora_prompt_groups)) {
+                    const parts = cfg.multi_lora_prompt_groups
+                        .map(arr => Array.isArray(arr) ? arr.map(s => String(s).trim()).filter(Boolean) : [])
+                        .map(groupList => groupList.length ? `(${groupList.join(', ')})` : '')
+                        .filter(Boolean);
+                    if (parts.length) return parts.join(', ');
+                }
+                // Then accept legacy combined string if available
+                if (typeof cfg.multi_lora_prompt_tags === 'string' && cfg.multi_lora_prompt_tags.trim()) {
+                    return cfg.multi_lora_prompt_tags.trim();
+                }
+                // Fallback to legacy single-LoRA array
+                if (Array.isArray(cfg.lora_prompt_tags)) {
+                    return cfg.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean).join(', ');
+                }
+                return '';
+            })();
             const loraTagsBlock = loraTags ? buildRow('LoRA Tags', loraTags) : '';
             const sections = [];
             if (promptRows) sections.push(promptRows, '<hr>');

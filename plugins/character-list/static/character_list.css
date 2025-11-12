@@ -68,11 +68,42 @@
 
 #modal-close {
     position: absolute;
-    top: -15px;
-    right: -10px;
-    color: #f1f1f1;
+    top: 8px;
+    right: 8px;
+    width: 40px;
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--rounded-full);
+    background-color: rgba(0, 0, 0, 0.65);
+    color: #fff;
     cursor: pointer;
-    font-size: 40px;
+    font-size: 28px;
+    line-height: 1;
+    z-index: 2;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    backdrop-filter: saturate(150%) blur(2px);
+    transition: transform 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+
+#modal-close:hover {
+    transform: scale(1.05);
+    background-color: rgba(0, 0, 0, 0.8);
+}
+
+#modal-close:active {
+    transform: scale(0.98);
+}
+
+@media (max-width: 480px) {
+    #modal-close {
+        top: 6px;
+        right: 6px;
+        width: 36px;
+        height: 36px;
+        font-size: 24px;
+    }
 }
 
 /* Yuuka: Style cho nút Album trên card */

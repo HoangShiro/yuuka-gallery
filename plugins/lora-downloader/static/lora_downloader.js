@@ -1240,11 +1240,13 @@ class LoraDownloaderService {
             }
 
             const baseConfig = await this._fetchAlbumBaseConfig(albumHash);
+            // Yuuka: New multi-LoRA mode — prefer lora_names/lora_chain; keep lora_prompt_tags for compatibility
             const payload = {
                 ...(baseConfig && typeof baseConfig === 'object' ? baseConfig : {}),
                 character: albumName,
                 lora_prompt_tags: tags,
-                lora_name: loraIdentifier,
+                lora_names: [loraIdentifier].filter(Boolean),
+                // Let backend normalize strengths via defaults if chain omitted
                 civitai_url: model?.civitai_url || baseConfig?.civitai_url || '',
             };
 
@@ -1282,7 +1284,14 @@ class LoraDownloaderService {
         }
         try {
             const response = await this.api.album.get(`/comfyui/info?character_hash=${encodeURIComponent(characterHash)}`);
-            return (response && typeof response === 'object') ? response : {};
+            // Prefer the actual config object from the API shape { last_config, global_choices, ... }
+            if (response && typeof response === 'object') {
+                if (response.last_config && typeof response.last_config === 'object') {
+                    return response.last_config;
+                }
+                return response; // fallback for older servers that returned the config directly
+            }
+            return {};
         } catch (err) {
             console.warn('[LoraDownloader] Không thể lấy cấu hình cơ bản của album:', err);
             return {};
@@ -1536,13 +1545,30 @@ class LoraDownloaderService {
                 const hash = album?.hash;
                 if (!hash) continue;
                 const config = await this._fetchAlbumBaseConfig(hash);
-                const configLora = this._normalizeLoraValue(config?.lora_name);
+                // New matching: check lora_names or lora_chain; fallback to single lora_name
+                const configNames = (() => {
+                    const list = [];
+                    if (Array.isArray(config?.lora_names)) {
+                        list.push(...config.lora_names);
+                    }
+                    if (Array.isArray(config?.lora_chain)) {
+                        config.lora_chain.forEach(entry => {
+                            const n = entry && (entry.lora_name || entry.name);
+                            if (n) list.push(n);
+                        });
+                    }
+                    if (typeof config?.lora_name === 'string' && config.lora_name.trim()) {
+                        list.push(config.lora_name);
+                    }
+                    return Array.from(new Set(list.map(v => this._normalizeLoraValue(v).trim()).filter(Boolean)));
+                })();
                 const rawConfigTags = Array.isArray(config?.lora_prompt_tags)
                     ? config.lora_prompt_tags
                     : (typeof config?.lora_prompt_tags === 'string' ? config.lora_prompt_tags.split(',') : []);
                 const configTags = rawConfigTags.map(tag => typeof tag === 'string' ? tag : '').filter(Boolean);
                 const hasMatchingTag = targetTag && configTags.some(tag => this._normalizeTagValue(tag) === targetTag);
-                if ((targetLora && configLora === targetLora) || hasMatchingTag) {
+                const hasMatchingLora = targetLora && configNames.includes(targetLora);
+                if (hasMatchingLora || hasMatchingTag) {
                     return { hash, name };
                 }
             }

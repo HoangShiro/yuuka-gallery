@@ -67,8 +67,35 @@ class ImageService:
                 workflow_template = config_to_save.get("_workflow_template")
                 if workflow_template is not None:
                     workflow_template = str(workflow_template).strip()
+                # Detect LoRA usage (single or multi) for correct workflow_type classification
                 raw_lora_name = config_to_save.get("lora_name")
-                has_lora = isinstance(raw_lora_name, str) and raw_lora_name.strip() and raw_lora_name.strip().lower() != "none"
+                has_single_lora = isinstance(raw_lora_name, str) and raw_lora_name.strip() and raw_lora_name.strip().lower() != "none"
+
+                def _has_multi_lora_from_chain(chain_val):
+                    if isinstance(chain_val, list) and len(chain_val) > 0:
+                        for item in chain_val:
+                            if isinstance(item, dict):
+                                name = item.get("name") or item.get("lora_name")
+                                if isinstance(name, str) and name.strip() and name.strip().lower() != "none":
+                                    return True
+                            elif isinstance(item, str):
+                                if item.strip() and item.strip().lower() != "none":
+                                    return True
+                    return False
+
+                def _has_multi_lora_from_names(names_val):
+                    if isinstance(names_val, list):
+                        return any(isinstance(s, str) and s.strip() and s.strip().lower() != "none" for s in names_val)
+                    if isinstance(names_val, str):
+                        parts = [p.strip() for p in names_val.split(',') if p.strip()]
+                        return any(p.lower() != "none" for p in parts)
+                    return False
+
+                has_lora = (
+                    has_single_lora
+                    or _has_multi_lora_from_chain(config_to_save.get("lora_chain"))
+                    or _has_multi_lora_from_names(config_to_save.get("lora_names"))
+                )
 
                 if config_to_save.get("_workflow_type") == "hires_input_image":
                     config_to_save["hires_enabled"] = True

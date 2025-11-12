@@ -1,184 +1,155 @@
 /**
- * Render thông tin chi tiết của một model vào một container HTML.
- * @param {object} model - Đối tượng model từ API Civitai.
- * @param {string} containerId - ID của element HTML để render kết quả vào.
+ * lora_search.js
+ * Module chứa logic để tương tác với Civitai REST API.
+ * Các hàm trả về Promise chứa dữ liệu hoặc throw Error khi thất bại.
  */
-function _renderModelDetailsInDOM(model, containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) {
-        console.error(`Không tìm thấy element với ID: ${containerId}`);
-        return;
-    }
 
-    // Xóa nội dung cũ trước khi render cái mới
-    container.innerHTML = '';
-
-    // Xây dựng chuỗi HTML
-    let htmlContent = `
-        <div class="model-card">
-            <h3>${model.name || 'N/A'} (ID: ${model.id})</h3>
-            <p><strong>Loại:</strong> ${model.type || 'N/A'}</p>
-            <p><strong>Tác giả:</strong> ${model.creator ? model.creator.username : 'N/A'}</p>
-    `;
-
-    const stats = model.stats || {};
-    if (Object.keys(stats).length > 0) {
-        htmlContent += `
-            <p>
-                <strong>Stats:</strong> 
-                Tải: ${stats.downloadCount || 0} | 
-                Thích: ${stats.favoriteCount || 0} | 
-                Rating: ${(stats.rating || 0).toFixed(2)} (${stats.ratingCount || 0} lượt)
-            </p>
-        `;
-    }
-
-    // --- Phần quan trọng: Lấy hình ảnh từ phiên bản model đầu tiên (thường là mới nhất) ---
-    if (model.modelVersions && model.modelVersions.length > 0) {
-        const primaryVersion = model.modelVersions[0]; // Lấy phiên bản đầu tiên trong danh sách
-        htmlContent += `<h4>Hình ảnh từ phiên bản: ${primaryVersion.name}</h4>`;
-
-        if (primaryVersion.images && primaryVersion.images.length > 0) {
-            htmlContent += '<div class="image-gallery">';
-            // Giới hạn chỉ hiển thị tối đa 5 ảnh để tránh làm nặng trang
-            primaryVersion.images.slice(0, 5).forEach(image => {
-                const promptText = image.meta ? (image.meta.prompt || 'Không có prompt.') : 'Không có prompt.';
-                htmlContent += `
-                    <div class="image-item">
-                        <a href="${image.url}" target="_blank" title="Xem ảnh gốc">
-                            <img src="${image.url}" alt="Model image" loading="lazy">
-                        </a>
-                        <p class="prompt"><strong>Prompt:</strong> ${promptText}</p>
-                    </div>
-                `;
-            });
-            htmlContent += '</div>';
-        } else {
-            htmlContent += '<p>Phiên bản này không có hình ảnh.</p>';
-        }
-    }
-
-    htmlContent += '</div>'; // Đóng thẻ model-card
-    container.innerHTML = htmlContent;
-}
-
-
-// --- CÁC HÀM GỌI API (Đã được cập nhật để gọi hàm render mới) ---
+const CIVITAI_API_BASE = "https://civitai.com/api/v1";
 
 /**
- * Tìm kiếm các model trên Civitai theo tên.
- * @param {string} searchTerm
- * @param {string} modelType
+ * Tìm kiếm các model trên Civitai theo tên và loại.
+ * @param {string} searchTerm - Tên model bạn muốn tìm.
+ * @param {string} modelType - Loại model ('LORA', 'Checkpoint', etc.). Mặc định là 'LORA'.
+ * @returns {Promise<Array<object>>} - Một Promise sẽ resolve với một mảng các đối tượng model.
+ * @throws {Error} - Ném ra lỗi nếu request thất bại.
  */
 async function searchModelsByName(searchTerm, modelType = 'LORA') {
-    console.log(`--- Đang tìm kiếm model loại '${modelType}' với tên '${searchTerm}' ---\n`);
-    const resultsContainer = document.getElementById('resultsByName');
-    resultsContainer.innerHTML = 'Đang tìm kiếm...'; // Thông báo cho người dùng
-
-    const url = new URL("https://civitai.com/api/v1/models");
+    if (!searchTerm) {
+        throw new Error("Tên tìm kiếm không được để trống.");
+    }
+    const url = new URL(`${CIVITAI_API_BASE}/models`);
     url.searchParams.append('query', searchTerm);
     url.searchParams.append('types', modelType);
-
     try {
         const response = await fetch(url.toString());
-        if (response.ok) {
-            const data = await response.json();
-            const models = data.items || [];
-            resultsContainer.innerHTML = ''; // Xóa thông báo "Đang tìm kiếm"
-            if (models.length === 0) {
-                resultsContainer.textContent = 'Không tìm thấy model nào khớp.';
-                return;
-            }
-            // Render từng model tìm được
-            models.forEach(model => _renderModelDetailsInDOM(model, 'resultsByName'));
-        } else {
+        if (!response.ok) {
             const errorText = await response.text();
-            resultsContainer.textContent = `Lỗi khi gọi API: ${response.status} - ${errorText}`;
+            throw new Error(`Lỗi API [${response.status}]: ${errorText}`);
         }
+        const data = await response.json();
+        return data.items || [];
     } catch (error) {
-        resultsContainer.textContent = `Đã xảy ra lỗi kết nối: ${error}`;
+        throw error;
     }
 }
 
 /**
- * Lấy thông tin model từ ID.
- * @param {number} modelId
+ * Lấy thông tin một model cụ thể từ ID của nó.
+ * @param {number|string} modelId - ID của model trên Civitai.
+ * @returns {Promise<object>} - Một Promise sẽ resolve với đối tượng model chi tiết.
+ * @throws {Error} - Ném ra lỗi nếu không tìm thấy model hoặc request thất bại.
  */
 async function getModelById(modelId) {
-    console.log(`--- Đang lấy thông tin model có ID: ${modelId} ---\n`);
-    const resultsContainer = document.getElementById('resultsById');
-    resultsContainer.innerHTML = 'Đang tải...';
-
-    const url = `https://civitai.com/api/v1/models/${modelId}`;
+    if (!modelId) {
+        throw new Error("Model ID không được để trống.");
+    }
+    const url = `${CIVITAI_API_BASE}/models/${modelId}`;
     try {
         const response = await fetch(url);
-        if (response.ok) {
-            const modelData = await response.json();
-            _renderModelDetailsInDOM(modelData, 'resultsById');
-        } else if (response.status === 404) {
-            resultsContainer.textContent = `Lỗi: Không tìm thấy model với ID ${modelId}.`;
-        } else {
-            const errorText = await response.text();
-            resultsContainer.textContent = `Lỗi khi gọi API: ${response.status} - ${errorText}`;
+        if (response.status === 404) {
+            throw new Error(`Không tìm thấy model với ID ${modelId}.`);
         }
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Lỗi API [${response.status}]: ${errorText}`);
+        }
+        return await response.json();
     } catch (error) {
-        resultsContainer.textContent = `Đã xảy ra lỗi kết nối: ${error}`;
+        throw error;
     }
 }
 
 /**
- * Lấy thông tin model từ URL.
- * @param {string} modelUrl
+ * Lấy thông tin model từ URL đầy đủ trên Civitai.
+ * @param {string} modelUrl - URL của model (ví dụ: https://civitai.com/models/12345/...).
+ * @returns {Promise<object>} - Một Promise sẽ resolve với đối tượng model chi tiết.
+ * @throws {Error} - Ném ra lỗi nếu URL không hợp lệ hoặc không tìm thấy model.
  */
 async function getModelByUrl(modelUrl) {
-    console.log(`--- Đang xử lý URL: ${modelUrl} ---\n`);
-    const resultsContainer = document.getElementById('resultsByUrl');
-    resultsContainer.innerHTML = ''; // Xóa kết quả cũ
-
+    if (!modelUrl) {
+        throw new Error("URL không được để trống.");
+    }
     const match = modelUrl.match(/\/models\/(\d+)/);
     if (match && match[1]) {
         const modelId = parseInt(match[1], 10);
-        // Tái sử dụng hàm getModelById nhưng render vào đúng container
-        const url = `https://civitai.com/api/v1/models/${modelId}`;
-        resultsContainer.innerHTML = 'Đang tải...';
-         try {
-            const response = await fetch(url);
-            if (response.ok) {
-                const modelData = await response.json();
-                _renderModelDetailsInDOM(modelData, 'resultsByUrl');
-            } else if (response.status === 404) {
-                resultsContainer.textContent = `Lỗi: Không tìm thấy model với ID ${modelId}.`;
-            } else {
-                const errorText = await response.text();
-                resultsContainer.textContent = `Lỗi khi gọi API: ${response.status} - ${errorText}`;
-            }
-        } catch (error) {
-            resultsContainer.textContent = `Đã xảy ra lỗi kết nối: ${error}`;
-        }
+        return await getModelById(modelId);
     } else {
-        resultsContainer.textContent = "URL không hợp lệ hoặc không tìm thấy ID model trong URL.";
+        throw new Error("URL không hợp lệ hoặc không tìm thấy ID model trong URL.");
     }
 }
 
-// --- Helper: expose raw search for reuse in other components (e.g., LoraDownloader) ---
-(function exposeRawSearch() {
+// --- HÀM MỚI ---
+
+/**
+ * Tìm kiếm hình ảnh trên Civitai dựa trên một truy vấn (tên, prompt, tag...).
+ * @param {object} options - Đối tượng chứa các tùy chọn tìm kiếm.
+ * @param {string} options.query - Từ khóa tìm kiếm.
+ * @param {number} [options.limit=20] - Số lượng hình ảnh tối đa trên mỗi trang (tối đa 200).
+ * @param {number} [options.page=1] - Số trang kết quả muốn lấy.
+ * @param {'Newest' | 'Most Reactions' | 'Most Comments' | 'Most Buzz' | 'Most Likes'} [options.sort='Newest'] - Tiêu chí sắp xếp.
+ * @param {'AllTime' | 'Year' | 'Month' | 'Week' | 'Day'} [options.period='AllTime'] - Khoảng thời gian áp dụng cho sắp xếp.
+ * @param {boolean} [options.nsfw=true] - `true` để bao gồm kết quả NSFW.
+ * @returns {Promise<Array<object>>} - Một Promise sẽ resolve với một mảng các đối tượng hình ảnh.
+ * @throws {Error} - Ném ra lỗi nếu request thất bại.
+ */
+async function searchImagesByQuery({
+    query,
+    limit = 20,
+    page = 1,
+    sort = 'Newest',
+    period = 'AllTime',
+    nsfw = true
+}) {
+    if (!query) {
+        throw new Error("Từ khóa tìm kiếm (query) không được để trống.");
+    }
+
+    const url = new URL(`${CIVITAI_API_BASE}/images`);
+    url.searchParams.append('query', query);
+    url.searchParams.append('limit', String(limit));
+    url.searchParams.append('page', String(page));
+    url.searchParams.append('sort', sort);
+    url.searchParams.append('period', period);
+    url.searchParams.append('nsfw', String(nsfw));
+
+    try {
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Lỗi API [${response.status}]: ${errorText}`);
+        }
+        const data = await response.json();
+        return data.items || [];
+    } catch (error) {
+        throw error;
+    }
+}
+
+// --- Helper: expose functions to global namespace for backward compatibility and raw search reuse ---
+(function exposeToGlobal() {
     try {
         const ensureNs = () => {
             window.Yuuka = window.Yuuka || { components: {} };
             window.Yuuka.loraSearch = window.Yuuka.loraSearch || {};
         };
         ensureNs();
+
+        // Preserve existing helper used by other components (returns raw API items)
         window.Yuuka.loraSearch.searchModelsRaw = async function(query, modelType = 'LORA') {
             const q = (query || '').trim();
             if (!q) return [];
-            const url = new URL('https://civitai.com/api/v1/models');
-            url.searchParams.append('query', q);
-            if (modelType) url.searchParams.append('types', modelType);
-            const res = await fetch(url.toString());
-            if (!res.ok) return [];
-            const data = await res.json();
-            return Array.isArray(data?.items) ? data.items : [];
+            try {
+                return await searchModelsByName(q, modelType);
+            } catch (_) {
+                return [];
+            }
         };
+
+        // Also expose main APIs under namespace (non-breaking add)
+        window.Yuuka.loraSearch.searchModelsByName = searchModelsByName;
+        window.Yuuka.loraSearch.getModelById = getModelById;
+        window.Yuuka.loraSearch.getModelByUrl = getModelByUrl;
+        window.Yuuka.loraSearch.searchImagesByQuery = searchImagesByQuery;
     } catch (err) {
         // no-op
     }

@@ -118,6 +118,91 @@ class GenerationService:
         except Exception:
             pass
 
+    # ---------- Workflow label helpers (multi-LoRA aware) ----------
+    def _count_loras_from_cfg(self, cfg: dict) -> int:
+        """Count how many LoRA entries are requested in the config.
+        Supports lora_chain (list of dict/str), lora_names (list or CSV), and lora_name (single).
+        """
+        try:
+            # 1) lora_chain
+            chain = cfg.get('lora_chain')
+            if isinstance(chain, list) and chain:
+                count = 0
+                for item in chain:
+                    if isinstance(item, dict):
+                        name = (item.get('name') or item.get('lora_name') or '').strip()
+                        if name and name.lower() != 'none':
+                            count += 1
+                    elif isinstance(item, str):
+                        name = item.strip()
+                        if name and name.lower() != 'none':
+                            count += 1
+                if count:
+                    return count
+
+            # 2) lora_names (CSV or list)
+            names = cfg.get('lora_names')
+            if isinstance(names, str):
+                parts = [p.strip() for p in names.split(',') if p.strip() and p.strip().lower() != 'none']
+                if parts:
+                    return len(parts)
+            elif isinstance(names, list):
+                parts = []
+                for p in names:
+                    if isinstance(p, str):
+                        s = p.strip()
+                        if s and s.lower() != 'none':
+                            parts.append(s)
+                    elif isinstance(p, dict):
+                        s = (p.get('name') or p.get('lora_name') or '').strip()
+                        if s and s.lower() != 'none':
+                            parts.append(s)
+                if parts:
+                    return len(parts)
+
+            # 3) lora_name (single)
+            single = cfg.get('lora_name')
+            if isinstance(single, str):
+                s = single.strip()
+                if s and s.lower() != 'none':
+                    return 1
+        except Exception:
+            pass
+        return 0
+
+    def _base_workflow_label(self, cfg: dict) -> str:
+        """Derive a base workflow label from config fields.
+        Prefers explicit labels; strips .json suffix if present.
+        """
+        label = (
+            cfg.get('workflow_template') or
+            cfg.get('workflow_type') or
+            cfg.get('_workflow_template') or
+            cfg.get('_workflow_type') or
+            'workflow'
+        )
+        try:
+            if isinstance(label, str) and label.endswith('.json'):
+                return label[:-5]
+        except Exception:
+            pass
+        return label
+
+    def _format_workflow_label(self, cfg: dict) -> str:
+        """Format workflow label with multi-LoRA awareness.
+        Examples:
+          - standard
+          - standard + LoRA
+          - hiresfix_esrgan_input_image + 3 LoRA
+        """
+        base = self._base_workflow_label(cfg or {})
+        lora_count = self._count_loras_from_cfg(cfg or {})
+        if lora_count > 1:
+            return f"{base} + {lora_count} LoRA"
+        if lora_count == 1:
+            return f"{base} + LoRA"
+        return base
+
     def _run_task(self, user_hash, task_id, character_hash, cfg_data):
         ws = None
         execution_successful = False
@@ -128,11 +213,7 @@ class GenerationService:
             target_address = cfg_data.get('server_address', '127.0.0.1:8888')
             # Pre-calc display fields for progress line
             user_tail = user_hash[-4:]
-            workflow_label_display = (
-                cfg_data.get('workflow_template') or
-                cfg_data.get('workflow_type') or
-                cfg_data.get('_workflow_template') or 'workflow'
-            )
+            workflow_label_display = self._format_workflow_label(cfg_data)
             width_display = cfg_data.get('width') or cfg_data.get('img_width') or '?'
             height_display = cfg_data.get('height') or cfg_data.get('img_height') or '?'
             size_label_display = f"{width_display} x {height_display}"
@@ -269,11 +350,7 @@ class GenerationService:
                     # user_hash tail (last 4 chars or segments separated by '-')
                     user_tail = user_hash[-4:]
                     cfg_gc = new_metadata.get('generationConfig', {}) or {}
-                    workflow_label = (
-                        cfg_gc.get('workflow_template') or
-                        cfg_gc.get('workflow_type') or
-                        cfg_gc.get('_workflow_template') or 'workflow'
-                    )
+                    workflow_label = self._format_workflow_label(cfg_gc)
                     # image size: try width/height from config, else '?' placeholders
                     width = cfg_gc.get('width') or cfg_gc.get('img_width') or '?'
                     height = cfg_gc.get('height') or cfg_gc.get('img_height') or '?'

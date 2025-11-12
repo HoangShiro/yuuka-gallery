@@ -1,0 +1,107 @@
+/* civitai_img_search.css - Independent copy of styles (adapted from lora_downloader.css) */
+/* Removed @import to eliminate dependency on lora-downloader plugin */
+
+.lora-downloader-open { overflow: hidden; }
+.civitai-img-overlay.lora-downloader-overlay { position: fixed; inset: 0; z-index: 1750; display: flex; align-items: center; justify-content: center; }
+.civitai-img-overlay .lora-downloader-backdrop { position: absolute; inset: 0; background: var(--color-modal-bg, rgba(0,0,0,0.85)); backdrop-filter: blur(8px); }
+.civitai-img-search-panel.lora-downloader-panel { position: relative; width: min(1280px,98vw); max-height: 90vh; background: var(--color-card-bg); color: var(--color-primary-text); border-radius: var(--rounded-lg); box-shadow: 0 24px 60px var(--color-shadow); display: flex; flex-direction: column; overflow: hidden; }
+.civitai-img-search-panel .lora-downloader-header { display: flex; align-items: flex-start; justify-content: space-between; padding: var(--spacing-5) var(--spacing-6); background: var(--color-primary-bg); border-bottom: 1px solid var(--color-border); }
+.civitai-img-search-panel .lora-downloader-header h2 { margin: 0; font-size: 1.6rem; font-weight: var(--font-weight-bold); }
+.civitai-img-search-panel .lora-downloader-header p { margin: var(--spacing-2) 0 0; color: var(--color-secondary-text); font-size: 0.95rem; }
+.civitai-img-search-panel .lora-downloader-close { background: transparent; color: inherit; border: none; cursor: pointer; padding: var(--spacing-2); border-radius: 50%; transition: background 0.2s ease; }
+.civitai-img-search-panel .lora-downloader-close:hover { background: var(--color-border); }
+.civitai-img-search-panel { --civitai-card-min: 220px; }
+.civitai-img-search-panel .lora-downloader-section { padding: var(--spacing-5) var(--spacing-6); }
+.civitai-img-search-panel .lora-downloader-body { display: flex; flex-direction: column; flex: 1 1 auto; overflow: hidden; }
+.civitai-img-search-panel .lora-downloader-form-section { flex: 0 0 auto; padding-bottom: var(--spacing-4); border-bottom: 1px solid var(--color-border); }
+.civitai-img-search-panel .lora-downloader-activity-section { flex: 1 1 auto; display: flex; flex-direction: column; overflow-y: auto; }
+.civitai-img-search-panel .lora-downloader-activity-list { display: flex; flex-direction: column; gap: var(--spacing-3); }
+.civitai-img-search-panel .lora-downloader-form { display: flex; flex-direction: column; gap: var(--spacing-4); }
+.civitai-img-search-panel .lora-downloader-form label { display: flex; flex-direction: column; gap: var(--spacing-2); }
+.civitai-img-search-panel .lora-downloader-form span { font-size: 0.9rem; font-weight: var(--font-weight-medium); color: #742f08; }
+.civitai-img-search-panel .lora-downloader-form input, .civitai-img-search-panel .lora-downloader-form select, .civitai-img-search-panel .lora-downloader-form textarea { background: var(--color-primary-bg); border: 1px solid var(--color-border); border-radius: var(--rounded-md); padding: 10px 12px; color: var(--color-primary-text); font-size: 0.95rem; transition: border-color 0.2s ease, background 0.2s ease; }
+.civitai-img-search-panel .lora-downloader-form input:focus, .civitai-img-search-panel .lora-downloader-form select:focus, .civitai-img-search-panel .lora-downloader-form textarea:focus { outline: none; border-color: var(--color-accent); background: var(--color-card-bg); }
+.civitai-img-search-panel .lora-downloader-form .toggle-field { display: flex; flex-direction: column; gap: var(--spacing-2); }
+.civitai-img-search-panel .android-toggle { position: relative; width: 46px; height: 26px; border-radius: 26px; background: var(--color-border); border: 1px solid var(--color-border); cursor: pointer; transition: background .25s ease, border-color .25s ease; outline: none; }
+.civitai-img-search-panel .android-toggle:before { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: var(--color-primary-text); box-shadow: 0 2px 4px rgba(0,0,0,.35); transition: transform .25s ease, background .25s ease; }
+.civitai-img-search-panel .android-toggle[aria-checked='true'] { background: var(--color-accent); border-color: var(--color-accent); }
+.civitai-img-search-panel .android-toggle[aria-checked='true']:before { transform: translateX(20px); background: #fff; }
+.civitai-img-search-panel .android-toggle:focus-visible { box-shadow: 0 0 0 3px rgba(255,138,117,0.45); }
+.civitai-img-search-panel .android-toggle:active:before { transform: translateX(0) scale(0.95); }
+.civitai-img-search-panel .android-toggle[aria-checked='true']:active:before { transform: translateX(20px) scale(0.95); }
+.civitai-img-search-panel .lora-downloader-field-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--spacing-4); align-items: end; }
+.civitai-img-search-panel .lora-downloader-form-card { border: 1px solid var(--color-border); border-radius: var(--rounded-lg); background: var(--color-card-bg); padding: var(--spacing-4); display: flex; flex-direction: column; gap: var(--spacing-4); }
+.civitai-img-search-panel .lora-downloader-form-row { display: flex; align-items: flex-end; gap: var(--spacing-3); }
+.civitai-img-search-panel .lora-form-field { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--spacing-2); min-width: 0; }
+.civitai-img-search-panel .lora-downloader-form-actions { display: inline-flex; align-items: center; gap: var(--spacing-2); flex-shrink: 0; }
+.civitai-img-search-panel .lora-form-action { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--color-border); border-radius: var(--rounded-md); background: var(--color-card-bg); color: var(--color-secondary-text); cursor: pointer; transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease; }
+.civitai-img-search-panel .lora-form-action:hover { background: var(--color-accent); border-color: var(--color-accent); color: #fff; }
+.civitai-img-search-panel .lora-form-action .material-symbols-outlined { font-size: 1.35rem; }
+.civitai-img-search-panel .lora-form-action.is-loading { opacity: .6; pointer-events: none; }
+.civitai-img-search-panel .lora-downloader-form-card.is-collapsed { gap: var(--spacing-3); }
+.civitai-img-search-panel .lora-downloader-form-card.is-collapsed .civitai-tag-filters { display: none !important; }
+.civitai-img-search-panel .lora-downloader-form-collapsible { display: block; }
+.civitai-img-search-panel .lora-downloader-form-collapsible[hidden] { display: none !important; }
+.civitai-tag-filters { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--spacing-4); align-items: start; }
+.civitai-tag-filters textarea { width: 100%; min-height: 64px; resize: vertical; }
+.civitai-img-search-panel .lora-downloader-subheader { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--spacing-3); margin-bottom: var(--spacing-3); flex-wrap: wrap; }
+.civitai-img-search-panel .lora-downloader-subheader > div:first-child { display: flex; flex-direction: column; gap: var(--spacing-1); }
+.civitai-img-search-panel .lora-downloader-subheader > div:first-child p { margin: 0; color: var(--color-secondary-text); font-size: 0.9rem; }
+.civitai-img-search-panel .lora-downloader-subheader-actions { display: inline-flex; gap: var(--spacing-2); }
+.civitai-img-search-panel .lora-downloader-subheader h3 { margin: 0; font-size: 1.1rem; font-weight: var(--font-weight-medium); }
+.civitai-img-search-panel .lora-downloader-subheader .btn-refresh { background: var(--color-border); border: none; color: var(--color-primary-text); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--rounded-md); padding: var(--spacing-2); cursor: pointer; transition: background 0.2s ease, color 0.2s ease; }
+.civitai-img-search-panel .lora-downloader-subheader button:hover { background: var(--color-accent); color: #fff; }
+.civitai-img-search-panel .lora-downloader-activity-list.has-models { display: grid; grid-template-columns: repeat(auto-fill,minmax(var(--civitai-card-min,240px),1fr)); gap: var(--spacing-4); align-items: stretch; min-width:0; }
+.civitai-img-search-panel .lora-downloader-activity-list.has-models > * { min-width:0; }
+.civitai-img-search-panel .lora-downloader-empty { padding: var(--spacing-4); text-align: center; background: var(--color-primary-bg); border-radius: var(--rounded-lg); font-size: 0.95rem; color: var(--color-secondary-text); border: 1px solid var(--color-border); }
+/* Removed old .lora-model-* blocks to avoid conflicts; using .civitai-card-* instead */
+
+/* Show more cards on very wide screens */
+@media (min-width:1280px){
+    .civitai-img-search-panel { --civitai-card-min: 200px; }
+}
+
+@media (max-width:640px){
+	.civitai-img-search-panel.lora-downloader-panel { width:98vw; max-height:92vh; }
+	.civitai-img-search-panel .lora-downloader-header { display:none; }
+	.civitai-img-search-panel .lora-downloader-section { padding:var(--spacing-4); }
+	.civitai-img-search-panel .lora-downloader-form-card { padding:var(--spacing-3); gap:var(--spacing-3); }
+	.civitai-img-search-panel .lora-downloader-form-row { gap:var(--spacing-2); }
+	.civitai-img-search-panel .lora-downloader-form-actions { gap:var(--spacing-1); }
+	.civitai-img-search-panel .lora-form-action { width:36px; height:36px; }
+	.civitai-img-search-panel .lora-downloader-field-grid { gap:var(--spacing-3); }
+	.civitai-tag-filters { grid-template-columns: 1fr; gap: var(--spacing-3); }
+	/* Narrow screens: force minimum two columns when feasible */
+	.civitai-img-search-panel { --civitai-card-min:150px; }
+	.civitai-img-search-panel .lora-downloader-activity-list.has-models { 
+		/* Use exactly two columns if width < 420px to avoid single column fallback */
+		grid-template-columns:repeat(2,minmax(0,1fr));
+		gap:var(--spacing-3);
+	}
+}
+
+/* Specific adjustments for image search cards */
+.civitai-img-search-panel h2 { font-size: 1.6rem; }
+.civitai-img-card { cursor:pointer; }
+.civitai-img-card:hover .civitai-card-row { border-color: var(--color-accent); }
+
+/* New isolated card system to avoid conflicts with lora_downloader */
+.civitai-img-search-panel .lora-downloader-activity-list.has-models { grid-template-columns: repeat(auto-fill, minmax(var(--civitai-card-min, 280px), 1fr)); }
+
+.civitai-img-card { width:100%; max-width:none; }
+.civitai-card-row { display:flex; flex-direction:column; gap:var(--spacing-3); padding:var(--spacing-4); border:1px solid var(--color-border); border-radius:var(--rounded-lg); background:var(--color-card-bg); height:100%; box-sizing:border-box; }
+.civitai-card-main { display:flex; flex-direction:column; gap:var(--spacing-2); width:100%; box-sizing:border-box; }
+.civitai-card-thumb-wrapper { width:100%; position:relative; }
+.civitai-card-thumb { width:100%; aspect-ratio:3/4; object-fit:cover; border-radius:var(--rounded-md); background:var(--color-border); display:block; }
+.civitai-card-text { display:flex; flex-direction:column; gap:var(--spacing-1); width:100%; min-width:0; flex:1 1 auto; }
+.civitai-card-text strong { display:-webkit-box; -webkit-line-clamp:1; line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; white-space:normal; font-size:1rem; font-weight:var(--font-weight-medium); word-break:break-word; overflow-wrap:anywhere; }
+.civitai-card-text p { display:-webkit-box; -webkit-line-clamp:3; line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; white-space:normal; font-size:0.85rem; line-height:1.2rem; margin:0; opacity:.9; word-break:break-word; overflow-wrap:anywhere; }
+.civitai-card-updated-inline { font-size:0.72rem; color:var(--color-secondary-text); word-break:break-word; }
+
+/* Hover emphasis */
+.civitai-img-card:hover .civitai-card-row { border-color: var(--color-accent); }
+
+/* Interaction zones */
+.civitai-card-thumb-wrapper.js-open-preview { cursor: zoom-in; }
+.civitai-card-text .js-copy { cursor: copy; }
+.civitai-card-text .js-copy.copied { opacity: 0.8; }

@@ -296,14 +296,13 @@ class CharacterListComponent {
         }
         
         if (q === '/token') {
-            const t = localStorage.getItem('yuuka-auth-token');
-            if (t) {
-                // Yuuka: auth rework v1.1 - Use global clipboard utility
-                Yuuka.ui.copyToClipboard(t)
+            const auth = window.Yuuka.services.auth;
+            if (auth && auth.copyTokenToClipboard) {
+                auth.copyTokenToClipboard()
                     .then(() => showError('Token đã sao chép.'))
                     .catch(() => showError('Lỗi: Không thể sao chép.'));
             } else {
-                showError('Không tìm thấy token.');
+                showError('Auth service chưa sẵn sàng.');
             }
             this.searchBox.value = '';
             return;
@@ -361,27 +360,11 @@ class CharacterListComponent {
         }
         
         if (q === '/logout') {
-            const token = localStorage.getItem('yuuka-auth-token');
-            if (token) {
-                try {
-                    // Yuuka: auth rework v1.1 - Use global clipboard utility
-                    await Yuuka.ui.copyToClipboard(token);
-                    sessionStorage.setItem('yuuka-logout-message', 'Đã đăng xuất. Token của bạn đã được sao chép vào clipboard.');
-                } catch (err) {
-                    console.warn("Could not copy token to clipboard:", err);
-                    sessionStorage.setItem('yuuka-logout-message', 'Đã đăng xuất. (Không thể sao chép token.)');
-                }
+            const auth = window.Yuuka.services.auth;
+            if (auth && auth.logout) {
+                await auth.logout(true);
             } else {
-                sessionStorage.setItem('yuuka-logout-message', 'Đã đăng xuất.');
-            }
-
-            try {
-                await this.api.auth.logout();
-            } catch (error) {
-                console.error(`Server logout failed: ${error.message}`);
-            } finally {
-                localStorage.removeItem('yuuka-auth-token');
-                window.location.reload();
+                showError('Auth service chưa sẵn sàng.');
             }
             return;
         }

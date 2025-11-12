@@ -20,13 +20,35 @@
             span.textContent = value;
             return `<div class="info-row"><strong>${label}:</strong> <span>${span.innerHTML}</span></div>`;
         };
+        const countLoras = (cfg) => {
+            try {
+                // lora_chain
+                if (Array.isArray(cfg.lora_chain) && cfg.lora_chain.length) {
+                    const names = cfg.lora_chain.map(it => (it && (it.lora_name || it.name) || '').trim()).filter(n => n && n.toLowerCase() !== 'none');
+                    if (names.length) return names.length;
+                }
+                // lora_names
+                if (Array.isArray(cfg.lora_names) && cfg.lora_names.length) {
+                    const names = cfg.lora_names.map(v => String(v && (v.lora_name || v.name || v)).trim()).filter(n => n && n.toLowerCase() !== 'none');
+                    if (names.length) return names.length;
+                } else if (typeof cfg.lora_names === 'string') {
+                    const names = cfg.lora_names.split(',').map(s => s.trim()).filter(Boolean).filter(n => n.toLowerCase() !== 'none');
+                    if (names.length) return names.length;
+                }
+                // lora_name (single)
+                if (typeof cfg.lora_name === 'string') {
+                    const s = cfg.lora_name.trim();
+                    if (s && s.toLowerCase() !== 'none') return 1;
+                }
+            } catch (e) {}
+            return 0;
+        };
+
         const resolveWorkflowDisplay = () => {
             const normalize = (value) => normalizeText(value).toLowerCase();
             const workflowTemplate = normalizeText(cfg.workflow_template);
             const workflowType = normalize(cfg.workflow_type);
-            const hasLoRA = typeof cfg.lora_name === 'string'
-                && cfg.lora_name.trim()
-                && cfg.lora_name.trim().toLowerCase() !== 'none';
+            const hasLoRA = countLoras(cfg) > 0;
             const labelMap = {
                 'hires_lora': 'Hires Fix + LoRA',
                 'hires': 'Hires Fix',
@@ -85,6 +107,32 @@
             ? `${Number(item.creationTime).toFixed(2)} giay`
             : (item.creationTime === 0 ? '0.00 giay' : '');
 
+        const displayLoRA = () => {
+            // Prefer lora_chain
+            if (Array.isArray(cfg.lora_chain) && cfg.lora_chain.length) {
+                const parts = cfg.lora_chain.map(item => {
+                    const n = String(item?.lora_name || item?.name || '').trim();
+                    if (!n) return null;
+                    const sm = item.strength_model ?? item.lora_strength_model;
+                    const sc = item.strength_clip ?? item.lora_strength_clip;
+                    if (sm != null && sc != null && Number.isFinite(Number(sm)) && Number.isFinite(Number(sc))) {
+                        return `${n}(${Number(sm).toFixed(2)}/${Number(sc).toFixed(2)})`;
+                    }
+                    return n;
+                }).filter(Boolean);
+                if (parts.length) return parts.join(', ');
+            }
+            // Then lora_names
+            if (Array.isArray(cfg.lora_names) && cfg.lora_names.length) {
+                return cfg.lora_names.map(v => String(v && (v.lora_name || v.name || v)).trim()).filter(Boolean).join(', ');
+            }
+            if (typeof cfg.lora_names === 'string' && cfg.lora_names.trim()) {
+                return cfg.lora_names.trim();
+            }
+            // Fallback to single
+            return cfg.lora_name;
+        };
+
         const infoGrid = `<div class="info-grid">${
             buildRow('Model', cfg.ckpt_name?.split('.')[0])
         }${
@@ -96,14 +144,30 @@
         }${
             buildRow('CFG', cfg.cfg)
         }${
-            buildRow('LoRA', cfg.lora_name)
+            buildRow('LoRA', displayLoRA())
         }${
             buildRow('Workflow', resolveWorkflowDisplay())
         }</div>`;
 
-        const loraTags = Array.isArray(cfg.lora_prompt_tags)
-            ? cfg.lora_prompt_tags.map(tag => normalizeText(tag)).filter(Boolean).join(', ')
-            : normalizeText(cfg.lora_prompt_tags);
+        const loraTags = (() => {
+            // First, try structured multi groups
+            if (Array.isArray(cfg.multi_lora_prompt_groups)) {
+                const parts = cfg.multi_lora_prompt_groups
+                    .map(arr => Array.isArray(arr) ? arr.map(s => normalizeText(s)).filter(Boolean) : [])
+                    .map(groupList => groupList.length ? `(${groupList.join(', ')})` : '')
+                    .filter(Boolean);
+                if (parts.length) return parts.join(', ');
+            }
+            // Then try legacy combined string
+            if (typeof cfg.multi_lora_prompt_tags === 'string' && cfg.multi_lora_prompt_tags.trim()) {
+                return cfg.multi_lora_prompt_tags.trim();
+            }
+            // Fallback to legacy list
+            if (Array.isArray(cfg.lora_prompt_tags)) {
+                return cfg.lora_prompt_tags.map(tag => normalizeText(tag)).filter(Boolean).join(', ');
+            }
+            return normalizeText(cfg.lora_prompt_tags);
+        })();
         const loraTagsBlock = loraTags ? buildRow('LoRA Tags', loraTags) : '';
 
         const sections = [];

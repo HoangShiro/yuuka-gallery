@@ -1,204 +1,69 @@
 // --- MODIFIED FILE: static/script.js ---
 
 // YUUKA: KHỞI TẠO NAMESPACE TOÀN CỤC NGAY LẬP TỨC
-window.Yuuka = {
-    components: {}, // Nơi các plugin sẽ khai báo component của chúng
-    services: {}, // YUUKA: Nơi chứa các instance của plugin dạng công cụ (singleton)
-    initialPluginState: {}, // Kênh giao tiếp để truyền dữ liệu khi chuyển tab
-    pluginState: {}, // Yuuka: Không gian state cho các plugin
-    
-    // YUUKA: EVENT BUS - NÂNG CẤP VỚI PHƯƠ-NG THỨC `off`
+// Yuuka: Core namespace (auth-related UI removed; delegated to auth plugin)
+window.Yuuka = window.Yuuka || {
+    components: {},
+    services: {},
+    initialPluginState: {},
+    pluginState: {},
     events: {
         _listeners: {},
         on(eventName, callback) {
-            if (!this._listeners[eventName]) {
-                this._listeners[eventName] = [];
-            }
+            if (!this._listeners[eventName]) this._listeners[eventName] = [];
             this._listeners[eventName].push(callback);
         },
         off(eventName, callback) {
-            if (this._listeners[eventName]) {
-                this._listeners[eventName] = this._listeners[eventName].filter(
-                    listener => listener !== callback
-                );
-            }
+            if (this._listeners[eventName]) this._listeners[eventName] = this._listeners[eventName].filter(l => l !== callback);
         },
         emit(eventName, data) {
             if (this._listeners[eventName]) {
-                this._listeners[eventName].forEach(callback => {
-                    try {
-                        callback(data);
-                    } catch (e) {
-                        console.error(`[EventBus] Error in '${eventName}' listener:`, e);
-                    }
-                });
+                this._listeners[eventName].forEach(cb => { try { cb(data); } catch(e){ console.error(`[EventBus] Error in '${eventName}' listener:`, e); } });
             }
-        },
+        }
     },
-
-    // YUUKA: UI SERVICE LÕI GIỜ CHỈ CÒN CÁC HÀM TIỆN ÍCH CHUNG
     ui: {
-        switchTab(tabId) {
-            switchTab(tabId);
-        },
-
-        confirm(message) {
+        switchTab(tabId){ switchTab(tabId); },
+        confirm(message){
             return new Promise(resolve => {
-                if (document.querySelector('.confirm-modal-backdrop')) {
-                    resolve(false);
-                    return;
-                }
-
+                if (document.querySelector('.confirm-modal-backdrop')) { resolve(false); return; }
                 const modal = document.createElement('div');
                 modal.className = 'confirm-modal-backdrop modal-backdrop';
-                modal.innerHTML = `
-                    <div class="confirm-modal-dialog">
-                        <p>${message}</p>
-                        <div class="modal-actions">
-                            <button class="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button>
-                            <button class="btn-confirm" title="Confirm"><span class="material-symbols-outlined">check</span></button>
-                        </div>
-                    </div>
-                `;
+                modal.innerHTML = `<div class="confirm-modal-dialog"><p>${message}</p><div class="modal-actions"><button class="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button><button class="btn-confirm" title="Confirm"><span class="material-symbols-outlined">check</span></button></div></div>`;
                 document.body.appendChild(modal);
-
-                const cleanupAndResolve = (value) => {
-                    modal.remove();
-                    window.removeEventListener('keydown', keydownHandler);
-                    resolve(value);
-                };
-
-                const keydownHandler = (e) => {
-                    if (e.key === 'Escape') cleanupAndResolve(false);
-                    if (e.key === 'Enter') cleanupAndResolve(true);
-                };
-
-                modal.querySelector('.btn-confirm').onclick = () => cleanupAndResolve(true);
-                modal.querySelector('.btn-cancel').onclick = () => cleanupAndResolve(false);
-                modal.addEventListener('click', e => { if (e.target === modal) cleanupAndResolve(false); });
-                window.addEventListener('keydown', keydownHandler);
+                const cleanup = v => { modal.remove(); window.removeEventListener('keydown', kd); resolve(v); };
+                const kd = e => { if (e.key==='Escape') cleanup(false); if (e.key==='Enter') cleanup(true); };
+                modal.querySelector('.btn-confirm').onclick = () => cleanup(true);
+                modal.querySelector('.btn-cancel').onclick = () => cleanup(false);
+                modal.addEventListener('click', e => { if (e.target === modal) cleanup(false); });
+                window.addEventListener('keydown', kd);
                 modal.querySelector('.btn-confirm').focus();
             });
         },
-
-        copyToClipboard(text) {
+        copyToClipboard(text){
             return new Promise((resolve, reject) => {
-                if (navigator.clipboard && window.isSecureContext) {
-                    navigator.clipboard.writeText(text).then(resolve).catch(reject);
-                } else {
-                    const textArea = document.createElement('textarea');
-                    textArea.value = text;
-                    textArea.style.position = 'fixed';
-                    textArea.style.left = '-9999px';
-                    document.body.appendChild(textArea);
-                    textArea.focus();
-                    textArea.select();
-                    try {
-                        const successful = document.execCommand('copy');
-                        if (successful) {
-                            resolve();
-                        } else {
-                            reject(new Error('Copy command was not successful'));
-                        }
-                    } catch (err) {
-                        reject(err);
-                    } finally {
-                        document.body.removeChild(textArea);
-                    }
-                }
+                if (navigator.clipboard && window.isSecureContext){ navigator.clipboard.writeText(text).then(resolve).catch(reject); return; }
+                const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.left='-9999px'; document.body.appendChild(ta); ta.focus(); ta.select();
+                try { if (document.execCommand('copy')) resolve(); else reject(new Error('Copy command was not successful')); }
+                catch(err){ reject(err); }
+                finally{ document.body.removeChild(ta); }
             });
         },
-
-        _initTagAutocomplete(formContainer, tagPredictions) {
-            if (!tagPredictions || tagPredictions.length === 0) return;
+        _initTagAutocomplete(formContainer, tagPredictions){
+            if (!tagPredictions || !tagPredictions.length) return;
             formContainer.querySelectorAll('textarea, input[type="text"]').forEach(input => {
                 if (input.parentElement.classList.contains('tag-autocomplete-container')) return;
-                const wrapper = document.createElement('div');
-                wrapper.className = 'tag-autocomplete-container';
-                input.parentElement.insertBefore(wrapper, input);
-                wrapper.appendChild(input);
-
-                const list = document.createElement('ul');
-                list.className = 'tag-autocomplete-list';
-                wrapper.appendChild(list);
-
-                let activeIndex = -1;
-                const hideList = () => {
-                    list.style.display = 'none';
-                    list.innerHTML = '';
-                    activeIndex = -1;
-                };
-
-                input.addEventListener('input', () => {
-                    const textValue = input.value;
-                    const cursor = input.selectionStart;
-                    const beforeCursor = textValue.substring(0, cursor);
-                    const lastComma = beforeCursor.lastIndexOf(',');
-                    const currentToken = beforeCursor.substring(lastComma + 1).trim();
-                    if (currentToken.length < 1) {
-                        hideList();
-                        return;
-                    }
-                    const searchToken = currentToken.replace(/\s+/g, '_').toLowerCase();
-                    const matches = tagPredictions.filter(tag => tag.startsWith(searchToken)).slice(0, 7);
-                    if (matches.length > 0) {
-                        list.innerHTML = matches.map(match => `
-                            <li class="tag-autocomplete-item" data-tag="${match}">${match.replace(/_/g, ' ')}</li>
-                        `).join('');
-                        list.style.display = 'block';
-                        activeIndex = -1;
-                    } else {
-                        hideList();
-                    }
-                });
-
-                const applyTag = (tag) => {
-                    const textValue = input.value;
-                    const cursor = input.selectionStart;
-                    const beforeCursor = textValue.substring(0, cursor);
-                    const lastComma = beforeCursor.lastIndexOf(',');
-                    const before = textValue.substring(0, lastComma + 1);
-                    const after = textValue.substring(cursor);
-                    const nextComma = after.indexOf(',');
-                    const remaining = nextComma == -1 ? '' : after.substring(nextComma);
-                    const result = `${before.trim() ? `${before.trim()} ` : ''}${tag.replace(/_/g, ' ')}, ${remaining.trim()}`.trim();
-                    input.value = result;
-                    const newCursor = (`${before.trim() ? `${before.trim()} ` : ''}${tag}`).length + 2;
-                    input.focus();
-                    input.setSelectionRange(newCursor, newCursor);
-                    hideList();
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                };
-
-                list.addEventListener('mousedown', (event) => {
-                    event.preventDefault();
-                    if (event.target.matches('.tag-autocomplete-item')) {
-                        applyTag(event.target.dataset.tag);
-                    }
-                });
-
-                input.addEventListener('keydown', (event) => {
-                    const items = list.querySelectorAll('.tag-autocomplete-item');
-                    if (items.length === 0) return;
-                    if (event.key === 'ArrowDown') {
-                        event.preventDefault();
-                        activeIndex = (activeIndex + 1) % items.length;
-                    } else if (event.key === 'ArrowUp') {
-                        event.preventDefault();
-                        activeIndex = (activeIndex - 1 + items.length) % items.length;
-                    } else if ((event.key === 'Enter' || event.key === 'Tab') && activeIndex > -1) {
-                        event.preventDefault();
-                        applyTag(items[activeIndex].dataset.tag);
-                    } else if (event.key === 'Escape') {
-                        hideList();
-                    }
-                    items.forEach((item, idx) => item.classList.toggle('active', idx === activeIndex));
-                });
-
-                input.addEventListener('blur', () => setTimeout(hideList, 150));
+                const wrapper=document.createElement('div'); wrapper.className='tag-autocomplete-container'; input.parentElement.insertBefore(wrapper,input); wrapper.appendChild(input);
+                const list=document.createElement('ul'); list.className='tag-autocomplete-list'; wrapper.appendChild(list);
+                let activeIndex=-1; const hide=()=>{ list.style.display='none'; list.innerHTML=''; activeIndex=-1; };
+                input.addEventListener('input', ()=>{ const textValue=input.value; const cursor=input.selectionStart; const before=textValue.substring(0,cursor); const lastComma=before.lastIndexOf(','); const current=before.substring(lastComma+1).trim(); if (current.length<1){ hide(); return; } const search=current.replace(/\s+/g,'_').toLowerCase(); const matches=tagPredictions.filter(t=>t.startsWith(search)).slice(0,7); if(matches.length){ list.innerHTML=matches.map(m=>`<li class="tag-autocomplete-item" data-tag="${m}">${m.replace(/_/g,' ')}</li>`).join(''); list.style.display='block'; activeIndex=-1; } else hide(); });
+                const applyTag=tag=>{ const textValue=input.value; const cursor=input.selectionStart; const before=textValue.substring(0,cursor); const lastComma=before.lastIndexOf(','); const prefix=textValue.substring(0,lastComma+1); const after=textValue.substring(cursor); const nextComma=after.indexOf(','); const remaining=nextComma==-1?'' : after.substring(nextComma); const result=`${prefix.trim()?`${prefix.trim()} `:''}${tag.replace(/_/g,' ')}, ${remaining.trim()}`.trim(); input.value=result; const newCursor=(`${prefix.trim()?`${prefix.trim()} `:''}${tag}`).length+2; input.focus(); input.setSelectionRange(newCursor,newCursor); hide(); input.dispatchEvent(new Event('input',{ bubbles:true })); };
+                list.addEventListener('mousedown', ev=>{ ev.preventDefault(); if (ev.target.matches('.tag-autocomplete-item')) applyTag(ev.target.dataset.tag); });
+                input.addEventListener('keydown', ev=>{ const items=list.querySelectorAll('.tag-autocomplete-item'); if(!items.length) return; if(ev.key==='ArrowDown'){ ev.preventDefault(); activeIndex=(activeIndex+1)%items.length; } else if(ev.key==='ArrowUp'){ ev.preventDefault(); activeIndex=(activeIndex-1+items.length)%items.length; } else if((ev.key==='Enter'||ev.key==='Tab') && activeIndex>-1){ ev.preventDefault(); applyTag(items[activeIndex].dataset.tag); } else if(ev.key==='Escape'){ hide(); } items.forEach((it,idx)=>it.classList.toggle('active', idx===activeIndex)); });
+                input.addEventListener('blur', ()=> setTimeout(hide,150));
             });
         }
-    },
+    }
 };
 // --- DOM Elements ---
 const tabsContainer = document.getElementById('tabs');
@@ -227,44 +92,10 @@ function showError(message) {
     errorPopup.classList.add('show');
     errorTimeout = setTimeout(() => { errorPopup.classList.remove('show'); }, 4000);
 }
+// Expose for plugins
+window.showError = showError;
 
-function renderLoginForm(message = '') {
-    document.body.className = 'is-logged-out';
-    authContainer.innerHTML = `<div class="auth-form-wrapper"><h3>Xác thực</h3><p>Nhập Token của bạn hoặc tạo một Token mới để tiếp tục.</p>${message ? `<p class="error-msg">${message}</p>` : ''}<form id="auth-form"><input type="text" id="auth-token-input" placeholder="Nhập Token tại đây" autocomplete="off"><button type="submit">Đăng nhập</button><button type="button" id="generate-token-btn">Tạo Token Mới</button></form></div>`;
-    
-    document.getElementById('auth-form').addEventListener('submit', async (e) => { 
-        e.preventDefault(); 
-        const token = document.getElementById('auth-token-input').value.trim(); 
-        if (!token) return;
-        try {
-            await api.auth.login(token);
-            localStorage.setItem('yuuka-auth-token', token); 
-            await startApplication();
-        } catch (error) {
-             renderLoginForm(`Token không hợp lệ hoặc đã xảy ra lỗi.`);
-        }
-    });
-
-    document.getElementById('generate-token-btn').addEventListener('click', async () => { 
-        try { 
-            const data = await api.auth.generateToken(); 
-            localStorage.setItem('yuuka-auth-token', data.token);
-            
-            // Yuuka: auth rework v1.1 - Tự động sao chép token mới
-            try {
-                await Yuuka.ui.copyToClipboard(data.token);
-                showError("Token mới đã được tạo và sao chép!");
-            } catch (copyError) {
-                console.error("Failed to copy token:", copyError);
-                showError("Đã tạo token mới (không thể tự sao chép).");
-            }
-            
-            await startApplication(); 
-        } catch (error) { 
-            renderLoginForm(`Lỗi tạo token: ${error.message}`); 
-        } 
-    });
-}
+// Auth UI removed; managed by AuthPluginComponent
 
 async function switchTab(tabName) {
     // Yuuka: reload on active tab click v1.0 - Gỡ bỏ điều kiện return sớm để cho phép tải lại.
@@ -455,38 +286,46 @@ async function initializeAppUI() {
 
 // Yuuka: auth rework v1.0 - Viết lại hoàn toàn luồng khởi động
 async function startApplication() {
-    console.log("[Core] Yuuka is waking up...");
+    console.log('[Core] Yuuka is waking up...');
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
-    // Yuuka: scroll restoration fix v1.0 - Tắt tính năng của trình duyệt
-    if ('scrollRestoration' in history) {
-        history.scrollRestoration = 'manual';
+    // Ensure auth service (provided by auth plugin JS) exists; if not, create a lightweight fallback until plugin loads.
+    if (!window.Yuuka.services.auth) {
+        if (window.Yuuka.components['AuthPluginComponent']) {
+            window.Yuuka.services.auth = new window.Yuuka.components['AuthPluginComponent'](null, api);
+            window.Yuuka.services.auth.init();
+        } else {
+            // Fallback placeholder (will be replaced once plugin script loads)
+            window.Yuuka.services.auth = {
+                getToken: () => localStorage.getItem('yuuka-auth-token'),
+                showLogin: (msg) => { document.body.className='is-logged-out'; const c=document.getElementById('auth-container'); if(c) c.innerHTML=`<div class="auth-form-wrapper"><h3>Đang tải Auth Plugin...</h3>${msg?`<p class='error-msg'>${msg}</p>`:''}</div>`; },
+                ensureLogoutMessage: ()=>{ const m=sessionStorage.getItem('yuuka-logout-message'); if(m){ sessionStorage.removeItem('yuuka-logout-message'); showError(m);} }
+            };
+        }
     }
 
-    const token = localStorage.getItem('yuuka-auth-token');
-    
-    const logoutMessage = sessionStorage.getItem('yuuka-logout-message');
-    if (logoutMessage) {
-        sessionStorage.removeItem('yuuka-logout-message');
-    }
+    window.Yuuka.services.auth.ensureLogoutMessage?.();
+    const token = window.Yuuka.services.auth.getToken?.();
 
     if (token) {
         try {
-            // Thử khởi tạo UI. Các request API bên trong sẽ tự xác thực token.
             await initializeAppUI();
         } catch (error) {
-            // Nếu có lỗi 401 (Unauthorized), token đã hết hạn hoặc không hợp lệ.
             if (error.status === 401) {
                 localStorage.removeItem('yuuka-auth-token');
-                renderLoginForm("Token không hợp lệ. Vui lòng đăng nhập lại.");
+                window.Yuuka.services.auth.showLogin?.('Token không hợp lệ. Vui lòng đăng nhập lại.');
             } else {
                 showError(`Lỗi khởi tạo: ${error.message}`);
                 console.error(error);
             }
         }
     } else {
-        // Nếu không có token trong localStorage, hiển thị form đăng nhập.
-        renderLoginForm(logoutMessage || '');
+        window.Yuuka.services.auth.showLogin?.('');
     }
 }
 
 window.addEventListener('load', startApplication);
+// Listen for auth:login to bootstrap rest of UI if not yet initialized
+window.Yuuka.events.on('auth:login', async () => {
+    try { await initializeAppUI(); } catch (e){ console.error('[Auth] Failed post-login init:', e); showError(`Lỗi khởi tạo: ${e.message}`); }
+});

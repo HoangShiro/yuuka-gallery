@@ -283,6 +283,7 @@
 
     ensureNamespace();
 
+
     async function openSettingsModal(options) {
         const modal = document.createElement('div');
         modal.className = 'modal-backdrop settings-modal-backdrop';
@@ -300,7 +301,52 @@
         };
 
         try {
-            const { last_config, global_choices } = await options.fetchInfo();
+            const infoPayload = await options.fetchInfo();
+            const { last_config, global_choices } = infoPayload;
+            // Prefer backend-provided normalized chain; otherwise derive from last_config
+            const deriveNormalizedChain = (cfg) => {
+                const result = [];
+                if (!cfg || typeof cfg !== 'object') return result;
+                const smDef = Number((global_choices?.lora_defaults?.lora_strength_model) ?? last_config?.lora_strength_model ?? 1.0) || 1.0;
+                const scDef = Number((global_choices?.lora_defaults?.lora_strength_clip) ?? last_config?.lora_strength_clip ?? 1.0) || 1.0;
+                const pushEntry = (name, sm, sc) => {
+                    const n = (name || '').trim();
+                    if (!n || n.toLowerCase() === 'none') return;
+                    let _sm = parseFloat(sm);
+                    let _sc = parseFloat(sc);
+                    if (Number.isNaN(_sm)) _sm = smDef;
+                    if (Number.isNaN(_sc)) _sc = scDef;
+                    result.push({ lora_name: n, strength_model: _sm, strength_clip: _sc });
+                };
+                const chain = cfg.lora_chain;
+                if (Array.isArray(chain) && chain.length) {
+                    chain.forEach(item => {
+                        if (!item) return;
+                        if (typeof item === 'string') {
+                            pushEntry(item, smDef, scDef);
+                        } else if (typeof item === 'object') {
+                            const name = item.name ?? item.lora_name ?? '';
+                            const sm = item.strength_model ?? item.lora_strength_model ?? smDef;
+                            const sc = item.strength_clip ?? item.lora_strength_clip ?? scDef;
+                            pushEntry(String(name), sm, sc);
+                        }
+                    });
+                    return result;
+                }
+                // Fallback: lora_names array or CSV
+                const namesRaw = cfg.lora_names ?? cfg.multi_lora_names ?? cfg.lora_name;
+                if (Array.isArray(namesRaw)) {
+                    namesRaw.forEach(n => pushEntry(String(n || ''), smDef, scDef));
+                } else if (typeof namesRaw === 'string') {
+                    namesRaw.split(',').map(s => s.trim()).filter(Boolean).forEach(n => pushEntry(n, smDef, scDef));
+                }
+                return result;
+            };
+            let normalizedLoraChain = Array.isArray(infoPayload?.normalized_lora_chain) ? infoPayload.normalized_lora_chain : [];
+            if (!normalizedLoraChain || !normalizedLoraChain.length) {
+                normalizedLoraChain = deriveNormalizedChain(last_config || {});
+            }
+            const loraNamesFromInfo = Array.isArray(infoPayload?.lora_names) ? infoPayload.lora_names : [];
             const tagPredictions = await api.getTags().catch(() => []);
 
             let loraMetadataMap = {};
@@ -319,7 +365,6 @@
             const loraOptions = (global_choices && Array.isArray(global_choices.loras) && global_choices.loras.length > 0)
                 ? global_choices.loras
                 : [{ name: 'None', value: 'None' }];
-            const selectedLora = last_config.lora_name || 'None';
             const toNumber = (val, fallback) => {
                 const parsed = parseFloat(val);
                 return Number.isNaN(parsed) ? fallback : parsed;
@@ -445,26 +490,13 @@
                         <div class="album-settings-section">
                             <h4>LoRA</h4>
                             <div class="album-settings-section__body">
-                                <div class="form-group lora-select-group">
-                                    <label for="cfg-lora_name">LoRA Name</label>
-                                    <button type="button" class="lora-select-toggle" aria-haspopup="listbox" aria-expanded="false">
-                                        <div class="lora-select-toggle__thumb"></div>
-                                        <div class="lora-select-toggle__meta">
-                                            <span class="lora-select-toggle__title">None</span>
-                                            <span class="lora-select-toggle__subtitle">Không dùng LoRA</span>
-                                        </div>
-                                        <span class="material-symbols-outlined lora-select-toggle__icon">expand_more</span>
+                                <!-- Yuuka: Multi-LoRA preparation wrapper v1.0 -->
+                                <div class="lora-multi-container" data-role="lora-multi-container"></div>
+                                <div class="lora-multi-add" data-role="lora-multi-add">
+                                    <button type="button" class="lora-multi-add__btn" title="Thêm LoRA (+)">
+                                        <span class="material-symbols-outlined">add</span>
                                     </button>
-                                    <div class="lora-card-panel" role="listbox">
-                                        <div class="lora-card-panel__controls">
-                                            <input type="search" class="lora-card-panel__search-input" placeholder="Search LoRA">
-                                            <button type="button" class="lora-card-panel__search-button" title="Clear search">x</button>
-                                        </div>
-                                        <div class="lora-card-grid"></div>
-                                    </div>
-                                    <input type="hidden" id="cfg-lora_name" name="lora_name" value="${escapeAttr(selectedLora)}">
                                 </div>
-                                <div class="lora-tags-wrapper"></div>
                             </div>
                         </div>
                     </div>
@@ -501,93 +533,406 @@
             `;
 
             const form = dialog.querySelector('#album-settings-form');
+            const loraDefaults = (global_choices && global_choices.lora_defaults)
+                ? global_choices.lora_defaults
+                : { lora_strength_model: 1.0, lora_strength_clip: 1.0 };
             const saveBtn = dialog.querySelector('.btn-save');
             const generateBtn = dialog.querySelector('.btn-generate');
-            const loraInput = form?.elements?.['lora_name'];
-            const loraFieldGroup = loraInput ? loraInput.closest('.form-group') : null;
-            const loraSelectGroup = loraFieldGroup;
-            const loraCardPanel = loraSelectGroup ? loraSelectGroup.querySelector('.lora-card-panel') : null;
-            const loraSearchInput = loraCardPanel ? loraCardPanel.querySelector('.lora-card-panel__search-input') : null;
-            const loraSearchButton = loraCardPanel ? loraCardPanel.querySelector('.lora-card-panel__search-button') : null;
-            const loraCardGrid = loraCardPanel ? loraCardPanel.querySelector('.lora-card-grid') : null;
-            const loraToggle = loraSelectGroup ? loraSelectGroup.querySelector('.lora-select-toggle') : null;
-            const loraToggleThumb = loraToggle ? loraToggle.querySelector('.lora-select-toggle__thumb') : null;
-            const loraToggleTitle = loraToggle ? loraToggle.querySelector('.lora-select-toggle__title') : null;
-            const loraToggleSubtitle = loraToggle ? loraToggle.querySelector('.lora-select-toggle__subtitle') : null;
-            const loraToggleIcon = loraToggle ? loraToggle.querySelector('.lora-select-toggle__icon') : null;
-            const loraColumn = dialog.querySelector('[data-column="lora"]');
-            const loraColumnBody = loraColumn ? loraColumn.querySelector('.album-settings-section__body') : null;
-            let loraTagsWrapper = null;
-            if (loraFieldGroup) {
-                loraTagsWrapper = loraFieldGroup.querySelector('.lora-tags-wrapper');
-                if (!loraTagsWrapper) {
-                    const body = loraFieldGroup.closest('.album-settings-section__body');
-                    loraTagsWrapper = body ? body.querySelector('.lora-tags-wrapper') : null;
-                }
-            } else if (loraColumnBody) {
-                loraTagsWrapper = loraColumnBody.querySelector('.lora-tags-wrapper');
-            }
-            if (!loraTagsWrapper && loraColumnBody) {
-                loraTagsWrapper = document.createElement('div');
-                loraTagsWrapper.className = 'lora-tags-wrapper';
-                loraColumnBody.appendChild(loraTagsWrapper);
-            }
+                        // Unified LoRA wrapper template & initialization
+                        const loraContainer = dialog.querySelector('[data-role="lora-multi-container"]');
 
-            let isLoraPanelOpen = false;
-            let hasPanelListeners = false;
-            const outsideClickListener = (event) => {
-                if (!loraSelectGroup?.contains(event.target)) {
-                    setLoraPanelOpen(false);
-                }
+            const createLoraWrapperHTML = (index, value, smVal, scVal) => {
+                                const valEsc = escapeAttr(value || 'None');
+                                const sm = (typeof smVal === 'number' && !Number.isNaN(smVal)) ? smVal : (Number(loraDefaults.lora_strength_model) || 1.0);
+                                const sc = (typeof scVal === 'number' && !Number.isNaN(scVal)) ? scVal : (Number(loraDefaults.lora_strength_clip) || 1.0);
+                                return `
+                <div class=\"lora-multi-wrapper\" data-role=\"lora-multi-wrapper\" data-index=\"${index}\" data-empty=\"${(!value || value==='None') ? 'true' : 'false'}\">\n
+                                    <div class=\"form-group lora-select-group\" data-role=\"lora-select-group\">\n
+                                        <label>LoRA #${index+1} <button type=\"button\" class=\"lora-remove-btn\" data-remove style=\"display:inline-flex\" title=\"Xóa LoRA\">&times;</button></label>\n
+                                        <button type=\"button\" class=\"lora-select-toggle\" aria-haspopup=\"listbox\" aria-expanded=\"false\">\n
+                                            <div class=\"lora-select-toggle__thumb\"></div>\n
+                                            <div class=\"lora-select-toggle__meta\">\n
+                                                <span class=\"lora-select-toggle__title\">${(value && value!=='None') ? escapeHtml(value) : 'Chọn một LoRA'}</span>\n
+                                                <span class=\"lora-select-toggle__subtitle\">${(value && value!=='None') ? escapeHtml(value) : 'Hoặc tải mới bằng Lora-downloader'}</span>\n
+                                            </div>\n
+                                            <span class=\"material-symbols-outlined lora-select-toggle__icon\">expand_more</span>\n
+                                        </button>\n
+                                        <div class=\"lora-card-panel\" role=\"listbox\" style=\"display:none\">\n
+                                            <div class=\"lora-card-panel__controls\">\n
+                                                <input type=\"search\" class=\"lora-card-panel__search-input\" placeholder=\"Search LoRA\">\n
+                                                <button type=\"button\" class=\"lora-card-panel__search-button\" title=\"Clear search\">x</button>\n
+                                            </div>\n
+                                            <div class=\"lora-card-grid\"></div>\n
+                                        </div>\n
+                                        <input type=\"hidden\" name=\"lora_name_${index}\" value=\"${valEsc}\">\n
+                                    </div>\n
+                                    <div class=\"lora-strength-row\" style=\"display:flex; gap: 12px;\">\n
+                                        <div class=\"form-group form-group-slider\">\n
+                                            <label for=\"cfg-lora_strength_model_${index}\">Model: <span id=\"val-lora_strength_model_${index}\">${sm}</span></label>\n
+                                            <input type=\"range\" data-lora-strength=\"model\" id=\"cfg-lora_strength_model_${index}\" name=\"lora_strength_model_${index}\" value=\"${sm}\" min=\"0\" max=\"1.5\" step=\"0.05\" oninput=\"document.getElementById('val-lora_strength_model_${index}').textContent = this.value\">\n
+                                        </div>\n
+                                        <div class=\"form-group form-group-slider\">\n
+                                            <label for=\"cfg-lora_strength_clip_${index}\">Clip: <span id=\"val-lora_strength_clip_${index}\">${sc}</span></label>\n
+                                            <input type=\"range\" data-lora-strength=\"clip\" id=\"cfg-lora_strength_clip_${index}\" name=\"lora_strength_clip_${index}\" value=\"${sc}\" min=\"0\" max=\"1.5\" step=\"0.05\" oninput=\"document.getElementById('val-lora_strength_clip_${index}').textContent = this.value\">\n
+                                        </div>\n
+                                    </div>\n
+                                    <div class=\"lora-tags-wrapper\" data-role=\"lora-tags-wrapper\"></div>\n
+                                </div>`;
+                        };
+
+                        const parseMultiLoraPreset = () => {
+                            // Priority: normalized chain from info -> last_config.lora_names -> multi_lora_names
+                            let names = [];
+                            if (normalizedLoraChain.length) {
+                                names = normalizedLoraChain.map(e => String(e.lora_name || '').trim()).filter(Boolean);
+                            }
+                            if (!names.length) {
+                                const namesRaw = loraNamesFromInfo.length ? loraNamesFromInfo : (last_config.lora_names || last_config.multi_lora_names || []);
+                                names = Array.isArray(namesRaw) ? namesRaw.filter(v => typeof v === 'string' && v.trim()) : [];
+                            }
+                            // Preferred structured format: array-of-arrays of strings
+                            const structured = Array.isArray(last_config.multi_lora_prompt_groups)
+                                ? last_config.multi_lora_prompt_groups.map(arr => Array.isArray(arr) ? arr.filter(Boolean) : [])
+                                : null;
+                            if (structured) {
+                                return { names, perLoraGroups: structured };
+                            }
+                            // Legacy string format: one parentheses block per LoRA; split content by comma into multiple groups
+                            const presetString = last_config.multi_lora_prompt_tags || '';
+                            const groupRegex = /\(([^)]*)\)/g;
+                            const perLoraGroups = [];
+                            let match;
+                            while ((match = groupRegex.exec(presetString)) !== null) {
+                                const content = (match[1] || '').trim();
+                                if (content) {
+                                    const parts = content.split(',').map(s => s.trim()).filter(Boolean);
+                                    perLoraGroups.push(parts);
+                                } else {
+                                    perLoraGroups.push([]);
+                                }
+                            }
+                            return { names, perLoraGroups };
+                        };
+
+                        const applyPresetToWrapper = (wrapper, loraName, groupList) => {
+                            if (!wrapper) return;
+                            const hidden = wrapper.querySelector('input[type="hidden"][name^="lora_name_"]');
+                            if (hidden) hidden.value = loraName || 'None';
+                            const titleEl = wrapper.querySelector('.lora-select-toggle__title');
+                            const subtitleEl = wrapper.querySelector('.lora-select-toggle__subtitle');
+                            if (titleEl) titleEl.textContent = (loraName && loraName !== 'None') ? loraName : 'Chọn một LoRA';
+                            if (subtitleEl) subtitleEl.textContent = (loraName && loraName !== 'None') ? loraName : 'Hoặc tải mới bằng Lora-downloader';
+                            // After init, when tags are rendered we will toggle according to groupList
+                            wrapper.dataset.presetGroups = JSON.stringify(groupList || []);
+                        };
+
+                        const mountInitialWrappers = () => {
+                            if (!loraContainer) return [];
+                            const { names, perLoraGroups } = parseMultiLoraPreset();
+                            // Always render at least one wrapper; prefer normalized/explicit names
+                            const finalNames = names.length ? names : ['None'];
+                            loraContainer.innerHTML = '';
+                            const getInitStrengths = (idx, name) => {
+                                let sm = Number(loraDefaults.lora_strength_model) || 1.0;
+                                let sc = Number(loraDefaults.lora_strength_clip) || 1.0;
+                                if (Array.isArray(normalizedLoraChain) && normalizedLoraChain.length) {
+                                    const byIdx = normalizedLoraChain[idx];
+                                    if (byIdx && (!name || byIdx.lora_name === name)) {
+                                        const smRaw = byIdx.strength_model ?? byIdx.lora_strength_model;
+                                        const scRaw = byIdx.strength_clip ?? byIdx.lora_strength_clip;
+                                        if (typeof smRaw === 'number') sm = smRaw; else if (typeof smRaw === 'string') { const t = parseFloat(smRaw); if (!Number.isNaN(t)) sm = t; }
+                                        if (typeof scRaw === 'number') sc = scRaw; else if (typeof scRaw === 'string') { const t2 = parseFloat(scRaw); if (!Number.isNaN(t2)) sc = t2; }
+                                    } else if (name) {
+                                        const found = normalizedLoraChain.find(e => e && e.lora_name === name);
+                                        if (found) {
+                                            const smRaw = found.strength_model ?? found.lora_strength_model;
+                                            const scRaw = found.strength_clip ?? found.lora_strength_clip;
+                                            if (typeof smRaw === 'number') sm = smRaw; else if (typeof smRaw === 'string') { const t = parseFloat(smRaw); if (!Number.isNaN(t)) sm = t; }
+                                            if (typeof scRaw === 'number') sc = scRaw; else if (typeof scRaw === 'string') { const t2 = parseFloat(scRaw); if (!Number.isNaN(t2)) sc = t2; }
+                                        }
+                                    }
+                                }
+                                return { sm, sc };
+                            };
+                            finalNames.forEach((n, idx) => {
+                                const { sm, sc } = getInitStrengths(idx, n);
+                                const html = createLoraWrapperHTML(idx, n || 'None', sm, sc);
+                                const temp = document.createElement('div');
+                                temp.innerHTML = html.trim();
+                                const wrapper = temp.firstElementChild;
+                                loraContainer.appendChild(wrapper);
+                                applyPresetToWrapper(wrapper, n, perLoraGroups[idx] || []);
+                            });
+                            return Array.from(loraContainer.querySelectorAll('.lora-multi-wrapper'));
+                        };
+                        const mountedWrappers = mountInitialWrappers();
+                        const initialWrapper = mountedWrappers[0] || null;
+
+
+            // --- Yuuka: Multi-LoRA dynamic add v1.0 ---
+            const multiAddContainer = dialog.querySelector('[data-role="lora-multi-add"]');
+            const createNewLoraWrapper = (index) => {
+                const defSm = Number(loraDefaults.lora_strength_model) || 1.0;
+                const defSc = Number(loraDefaults.lora_strength_clip) || 1.0;
+                const html = createLoraWrapperHTML(index, 'None', defSm, defSc);
+                const temp = document.createElement('div');
+                temp.innerHTML = html.trim();
+                const wrapper = temp.firstElementChild;
+                return wrapper;
             };
-            const escapeListener = (event) => {
-                if (event.key === 'Escape') {
-                    setLoraPanelOpen(false);
-                }
-            };
-            const setLoraPanelOpen = (open) => {
-                if (!loraSelectGroup) return;
-                if (isLoraPanelOpen === open) return;
-                isLoraPanelOpen = open;
-                loraSelectGroup.classList.toggle('is-open', open);
-                if (loraCardPanel) {
-                    loraCardPanel.style.display = open ? '' : 'none';
-                }
-                if (loraToggle) {
-                    loraToggle.classList.toggle('is-open', open);
-                    loraToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-                }
-                if (loraToggleIcon) {
-                    loraToggleIcon.textContent = open ? 'expand_less' : 'expand_more';
-                }
-                if (open) {
-                    if (!hasPanelListeners) {
-                        document.addEventListener('mousedown', outsideClickListener);
-                        document.addEventListener('keydown', escapeListener);
-                        hasPanelListeners = true;
-                    }
-                } else if (hasPanelListeners) {
-                    document.removeEventListener('mousedown', outsideClickListener);
-                    document.removeEventListener('keydown', escapeListener);
-                    hasPanelListeners = false;
-                }
-            };
-            if (loraCardPanel) {
-                loraCardPanel.style.display = 'none';
-            }
-            if (loraToggle) {
-                loraToggle.addEventListener('click', () => {
-                    setLoraPanelOpen(!isLoraPanelOpen);
+            const getLoraWrappers = () => Array.from(dialog.querySelectorAll('.lora-multi-wrapper'));
+            const nextIndex = () => getLoraWrappers().length;
+            if (multiAddContainer) {
+                const addBtn = multiAddContainer.querySelector('.lora-multi-add__btn');
+                addBtn?.addEventListener('click', () => {
+                    const index = nextIndex();
+                    const wrapper = createNewLoraWrapper(index);
+                    multiAddContainer.before(wrapper);
+                    initSingleLoraWrapper(wrapper);
+                    reindexLoraWrappers();
                 });
             }
-            cleanupFns.push(() => {
-                if (hasPanelListeners) {
-                    document.removeEventListener('mousedown', outsideClickListener);
-                    document.removeEventListener('keydown', escapeListener);
-                    hasPanelListeners = false;
+
+            // --- Yuuka: Multi-LoRA enhancement v1.1 ---
+            const buildLoraCards = (grid, wrappersCtx) => {
+                if (!grid) return;
+                grid.innerHTML = '';
+                const cardOptions = Array.isArray(loraOptions) && loraOptions.length ? loraOptions : [{ name: 'None', value: 'None' }];
+                cardOptions.forEach(option => {
+                    if (!option) return;
+                    const value = option.value ?? option.name ?? '';
+                    if (typeof value !== 'string') return;
+                    const metadata = value === 'None' ? null : findLoraMetadata(value);
+                    // Hide 'None' option from panel (user can remove wrapper to clear)
+                    if (value === 'None') return; 
+                    let displayName = resolveLoraCharacterName(metadata, option.name || value);
+                    let subtitle = (metadata?.filename || metadata?.name || option.name || value);
+                    const thumbUrl = value === 'None' ? null : getLoraThumbnailUrl(metadata);
+                    const card = document.createElement('button');
+                    card.type = 'button';
+                    card.className = 'lora-card';
+                    card.dataset.value = value;
+                    card.setAttribute('role','option');
+                    card.innerHTML = `
+                        <div class="lora-card__thumb">${thumbUrl ? `<img src="${escapeAttr(thumbUrl)}" alt="${escapeAttr(displayName)}" loading="lazy">` : ''}</div>
+                        <div class="lora-card__meta">
+                            <div class="lora-card__title">${escapeHtml(truncateText(displayName,40))}</div>
+                            <div class="lora-card__subtitle">${escapeHtml(truncateText(subtitle,40))}</div>
+                        </div>
+                    `;
+                    // Clicking the thumbnail opens simple-viewer (does not select the LoRA)
+                    if (thumbUrl && metadata) {
+                        const thumbEl = card.querySelector('.lora-card__thumb');
+                        if (thumbEl) {
+                            thumbEl.title = 'Xem ảnh preview';
+                            thumbEl.style.cursor = 'zoom-in';
+                            thumbEl.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openSimpleViewer(metadata, thumbUrl);
+                            });
+                        }
+                    }
+                    card.addEventListener('click', () => wrappersCtx.select(value, displayName));
+                    grid.appendChild(card);
+                });
+            };
+
+            // Per-wrapper tag selection state
+            const wrapperTagStates = new Map(); // key: loraName -> array<boolean>
+            const renderWrapperTags = (tagsWrapper, loraName) => {
+                if (!tagsWrapper) return;
+                tagsWrapper.innerHTML = '';
+                tagsWrapper.style.display = 'none';
+                if (!loraName || loraName.toLowerCase() === 'none') return;
+                const meta = loraMetadataMap[loraName] || findLoraMetadata(loraName);
+                const trainedWords = meta ? extractTrainedWords(meta) : [];
+                if (!trainedWords.length) return;
+                // Check preset groups on parent wrapper
+                const parentWrapper = tagsWrapper.closest('.lora-multi-wrapper');
+                const stateKey = `${loraName}#${parentWrapper?.dataset.index || ''}`;
+                let state = wrapperTagStates.get(stateKey);
+                let presetGroups = [];
+                if (parentWrapper && parentWrapper.dataset.presetGroups) {
+                    try { presetGroups = JSON.parse(parentWrapper.dataset.presetGroups) || []; } catch (_) {}
                 }
-                isLoraPanelOpen = false;
+                const normalizedPreset = presetGroups.map(g => g.trim().toLowerCase());
+                if (!state || state.length !== trainedWords.length) {
+                    state = trainedWords.map((group, idx) => {
+                        const groupText = formatGroupText(group).trim().toLowerCase();
+                        if (normalizedPreset.length) return normalizedPreset.includes(groupText);
+                        // Default: no group selected unless preset says so
+                        return false;
+                    });
+                    wrapperTagStates.set(stateKey, state);
+                }
+                tagsWrapper.style.display = 'flex';
+                trainedWords.forEach((group, idx) => {
+                    const card = document.createElement('div');
+                    card.className = 'lora-tag-card';
+                    const header = document.createElement('div');
+                    header.className = 'lora-tag-card__header';
+                    const title = document.createElement('span');
+                    title.textContent = `LoRA tags ${idx+1}`;
+                    const toggle = document.createElement('button');
+                    toggle.type = 'button';
+                    toggle.className = 'lora-tag-toggle';
+                    toggle.classList.toggle('is-active', !!state[idx]);
+                    toggle.setAttribute('aria-pressed', state[idx] ? 'true' : 'false');
+                    toggle.addEventListener('click', () => {
+                        // Allow turning all off as well
+                        state[idx] = !state[idx];
+                        toggle.classList.toggle('is-active', state[idx]);
+                        toggle.setAttribute('aria-pressed', state[idx] ? 'true' : 'false');
+                        wrapperTagStates.set(stateKey, [...state]);
+                    });
+                    header.append(title, toggle);
+                    const body = document.createElement('div');
+                    body.className = 'lora-tag-card__body';
+                    body.textContent = formatGroupText(group);
+                    card.append(header, body);
+                    tagsWrapper.appendChild(card);
+                });
+            };
+
+            const reindexLoraWrappers = () => {
+                getLoraWrappers().forEach((wrapper, idx) => {
+                    wrapper.dataset.index = String(idx);
+                    const hidden = wrapper.querySelector('input[type="hidden"][name^="lora_name_"]');
+                    if (hidden) hidden.name = `lora_name_${idx}`;
+                    const label = wrapper.querySelector('.lora-select-group > label');
+                    if (label) {
+                        const removeBtn = label.querySelector('[data-remove]');
+                        // Reset text (firstChild text node)
+                        label.childNodes.forEach(node => { if (node.nodeType===3) node.textContent = `LoRA #${idx+1} `; });
+                        if (removeBtn) removeBtn.style.display = '';
+                    }
+                    // Update strength inputs' name/id/for and display span ids to keep inline oninput working
+                    const modelInput = wrapper.querySelector('input[data-lora-strength="model"]');
+                    const clipInput = wrapper.querySelector('input[data-lora-strength="clip"]');
+                    if (modelInput) {
+                        const group = modelInput.closest('.form-group');
+                        const labelEl = group ? group.querySelector('label') : null;
+                        const spanEl = labelEl ? labelEl.querySelector('span[id^="val-lora_strength_model_"]') : null;
+                        modelInput.name = `lora_strength_model_${idx}`;
+                        modelInput.id = `cfg-lora_strength_model_${idx}`;
+                        modelInput.setAttribute('oninput', `document.getElementById('val-lora_strength_model_${idx}').textContent = this.value`);
+                        if (labelEl) labelEl.setAttribute('for', `cfg-lora_strength_model_${idx}`);
+                        if (spanEl) spanEl.id = `val-lora_strength_model_${idx}`;
+                    }
+                    if (clipInput) {
+                        const group = clipInput.closest('.form-group');
+                        const labelEl = group ? group.querySelector('label') : null;
+                        const spanEl = labelEl ? labelEl.querySelector('span[id^="val-lora_strength_clip_"]') : null;
+                        clipInput.name = `lora_strength_clip_${idx}`;
+                        clipInput.id = `cfg-lora_strength_clip_${idx}`;
+                        clipInput.setAttribute('oninput', `document.getElementById('val-lora_strength_clip_${idx}').textContent = this.value`);
+                        if (labelEl) labelEl.setAttribute('for', `cfg-lora_strength_clip_${idx}`);
+                        if (spanEl) spanEl.id = `val-lora_strength_clip_${idx}`;
+                    }
+                });
+            };
+
+            const initSingleLoraWrapper = (wrapper) => {
+                const selectGroup = wrapper.querySelector('.lora-select-group');
+                const toggle = selectGroup?.querySelector('.lora-select-toggle');
+                const cardPanel = selectGroup?.querySelector('.lora-card-panel');
+                const searchInput = cardPanel?.querySelector('.lora-card-panel__search-input');
+                const clearBtn = cardPanel?.querySelector('.lora-card-panel__search-button');
+                const cardGrid = cardPanel?.querySelector('.lora-card-grid');
+                const titleEl = toggle?.querySelector('.lora-select-toggle__title');
+                const subtitleEl = toggle?.querySelector('.lora-select-toggle__subtitle');
+                const iconEl = toggle?.querySelector('.lora-select-toggle__icon');
+                const thumbEl = toggle?.querySelector('.lora-select-toggle__thumb');
+                const hiddenInput = selectGroup?.querySelector('input[type="hidden"][name^="lora_name_"]');
+                const tagsWrapper = wrapper.querySelector('[data-role="lora-tags-wrapper"]');
+                const removeBtn = selectGroup?.querySelector('[data-remove]');
+                let panelOpen = false;
+                const setPanel = (open) => {
+                    panelOpen = open;
+                    selectGroup.classList.toggle('is-open', open);
+                    if (cardPanel) cardPanel.style.display = open ? '' : 'none';
+                    if (iconEl) iconEl.textContent = open ? 'expand_less' : 'expand_more';
+                };
+                const selectLoRA = (value, displayName) => {
+                    if (!hiddenInput) return;
+                    const normalized = value || 'None';
+                    hiddenInput.value = normalized;
+                    const isNone = normalized === 'None';
+                    if (titleEl) titleEl.textContent = isNone ? 'Chọn một LoRA' : (displayName || normalized);
+                    if (subtitleEl) subtitleEl.textContent = isNone ? 'Hoặc tải mới bằng Lora-downloader' : (normalized);
+                    // Toggle strength row visibility via data-empty
+                    wrapper.setAttribute('data-empty', isNone ? 'true' : 'false');
+                    const meta = !isNone ? (loraMetadataMap[normalized] || findLoraMetadata(normalized)) : null;
+                    const thumbUrl = meta ? getLoraThumbnailUrl(meta) : null;
+                    if (thumbEl) {
+                        // Clear previous content
+                        thumbEl.innerHTML = (!isNone && thumbUrl)
+                            ? `<img src="${escapeAttr(thumbUrl)}" alt="${escapeAttr(displayName || normalized)}" loading="lazy">`
+                            : '';
+                        // Remove old listener if exists
+                        if (thumbEl._previewHandler) {
+                            thumbEl.removeEventListener('click', thumbEl._previewHandler);
+                            delete thumbEl._previewHandler;
+                        }
+                        if (!isNone && meta && thumbUrl) {
+                            const handler = (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openSimpleViewer(meta, thumbUrl);
+                            };
+                            thumbEl._previewHandler = handler;
+                            thumbEl.addEventListener('click', handler);
+                            thumbEl.title = 'Xem ảnh preview';
+                            thumbEl.style.cursor = 'zoom-in';
+                        } else {
+                            thumbEl.removeAttribute('title');
+                            thumbEl.style.cursor = '';
+                        }
+                    }
+                    renderWrapperTags(tagsWrapper, normalized);
+                    setPanel(false);
+                };
+                const ctx = { select: selectLoRA };
+                if (cardGrid && !cardGrid.dataset.built) {
+                    buildLoraCards(cardGrid, ctx);
+                    cardGrid.dataset.built = 'true';
+                }
+                // Ensure initial thumbnail & tags are rendered for every wrapper (previously only first got updated via legacy logic)
+                if (hiddenInput && typeof hiddenInput.value === 'string') {
+                    const initialVal = hiddenInput.value.trim();
+                    // Avoid double render if already processed, but safe to call.
+                    selectLoRA(initialVal, initialVal);
+                }
+                toggle?.addEventListener('click', () => setPanel(!panelOpen));
+                searchInput?.addEventListener('input', () => {
+                    const term = (searchInput.value || '').toLowerCase();
+                    cardGrid?.querySelectorAll('.lora-card').forEach(card => {
+                        const value = card.dataset.value.toLowerCase();
+                        const text = card.querySelector('.lora-card__title')?.textContent.toLowerCase() || '';
+                        card.style.display = (!term || value.includes(term) || text.includes(term)) ? '' : 'none';
+                    });
+                });
+                clearBtn?.addEventListener('click', () => { if (searchInput){ searchInput.value=''; searchInput.dispatchEvent(new Event('input')); } });
+                removeBtn?.addEventListener('click', () => {
+                    wrapper.remove();
+                    reindexLoraWrappers();
+                });
+            };
+
+            // Initialize existing wrapper(s)
+            getLoraWrappers().forEach(w => {
+                initSingleLoraWrapper(w);
+                // After init, force apply preset tags if any
+                const hidden = w.querySelector('input[type="hidden"][name^="lora_name_"]');
+                const loraName = hidden ? hidden.value : 'None';
+                if (loraName && loraName !== 'None') {
+                    renderWrapperTags(w.querySelector('[data-role="lora-tags-wrapper"]'), loraName);
+                }
             });
+            reindexLoraWrappers();
+
+            // Legacy single-LoRA panel removed; per-wrapper selectors handle their own panel state.
 
             const sizeSelect = form?.elements?.['size'];
             const stageConfigGrid = dialog.querySelector('[data-stage-config]');
@@ -698,16 +1043,22 @@
             cleanupFns.push(() => mobileQuery.removeEventListener('change', applyLayout));
             applyLayout();
 
-            const loraMetadataList = Object.values(loraMetadataMap || {});
-            let existingLoraSelections = Array.isArray(last_config.lora_prompt_tags) ? last_config.lora_prompt_tags.slice() : [];
-            const findLoraMetadata = (value) => loraMetadataList.find(entry => {
-                if (!entry) return false;
-                if (entry.filename && entry.filename === value) return true;
-                if (entry.name && entry.name === value) return true;
-                return false;
-            });
+            // Legacy global single-LoRA state removed; metadata lookups provided below for per-wrapper UIs.
+            // Hoisted function so multi-LoRA code above can use it without TDZ errors
+            function findLoraMetadata(value) {
+                if (!value) return undefined;
+                const direct = (loraMetadataMap && typeof loraMetadataMap === 'object') ? loraMetadataMap[value] : undefined;
+                if (direct) return direct;
+                const list = Object.values(loraMetadataMap || {});
+                for (const entry of list) {
+                    if (!entry) continue;
+                    if (entry.filename && entry.filename === value) return entry;
+                    if (entry.name && entry.name === value) return entry;
+                }
+                return undefined;
+            }
 
-            const extractTrainedWords = (metadata) => {
+            function extractTrainedWords(metadata) {
                 const collected = [];
                 if (!metadata || !metadata.model_data) return collected;
                 const versions = Array.isArray(metadata.model_data.modelVersions) ? metadata.model_data.modelVersions : [];
@@ -730,326 +1081,9 @@
                     }
                 }
                 return collected;
-            };
-
-            const loraTagState = new Map();
-            let currentLoraKey = null;
-            let currentLoraGroups = [];
-
-            const getSelectedLoraPromptTags = () => {
-                if (!currentLoraKey || !currentLoraGroups.length) return [];
-                const state = loraTagState.get(currentLoraKey) || [];
-                return currentLoraGroups.reduce((acc, group, idx) => {
-                    if (!state[idx]) return acc;
-                    const formatted = formatGroupText(group).trim();
-                    if (formatted) acc.push(`(${formatted})`);
-                    return acc;
-                }, []);
-            };
-
-            const renderLoraTags = (loraName) => {
-                if (!loraTagsWrapper) return;
-                loraTagsWrapper.innerHTML = '';
-                loraTagsWrapper.style.display = 'none';
-                if (!loraName || loraName === 'None') {
-                    currentLoraKey = null;
-                    currentLoraGroups = [];
-                    return;
-                }
-                const metadata = findLoraMetadata(loraName);
-                if (!metadata) {
-                    currentLoraKey = null;
-                    currentLoraGroups = [];
-                    loraTagState.delete(loraName);
-                    return;
-                }
-                const trainedWords = extractTrainedWords(metadata);
-                if (!trainedWords.length) {
-                    currentLoraKey = null;
-                    currentLoraGroups = [];
-                    loraTagState.delete(loraName);
-                    return;
-                }
-                currentLoraKey = loraName;
-                currentLoraGroups = trainedWords;
-                loraTagsWrapper.style.display = 'flex';
-                let state = loraTagState.get(loraName);
-                if (!state || state.length !== trainedWords.length) {
-                    const storedSet = new Set(existingLoraSelections.map(normalizeStoredGroup).filter(Boolean));
-                    state = trainedWords.map((group, idx) => {
-                        if (storedSet.size > 0) {
-                            return storedSet.has(parseWordGroup(group).map(normalizeTag).join(','));
-                        }
-                        return idx === 0;
-                    });
-                    if (!state.some(Boolean)) {
-                        state[0] = true;
-                    }
-                    loraTagState.set(loraName, state);
-                }
-                const stateRef = [...state];
-                trainedWords.forEach((group, idx) => {
-                    const card = document.createElement('div');
-                    card.className = 'lora-tag-card';
-                    const header = document.createElement('div');
-                    header.className = 'lora-tag-card__header';
-                    const title = document.createElement('span');
-                    title.textContent = `LoRA tags ${idx + 1}`;
-                    const toggle = document.createElement('button');
-                    toggle.type = 'button';
-                    toggle.className = 'lora-tag-toggle';
-                    toggle.classList.toggle('is-active', !!stateRef[idx]);
-                    toggle.setAttribute('aria-pressed', stateRef[idx] ? 'true' : 'false');
-                    toggle.addEventListener('click', () => {
-                        stateRef[idx] = !stateRef[idx];
-                        loraTagState.set(loraName, [...stateRef]);
-                        toggle.classList.toggle('is-active', stateRef[idx]);
-                        toggle.setAttribute('aria-pressed', stateRef[idx] ? 'true' : 'false');
-                    });
-                    header.append(title, toggle);
-                    const body = document.createElement('div');
-                    body.className = 'lora-tag-card__body';
-                    body.textContent = formatGroupText(group);
-                    card.append(header, body);
-                    loraTagsWrapper.appendChild(card);
-                });
-            };
-
-            const characterSearchTokens = buildSearchTokensFromText(last_config?.character);
-            const loraCardElements = new Map();
-            const loraOptionMeta = new Map();
-            const buildLoraSearchIndex = (value, option, metadata, fullDisplayName, fullSubtitle) => {
-                const tokens = new Set();
-                const addToken = (token) => {
-                    if (typeof token !== 'string') return;
-                    const trimmed = token.trim();
-                    if (!trimmed) return;
-                    const lowered = trimmed.toLowerCase();
-                    tokens.add(lowered);
-                    trimmed.split(/[\s,/_-]+/).forEach(part => {
-                        const piece = part.trim().toLowerCase();
-                        if (piece) tokens.add(piece);
-                    });
-                };
-                addToken(value);
-                if (option?.name) addToken(option.name);
-                if (Array.isArray(option?.keywords)) {
-                    option.keywords.forEach(addToken);
-                }
-                if (fullDisplayName) addToken(fullDisplayName);
-                if (fullSubtitle) addToken(fullSubtitle);
-                if (metadata) {
-                    ['name', 'filename', 'alias', 'title'].forEach(key => addToken(metadata[key]));
-                    const metadataTags = extractModelTags(metadata);
-                    metadataTags.forEach(addToken);
-                    const trainedWords = extractTrainedWords(metadata);
-                    trainedWords.forEach(addToken);
-                }
-                return Array.from(tokens).join(' ');
-            };
-            const reorderLoraCardsForCharacterMatch = () => {
-                if (!loraCardGrid || !characterSearchTokens.length) return;
-                const entries = Array.from(loraCardElements.entries());
-                entries.sort((a, b) => {
-                    const metaA = loraOptionMeta.get(a[0]);
-                    const metaB = loraOptionMeta.get(b[0]);
-                    const rankA = metaA?.matchesCharacter ? 0 : 1;
-                    const rankB = metaB?.matchesCharacter ? 0 : 1;
-                    if (rankA !== rankB) return rankA - rankB;
-                    const orderA = metaA?.originalOrder ?? 0;
-                    const orderB = metaB?.originalOrder ?? 0;
-                    return orderA - orderB;
-                });
-                entries.forEach(([, card]) => loraCardGrid.appendChild(card));
-            };
-            const applyLoraSearchFilter = () => {
-                if (!loraCardGrid) return;
-                const query = (loraSearchInput?.value || '').trim().toLowerCase();
-                loraCardElements.forEach((card, key) => {
-                    const meta = loraOptionMeta.get(key);
-                    const haystack = meta?.searchIndex || '';
-                    const isMatch = !query || haystack.includes(query);
-                    card.style.display = isMatch ? '' : 'none';
-                });
-            };
-            const updateToggleSummary = (value) => {
-                if (!loraToggle) return;
-                const meta = loraOptionMeta.get(value) || {};
-                const displayName = meta.displayName || value || 'None';
-                const subtitle = (value === 'None')
-                    ? 'Không dùng LoRA'
-                    : (meta.subtitle || value || '');
-                if (loraToggleTitle) {
-                    loraToggleTitle.textContent = displayName;
-                }
-                if (loraToggleSubtitle) {
-                    loraToggleSubtitle.textContent = subtitle;
-                }
-                if (loraToggleThumb) {
-                    if (meta.thumbUrl) {
-                        loraToggleThumb.innerHTML = `<img src="${escapeAttr(meta.thumbUrl)}" alt="${escapeAttr(displayName)}" loading="lazy">`;
-                    } else {
-                        loraToggleThumb.innerHTML = `<span class="material-symbols-outlined">${value === 'None' ? 'block' : 'image'}</span>`;
-                    }
-                }
-            };
-            const setLoraSelection = (value, { dispatchEvent = false } = {}) => {
-                if (!loraInput) return;
-                const normalized = value || 'None';
-                const previousValue = loraInput.value;
-                loraInput.value = normalized;
-                loraCardElements.forEach((card, key) => {
-                    const isActive = key === normalized;
-                    card.classList.toggle('is-selected', isActive);
-                    card.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-                    card.setAttribute('aria-selected', isActive ? 'true' : 'false');
-                });
-                updateToggleSummary(normalized);
-                if (dispatchEvent && previousValue !== normalized) {
-                    loraInput.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-                renderLoraTags(normalized);
-            };
-
-            const updateSearchButtonState = () => {
-                if (!loraSearchButton) return;
-                const hasQuery = !!(loraSearchInput && loraSearchInput.value.trim());
-                loraSearchButton.disabled = !hasQuery;
-            };
-
-            if (loraSearchInput) {
-                const handleSearchInput = () => {
-                    applyLoraSearchFilter();
-                    updateSearchButtonState();
-                };
-                const handleSearchKeydown = (event) => {
-                    if (event.key === 'Enter') {
-                        event.preventDefault();
-                        applyLoraSearchFilter();
-                        updateSearchButtonState();
-                    }
-                };
-                loraSearchInput.addEventListener('input', handleSearchInput);
-                loraSearchInput.addEventListener('keydown', handleSearchKeydown);
-                cleanupFns.push(() => {
-                    loraSearchInput.removeEventListener('input', handleSearchInput);
-                    loraSearchInput.removeEventListener('keydown', handleSearchKeydown);
-                });
-            }
-            if (loraSearchButton) {
-                const handleSearchClick = (event) => {
-                    event.preventDefault();
-                    if (loraSearchInput) {
-                        if (!loraSearchInput.value) return;
-                        loraSearchInput.value = '';
-                    }
-                    applyLoraSearchFilter();
-                    updateSearchButtonState();
-                    if (loraSearchInput) {
-                        loraSearchInput.focus();
-                    }
-                };
-                loraSearchButton.addEventListener('click', handleSearchClick);
-                cleanupFns.push(() => loraSearchButton.removeEventListener('click', handleSearchClick));
             }
 
-            if (loraCardGrid && loraInput) {
-                loraCardGrid.innerHTML = '';
-                loraCardElements.clear();
-                loraOptionMeta.clear();
-                const cardOptions = Array.isArray(loraOptions) && loraOptions.length
-                    ? loraOptions
-                    : [{ name: 'None', value: 'None' }];
-                let cardOrder = 0;
-                cardOptions.forEach((option) => {
-                    if (!option) return;
-                    const value = option.value ?? option.name ?? '';
-                    if (typeof value !== 'string') return;
-                    const metadata = value === 'None' ? null : findLoraMetadata(value);
-                    let displayName = value === 'None'
-                        ? (option.name || 'None')
-                        : resolveLoraCharacterName(metadata, option.name || value);
-                    let subtitle = value === 'None'
-                        ? 'Không dùng LoRA'
-                        : (metadata?.filename || metadata?.name || option.name || value);
-                    const fullDisplayName = displayName;
-                    const fullSubtitle = subtitle;
-                    displayName = truncateText(displayName, 40);
-                    subtitle = truncateText(subtitle, 40);
-                    const searchIndex = buildLoraSearchIndex(value, option, metadata, fullDisplayName, fullSubtitle);
-                    const matchesCharacter = characterSearchTokens.length > 0
-                        ? characterSearchTokens.some(term => searchIndex.includes(term))
-                        : false;
-                    const thumbUrl = value === 'None' ? null : getLoraThumbnailUrl(metadata);
-                    const card = document.createElement('button');
-                    card.type = 'button';
-                    card.className = 'lora-card';
-                    card.dataset.value = value;
-                    card.dataset.isCharacterMatch = matchesCharacter ? 'true' : 'false';
-                    card.setAttribute('role', 'option');
-                    card.setAttribute('aria-pressed', 'false');
-                    card.setAttribute('aria-selected', 'false');
-                    card.innerHTML = `
-                        <div class="lora-card__thumb">
-                            ${thumbUrl
-                                ? `<img src="${escapeAttr(thumbUrl)}" alt="${escapeAttr(displayName)}" loading="lazy">`
-                                : `<span class="material-symbols-outlined">${value === 'None' ? 'block' : 'image'}</span>`}
-                        </div>
-                        <div class="lora-card__meta">
-                            <span class="lora-card__title">${escapeHtml(displayName)}</span>
-                            <span class="lora-card__subtitle">${escapeHtml(subtitle || '')}</span>
-                        </div>
-                    `;
-                    card.title = fullSubtitle || fullDisplayName || displayName;
-                    card.dataset.searchIndex = searchIndex;
-                    const originalOrder = cardOrder++;
-                    loraOptionMeta.set(value, {
-                        displayName,
-                        subtitle,
-                        thumbUrl,
-                        metadata,
-                        fullDisplayName,
-                        fullSubtitle,
-                        searchIndex,
-                        matchesCharacter,
-                        originalOrder
-                    });
-                    card.addEventListener('click', () => {
-                        if (loraInput.value === value) {
-                            renderLoraTags(value);
-                            setLoraPanelOpen(false);
-                            return;
-                        }
-                        setLoraSelection(value, { dispatchEvent: true });
-                        setLoraPanelOpen(false);
-                    });
-                    const thumbElement = card.querySelector('.lora-card__thumb');
-                    if (thumbElement && metadata) {
-                        thumbElement.classList.add('is-clickable');
-                        thumbElement.addEventListener('click', (event) => {
-                            event.stopPropagation();
-                            openSimpleViewer(metadata, thumbUrl);
-                        });
-                    }
-                    loraCardGrid.appendChild(card);
-                    loraCardElements.set(value, card);
-                });
-                reorderLoraCardsForCharacterMatch();
-                const initialValue = loraInput.value || 'None';
-                setLoraSelection(initialValue, { dispatchEvent: false });
-                applyLoraSearchFilter();
-                updateSearchButtonState();
-            } else if (loraInput) {
-                loraInput.addEventListener('change', (event) => {
-                    renderLoraTags(event.target.value);
-                    updateToggleSummary(event.target.value);
-                });
-                renderLoraTags(loraInput.value);
-                updateToggleSummary(loraInput.value);
-            } else {
-                renderLoraTags('None');
-                updateToggleSummary('None');
-            }
+            // Legacy single-LoRA search panel and global tag toggles removed; selection is managed per-wrapper.
 
             if (window.Yuuka?.ui?._initTagAutocomplete) {
                 window.Yuuka.ui._initTagAutocomplete(dialog, tagPredictions);
@@ -1135,12 +1169,56 @@
 
             const collectFormValues = () => {
                 const payload = {};
-                ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative', 'lora_name', 'server_address', 'sampler_name', 'scheduler', 'ckpt_name']
+                ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative', 'server_address', 'sampler_name', 'scheduler', 'ckpt_name']
                     .forEach(k => {
                         if (form.elements[k]) {
                             payload[k] = form.elements[k].value;
                         }
                     });
+                // Yuuka: multi-LoRA collect - gather all lora inputs if present
+                let loraWrappers = Array.from(dialog.querySelectorAll('.lora-multi-wrapper'));
+                const activeLoraEntries = [];
+                loraWrappers.forEach(wrapper => {
+                    const hidden = wrapper.querySelector('input[type="hidden"][name^="lora_name_"]');
+                    const loraName = (hidden?.value || 'None').trim();
+                    if (!loraName || loraName.toLowerCase()==='none') return;
+                    // Read per-LoRA strengths from sliders in this wrapper
+                    const smInput = wrapper.querySelector('input[data-lora-strength="model"]');
+                    const scInput = wrapper.querySelector('input[data-lora-strength="clip"]');
+                    let smVal = parseFloat(smInput ? smInput.value : '');
+                    let scVal = parseFloat(scInput ? scInput.value : '');
+                    if (Number.isNaN(smVal)) smVal = Number(loraDefaults.lora_strength_model) || 1.0;
+                    if (Number.isNaN(scVal)) scVal = Number(loraDefaults.lora_strength_clip) || 1.0;
+                    // Collect tag groups toggled on for this LoRA
+                    const loraTagCards = wrapper.querySelectorAll('.lora-tag-card');
+                    const groups = [];
+                    loraTagCards.forEach(card => {
+                        const toggle = card.querySelector('.lora-tag-toggle');
+                        const body = card.querySelector('.lora-tag-card__body');
+                        if (toggle && toggle.classList.contains('is-active')) {
+                            const raw = body?.textContent?.trim() || '';
+                            if (raw) groups.push(raw);
+                        }
+                    });
+                    // Build legacy string per-LoRA: include all selected groups within one parentheses block
+                    const formatted = groups.length ? `(${groups.join(', ')})` : '';
+                    activeLoraEntries.push({ name: loraName, groupText: formatted, groups, sm: smVal, sc: scVal });
+                });
+                const loraNames = activeLoraEntries.map(e => e.name);
+                payload.lora_names = loraNames;
+                // Construct lora_chain with per-LoRA strengths
+                if (loraNames.length) {
+                    payload.lora_chain = activeLoraEntries.map(e => ({ lora_name: e.name, strength_model: e.sm, strength_clip: e.sc }));
+                } else {
+                    payload.lora_chain = [];
+                }
+                // Build combined tags string: (LoRA1 groups...), (LoRA2 groups...), ...
+                const multiTagsParts = activeLoraEntries
+                    .filter(e => e.groupText)
+                    .map(e => e.groupText);
+                payload.multi_lora_prompt_tags = multiTagsParts.join(', ');
+                // New structured multi-select payload aligned with lora_names
+                payload.multi_lora_prompt_groups = activeLoraEntries.map(e => e.groups);
                 ['steps', 'cfg'].forEach(k => {
                     if (!form.elements[k]) return;
                     const val = parseFloat(form.elements[k].value);
@@ -1185,7 +1263,21 @@
                 payload.hires_upscale_model = form.elements['hires_upscale_model']?.value || hiresUpscaleModelValue;
                 payload.hires_upscale_method = form.elements['hires_upscale_method']?.value || hiresUpscaleMethodValue;
 
-                payload.lora_prompt_tags = getSelectedLoraPromptTags();
+                // Expanded legacy compatibility: include ALL selected groups for EVERY LoRA in lora_prompt_tags
+                // so older consumer code can still display them (each group wrapped in parentheses).
+                const allGroupsFlattened = [];
+                loraWrappers.forEach(wrapper => {
+                    const cards = wrapper.querySelectorAll('.lora-tag-card');
+                    cards.forEach(card => {
+                        const toggle = card.querySelector('.lora-tag-toggle');
+                        const body = card.querySelector('.lora-tag-card__body');
+                        if (toggle && toggle.classList.contains('is-active')) {
+                            const raw = body?.textContent?.trim() || '';
+                            if (raw) allGroupsFlattened.push(`(${raw})`);
+                        }
+                    });
+                });
+                payload.lora_prompt_tags = allGroupsFlattened;
                 return payload;
             };
 
@@ -1212,7 +1304,6 @@
                             return;
                         }
                     }
-                        existingLoraSelections = Array.isArray(payload.lora_prompt_tags) ? payload.lora_prompt_tags.slice() : [];
                     const successMessage = shouldGenerate && typeof options.onGenerate === 'function'
                         ? 'Đã lưu cấu hình và bắt đầu generate!'
                         : 'Lưu cấu hình thành công!';

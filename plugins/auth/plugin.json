@@ -1,0 +1,23 @@
+{
+    "id": "auth",
+    "name": "Authentication",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Plugin quản lý xác thực, login UI, tạo/copy token và logout.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:AuthPlugin",
+        "frontend_component": "AuthPluginComponent"
+    },
+    "assets": {
+        "js": ["auth_component.js"],
+        "css": []
+    },
+    "dependencies": {
+        "python": []
+    },
+    "ui": {
+        "is_singleton": true,
+        "order": -100
+    }
+}

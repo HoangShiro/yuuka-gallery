@@ -387,7 +387,7 @@ class NavibarComponent {
                 returnBtn.type = 'button';
                 returnBtn.className = 'nav-btn nav-btn--minimal navibar-search-return';
                 returnBtn.title = 'Trở về';
-                returnBtn.innerHTML = '<span class="material-symbols-outlined">chevron_forward</span>';
+                returnBtn.innerHTML = '<span class="material-symbols-outlined">keyboard_arrow_down</span>';
                 returnBtn.addEventListener('click', () => this.showSearchBar(null));
 
                 actions.appendChild(returnBtn);

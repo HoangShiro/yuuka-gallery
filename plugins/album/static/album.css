@@ -530,6 +530,118 @@
     gap: var(--spacing-3);
 }
 
+/* Spacing between multi-LoRA wrappers */
+.plugin-album__settings-modal .lora-multi-wrapper {
+    padding-bottom: var(--spacing-4);
+    margin-bottom: var(--spacing-2);
+    border-bottom: 1px dashed var(--color-border);
+}
+.plugin-album__settings-modal .lora-multi-wrapper:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+/* Per-LoRA strength sliders (Model & Clip) */
+.plugin-album__settings-modal .lora-multi-wrapper { position: relative; }
+.plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row {
+    margin: 4px 0 6px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    width: 100%;
+    flex-wrap: nowrap; /* keep on one line by default */
+}
+.plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider {
+    flex: 1 1 0%; /* allow equal shrink/grow without min-content overflow */
+    min-width: 0; /* enable shrinking below content's min width */
+    margin: 0;
+    box-sizing: border-box;
+}
+.plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider label {
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 500;
+    color: var(--color-secondary-text);
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+}
+.plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider input[type="range"] {
+    width: 100%;
+    height: 4px;
+}
+.plugin-album__settings-modal .lora-multi-wrapper[data-empty="true"] .lora-strength-row {
+    display: none !important;
+}
+.plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row span[id^="val-lora_strength_"] {
+    min-width: 28px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+    .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row {
+        flex-direction: row; /* keep same row */
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: 8px; /* tighter gap on small screens */
+    }
+    .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider {
+        flex: 1 1 0%;
+        min-width: 0;
+    }
+    .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider label {
+        justify-content: space-between;
+    }
+}
+
+/* Remove button inside label */
+.plugin-album__settings-modal .lora-select-group > label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-2);
+}
+.plugin-album__settings-modal .lora-remove-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-secondary-text);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 var(--spacing-2);
+}
+.plugin-album__settings-modal .lora-remove-btn:hover {
+    color: #d14343;
+}
+
+/* Yuuka: Multi-LoRA add placeholder card */
+.plugin-album__settings-modal .lora-multi-add {
+    margin-top: var(--spacing-3);
+}
+.plugin-album__settings-modal .lora-multi-add__btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-4);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    color: var(--color-secondary-text);
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.plugin-album__settings-modal .lora-multi-add__btn:hover {
+    background: var(--color-primary-bg);
+    border-color: var(--color-accent);
+    color: var(--color-primary-text);
+}
+.plugin-album__settings-modal .lora-multi-add__btn .material-symbols-outlined {
+    font-size: 24px;
+}
+
 .plugin-album__settings-modal .lora-select-toggle {
     display: flex;
     align-items: center;

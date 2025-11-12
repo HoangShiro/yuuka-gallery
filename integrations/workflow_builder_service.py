@@ -68,8 +68,49 @@ def normalize_tag_list(tags: str) -> List[str]:
         return []
     return [tag.strip() for tag in tags.split(',') if tag.strip()]
 
+def _collect_lora_prompt_tokens(cfg_data: Dict[str, Any]) -> List[str]:
+    """Collect LoRA-related prompt tokens with multi-LoRA awareness.
+    Priority:
+      1) multi_lora_prompt_groups: list[list[str]] -> each LoRA becomes a single token "(g1, g2, ...)"
+      2) multi_lora_prompt_tags: legacy string "(g1, g2), (h1), ..." -> extract each parenthesized block
+      3) lora_prompt_tags: list[str] (legacy single-LoRA)
+    Returns list of strings (already properly wrapped/trimmed) to append to positive prompt.
+    """
+    try:
+        groups = cfg_data.get('multi_lora_prompt_groups')
+        if isinstance(groups, list) and any(isinstance(g, list) and g for g in groups):
+            tokens: List[str] = []
+            for group_list in groups:
+                if not isinstance(group_list, list):
+                    continue
+                inner = ", ".join(str(s).strip() for s in group_list if str(s).strip())
+                if inner:
+                    tokens.append(f"({inner})")
+            if tokens:
+                return tokens
+    except Exception:
+        pass
+
+    try:
+        legacy_multi = cfg_data.get('multi_lora_prompt_tags')
+        if isinstance(legacy_multi, str):
+            # Extract every (...) as one token
+            import re
+            tokens = [f"({m.strip()})" for m in re.findall(r"\(([^)]*)\)", legacy_multi or "") if m and m.strip()]
+            if tokens:
+                return tokens
+    except Exception:
+        pass
+
+    # Fallback to legacy single-LoRA tags list
+    lora_prompt_tags = cfg_data.get('lora_prompt_tags', [])
+    if isinstance(lora_prompt_tags, list):
+        return [str(item).strip() for item in lora_prompt_tags if str(item).strip()]
+    return []
+
+
 def build_full_prompt_from_cfg(cfg_data: Dict[str, Any]) -> str:
-    """Build prompt from config."""
+    """Build positive prompt from config, preferring multi-LoRA tokens when available."""
     prompt_parts = [
         cfg_data.get('character_prompt') or cfg_data.get('character', ''),
         cfg_data.get('outfits', ''),
@@ -78,10 +119,9 @@ def build_full_prompt_from_cfg(cfg_data: Dict[str, Any]) -> str:
         cfg_data.get('context', ''),
         cfg_data.get('quality', 'masterpiece, best quality'),
     ]
-    lora_prompt_tags = cfg_data.get('lora_prompt_tags', [])
-    if isinstance(lora_prompt_tags, list):
-        prompt_parts.extend(str(item).strip() for item in lora_prompt_tags if str(item).strip())
-    full_prompt = ", ".join(filter(None, [part.strip() for part in prompt_parts]))
+    # Append LoRA tokens with multi-LoRA awareness
+    prompt_parts.extend(_collect_lora_prompt_tokens(cfg_data))
+    full_prompt = ", ".join(filter(None, [str(part).strip() for part in prompt_parts]))
     return full_prompt
 
 
@@ -116,6 +156,183 @@ class WorkflowBuilderService:
                 self.workflow_templates[name] = None
                 print(f"💥 [WorkflowBuilder] CRITICAL: Failed to load template '{name}' from {path}: {e}")
 
+    # ===========================
+    # LoRA helpers (multi-chain)
+    # ===========================
+    def _parse_lora_chain(self, cfg_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Phân tích danh sách LoRA từ cấu hình.
+        Hỗ trợ các trường:
+          - lora_chain: list[str] hoặc list[dict{name|lora_name, strength_model, strength_clip}]
+          - lora_names: list[str] hoặc chuỗi phân tách bằng dấu phẩy
+          - lora_name: str đơn
+        Trả về danh sách dict: {"lora_name", "strength_model", "strength_clip"} (lọc bỏ giá trị rỗng/None).
+        """
+        result: List[Dict[str, Any]] = []
+        default_strength_model = cfg_data.get('lora_strength_model', DEFAULT_CONFIG['lora_strength_model'])
+        default_strength_clip = cfg_data.get('lora_strength_clip', DEFAULT_CONFIG['lora_strength_clip'])
+
+        def _append_one(name: Any, sm: Any = None, sc: Any = None):
+            if not isinstance(name, str):
+                return
+            name = name.strip()
+            if not name or name == "None":
+                return
+            try:
+                sm_val = float(sm) if sm is not None else float(default_strength_model)
+            except (TypeError, ValueError):
+                sm_val = float(default_strength_model)
+            try:
+                sc_val = float(sc) if sc is not None else float(default_strength_clip)
+            except (TypeError, ValueError):
+                sc_val = float(default_strength_clip)
+            result.append({"lora_name": name, "strength_model": sm_val, "strength_clip": sc_val})
+
+        # 1) lora_chain (list)
+        chain = cfg_data.get('lora_chain')
+        if isinstance(chain, list):
+            for item in chain:
+                if isinstance(item, str):
+                    _append_one(item)
+                elif isinstance(item, dict):
+                    _append_one(
+                        item.get('name') or item.get('lora_name'),
+                        item.get('strength_model'),
+                        item.get('strength_clip'),
+                    )
+
+        # 2) lora_names (list hoặc chuỗi CSV)
+        lora_names = cfg_data.get('lora_names')
+        if isinstance(lora_names, str):
+            parts = [p.strip() for p in lora_names.split(',') if p.strip()]
+            for p in parts:
+                _append_one(p)
+        elif isinstance(lora_names, list):
+            for p in lora_names:
+                if isinstance(p, str):
+                    _append_one(p)
+                elif isinstance(p, dict):
+                    _append_one(
+                        p.get('name') or p.get('lora_name'),
+                        p.get('strength_model'),
+                        p.get('strength_clip'),
+                    )
+
+        # 3) lora_name (đơn)
+        single = cfg_data.get('lora_name')
+        if isinstance(single, str):
+            _append_one(single)
+
+        # Loại bỏ trùng lặp theo thứ tự (nếu vô tình nhập trùng)
+        seen = set()
+        uniq: List[Dict[str, Any]] = []
+        for d in result:
+            key = (d['lora_name'], d['strength_model'], d['strength_clip'])
+            if key not in seen:
+                seen.add(key)
+                uniq.append(d)
+        return uniq
+
+    def _inject_lora_chain(self, workflow: Dict[str, Any], loras: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], str]:
+        """Chèn hoặc cập nhật chuỗi LoraLoader vào workflow.
+        - Nếu template đã có LoraLoader: dùng node đầu tiên làm điểm bắt đầu, cập nhật nó là LoRA[0], sau đó tạo thêm các node nối tiếp.
+        - Nếu template chưa có LoraLoader: tự tạo node và nối từ CheckpointLoaderSimple.
+        - Sau khi có node LoRA cuối (last_id), cập nhật các node KSampler 'model' và các CLIPTextEncode 'clip' trỏ tới node này.
+        Trả về (workflow, last_lora_node_id)
+        """
+        if not loras:
+            return workflow, None
+
+        # Tìm node CheckpointLoaderSimple (làm nguồn model/clip gốc)
+        ckpt_id = None
+        for node_id, node_data in workflow.items():
+            if isinstance(node_data, dict) and node_data.get('class_type') == 'CheckpointLoaderSimple':
+                ckpt_id = node_id
+                break
+        if ckpt_id is None:
+            # Không có checkpoint => không thể tiêm LoRA hợp lệ
+            print("[WorkflowBuilder] No CheckpointLoaderSimple found; cannot inject LoRA chain.")
+            return workflow, None
+
+        # Thu thập các node LoRA sẵn có trong template (nếu có)
+        existing_loras = [nid for nid, nd in workflow.items() if isinstance(nd, dict) and nd.get('class_type') == 'LoraLoader']
+        # Sắp xếp theo int(id) để ổn định
+        try:
+            existing_loras.sort(key=lambda x: int(x))
+        except Exception:
+            existing_loras.sort()
+
+        # ID mới tăng dần
+        def _next_id(start_from: int = None) -> str:
+            max_id = 0
+            for nid in workflow.keys():
+                try:
+                    max_id = max(max_id, int(nid))
+                except Exception:
+                    continue
+            return str(max_id + 1)
+
+        last_source_id = None
+        # Nếu có sẵn LoraLoader, dùng node đầu làm LoRA[0]
+        if existing_loras:
+            first_lora_id = existing_loras[0]
+            # Gán thông số cho node đầu theo loras[0]
+            loader_inputs = workflow.setdefault(first_lora_id, {}).setdefault('inputs', {})
+            loader_inputs['lora_name'] = loras[0]['lora_name']
+            loader_inputs['strength_model'] = loras[0]['strength_model']
+            loader_inputs['strength_clip'] = loras[0]['strength_clip']
+            # Đảm bảo đầu vào của node đầu nối từ checkpoint
+            loader_inputs['model'] = [ckpt_id, 0]
+            loader_inputs['clip'] = [ckpt_id, 1]
+            last_source_id = first_lora_id
+            # Xóa các LoraLoader còn lại trong template (nếu có), để tránh cấu trúc lạ
+            for extra_id in existing_loras[1:]:
+                try:
+                    del workflow[extra_id]
+                except Exception:
+                    pass
+        else:
+            # Tạo node LoRA đầu tiên
+            first_lora_id = _next_id()
+            workflow[first_lora_id] = {
+                "inputs": {
+                    "lora_name": loras[0]['lora_name'],
+                    "strength_model": loras[0]['strength_model'],
+                    "strength_clip": loras[0]['strength_clip'],
+                    "model": [ckpt_id, 0],
+                    "clip": [ckpt_id, 1],
+                },
+                "class_type": "LoraLoader",
+            }
+            last_source_id = first_lora_id
+
+        # Tạo các node LoRA tiếp theo, nối dây từ node trước đó
+        for spec in loras[1:]:
+            new_id = _next_id()
+            workflow[new_id] = {
+                "inputs": {
+                    "lora_name": spec['lora_name'],
+                    "strength_model": spec['strength_model'],
+                    "strength_clip": spec['strength_clip'],
+                    "model": [last_source_id, 0],
+                    "clip": [last_source_id, 1],
+                },
+                "class_type": "LoraLoader",
+            }
+            last_source_id = new_id
+
+        # Cập nhật các node KSampler và CLIPTextEncode trỏ tới node LoRA cuối
+        last_id = last_source_id
+        for node_id, node_data in workflow.items():
+            if not isinstance(node_data, dict):
+                continue
+            cls = node_data.get('class_type')
+            if cls == 'KSampler':
+                node_data.setdefault('inputs', {})['model'] = [last_id, 0]
+            elif cls == 'CLIPTextEncode':
+                node_data.setdefault('inputs', {})['clip'] = [last_id, 1]
+
+        return workflow, last_id
+
     def build_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
         """
         Hàm điều phối chính. Nó sẽ quyết định dùng builder nào dựa trên cfg_data.
@@ -134,7 +351,8 @@ class WorkflowBuilderService:
             return self._build_hiresfix_workflow(cfg_data, seed)
 
         lora_name = cfg_data.get('lora_name')
-        if lora_name and lora_name != "None" and lora_name.strip() != "":
+        lora_chain = self._parse_lora_chain(cfg_data)
+        if (lora_name and lora_name != "None" and str(lora_name).strip() != "") or lora_chain:
             return self._build_lora_workflow(cfg_data, seed)
         return self._build_standard_workflow(cfg_data, seed)
 
@@ -205,8 +423,8 @@ class WorkflowBuilderService:
             print("[WorkflowBuilder] Missing uploaded image name for hires input workflow. Falling back to standard workflow.")
             return self._build_standard_workflow(cfg_data, seed)
 
-        lora_name = cfg_data.get("lora_name", "")
-        use_lora = isinstance(lora_name, str) and lora_name.strip() and lora_name.strip() != "None"
+        lora_specs = self._parse_lora_chain(cfg_data)
+        use_lora = len(lora_specs) > 0
 
         template_key = "hiresfix_esrgan_input_image_lora" if use_lora else "hiresfix_esrgan_input_image"
         template = self.workflow_templates.get(template_key)
@@ -222,9 +440,6 @@ class WorkflowBuilderService:
 
         if isinstance(cfg_data, dict):
             cfg_data["_workflow_template"] = HIRESFIX_ESRGAN_INPUT_IMAGE_LORA_WORKFLOW_NAME if use_lora else HIRESFIX_ESRGAN_INPUT_IMAGE_WORKFLOW_NAME
-
-        if isinstance(cfg_data, dict):
-            cfg_data["_workflow_template"] = SDXL_LORA_WORKFLOW_NAME
 
         workflow = deepcopy(template)
 
@@ -284,22 +499,9 @@ class WorkflowBuilderService:
         workflow.setdefault("28", {}).setdefault("inputs", {})["image"] = uploaded_name
 
         if use_lora:
-            lora_node_id = None
-            for node_id, node_data in workflow.items():
-                if isinstance(node_data, dict) and node_data.get("class_type") == "LoraLoader":
-                    lora_node_id = node_id
-                    break
-            if lora_node_id:
-                loader_inputs = workflow[lora_node_id].setdefault("inputs", {})
-                loader_inputs["lora_name"] = lora_name.strip()
-                loader_inputs["strength_model"] = cfg_data.get(
-                    "lora_strength_model", DEFAULT_CONFIG["lora_strength_model"]
-                )
-                loader_inputs["strength_clip"] = cfg_data.get(
-                    "lora_strength_clip", DEFAULT_CONFIG["lora_strength_clip"]
-                )
-            else:
-                print("[WorkflowBuilder] LoRA template for hires input image is missing LoraLoader node.")
+            workflow, last_lora_id = self._inject_lora_chain(workflow, lora_specs)
+            if last_lora_id is None:
+                print("[WorkflowBuilder] Warning: Could not inject LoRA chain for hires input image template.")
 
         return workflow, "31"
 
@@ -308,10 +510,8 @@ class WorkflowBuilderService:
 
     def _build_hiresfix_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
         """Build hires-fix ESRGAN workflow with custom base64 output."""
-        lora_name = cfg_data.get("lora_name", "")
-        use_lora = False
-        if isinstance(lora_name, str) and lora_name.strip() and lora_name.strip() != "None":
-            use_lora = True
+        lora_specs = self._parse_lora_chain(cfg_data)
+        use_lora = len(lora_specs) > 0
 
         template_key = "hiresfix_esrgan_lora" if use_lora else "hiresfix_esrgan"
         template = self.workflow_templates.get(template_key)
@@ -398,20 +598,9 @@ class WorkflowBuilderService:
         workflow.setdefault("25", {}).setdefault("inputs", {})["ckpt_name"] = cfg_data.get("ckpt_name", DEFAULT_CONFIG["ckpt_name"])
 
         if use_lora:
-            lora_strength_model = cfg_data.get('lora_strength_model', DEFAULT_CONFIG['lora_strength_model'])
-            lora_strength_clip = cfg_data.get('lora_strength_clip', DEFAULT_CONFIG['lora_strength_clip'])
-            lora_loader_id = None
-            for node_id, node_data in workflow.items():
-                if isinstance(node_data, dict) and node_data.get("class_type") == "LoraLoader":
-                    lora_loader_id = node_id
-                    break
-            if lora_loader_id and isinstance(workflow.get(lora_loader_id), dict):
-                loader_inputs = workflow[lora_loader_id].setdefault("inputs", {})
-                loader_inputs["lora_name"] = lora_name.strip()
-                loader_inputs["strength_model"] = lora_strength_model
-                loader_inputs["strength_clip"] = lora_strength_clip
-            else:
-                print("[WorkflowBuilder] Warning: LoRA-enabled hires workflow missing LoraLoader node.")
+            workflow, last_lora_id = self._inject_lora_chain(workflow, lora_specs)
+            if last_lora_id is None:
+                print("[WorkflowBuilder] Warning: Could not inject LoRA chain for hires workflow.")
 
         output_node_id = "30"
         if output_node_id not in workflow:
@@ -423,40 +612,79 @@ class WorkflowBuilderService:
         return workflow, output_node_id
 
     def _build_lora_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
-        """Xây dựng workflow sử dụng LoRA từ template."""
-        template = self.workflow_templates.get("sdxl_lora")
+        """Xây dựng workflow sử dụng 1 hoặc nhiều LoRA từ template.
+        Hỗ trợ chuỗi LoRA nối tiếp nhau theo mẫu: Checkpoint -> LoRA1 -> LoRA2 -> ... -> KSampler/CLIP.
+        """
+        template = self.workflow_templates.get("sdxl_lora") or self.workflow_templates.get("sdxl") or self.workflow_templates.get("standard")
         if not template:
-            # Yuuka: Nếu template không có, quay về dùng workflow standard để không bị crash.
+            # Không có template phù hợp => fallback standard
             print("⚠️ SDXL LoRA workflow template not found. Falling back to standard workflow.")
             return self._build_standard_workflow(cfg_data, seed)
-        
+
         workflow = deepcopy(template)
-        selected_lora = cfg_data.get("lora_name", DEFAULT_CONFIG["lora_name"])
-        workflow["13"]["inputs"]["lora_name"] = selected_lora
-        workflow["13"]["inputs"]["strength_model"] = cfg_data.get('lora_strength_model', DEFAULT_CONFIG['lora_strength_model'])
-        workflow["13"]["inputs"]["strength_clip"] = cfg_data.get('lora_strength_clip', DEFAULT_CONFIG['lora_strength_clip'])
-        
-        workflow["4"]["inputs"]["ckpt_name"] = cfg_data.get("ckpt_name", DEFAULT_CONFIG["ckpt_name"])
-        workflow["6"]["inputs"]["text"] = cfg_data.get(COMBINED_TEXT_PROMPT_KEY, build_full_prompt_from_cfg(cfg_data))
-        workflow["7"]["inputs"]["text"] = ", ".join(normalize_tag_list(str(cfg_data.get("negative", DEFAULT_CONFIG["negative"]))))
-        
-        workflow["5"]["inputs"]["width"] = cfg_data.get("width", DEFAULT_CONFIG["width"])
-        workflow["5"]["inputs"]["height"] = cfg_data.get("height", DEFAULT_CONFIG["height"])
-        workflow["5"]["inputs"]["batch_size"] = 1
-        
-        workflow["3"]["inputs"]["seed"] = seed
-        workflow["3"]["inputs"]["steps"] = cfg_data.get("steps", DEFAULT_CONFIG["steps"])
-        workflow["3"]["inputs"]["cfg"] = cfg_data.get("cfg", DEFAULT_CONFIG["cfg"])
-        workflow["3"]["inputs"]["sampler_name"] = cfg_data.get("sampler_name", DEFAULT_CONFIG["sampler_name"])
-        workflow["3"]["inputs"]["scheduler"] = cfg_data.get("scheduler", DEFAULT_CONFIG["scheduler"])
-        
-        # Yuuka: Cần đảm bảo workflow LoRA cũng có node output base64. 
-        # Giả sử template có node ID là "16" cho việc này. Nếu không, nó sẽ thất bại.
-        # Senpai cần đảm bảo template `SDXL_with_LoRA.json` có node ImageToBase64_Yuuka.
-        output_node_id = "15" # Giả định ID node output là 15, cần kiểm tra file json
-        if output_node_id not in workflow:
-            print(f"⚠️  Template LoRA không có output node {output_node_id}. Việc lấy ảnh có thể thất bại.")
-            # Fallback về node SaveImage nếu có
-            output_node_id = "9" if "9" in workflow else "15"
+
+        # Prompt & sampler params
+        workflow.setdefault("4", {}).setdefault("inputs", {})["ckpt_name"] = cfg_data.get("ckpt_name", DEFAULT_CONFIG["ckpt_name"])
+        if "6" in workflow:
+            workflow["6"].setdefault("inputs", {})["text"] = cfg_data.get(COMBINED_TEXT_PROMPT_KEY, build_full_prompt_from_cfg(cfg_data))
+        if "7" in workflow:
+            workflow["7"].setdefault("inputs", {})["text"] = ", ".join(
+                normalize_tag_list(
+                    str(cfg_data.get("negative", DEFAULT_CONFIG["negative"]))
+                )
+            )
+
+        if "5" in workflow:
+            workflow["5"].setdefault("inputs", {})["width"] = cfg_data.get("width", DEFAULT_CONFIG["width"])
+            workflow["5"].setdefault("inputs", {})["height"] = cfg_data.get("height", DEFAULT_CONFIG["height"])
+            workflow["5"].setdefault("inputs", {})["batch_size"] = 1
+
+        if "3" in workflow:
+            workflow["3"].setdefault("inputs", {})["seed"] = seed
+            workflow["3"].setdefault("inputs", {})["steps"] = cfg_data.get("steps", DEFAULT_CONFIG["steps"])
+            workflow["3"].setdefault("inputs", {})["cfg"] = cfg_data.get("cfg", DEFAULT_CONFIG["cfg"])
+            workflow["3"].setdefault("inputs", {})["sampler_name"] = cfg_data.get("sampler_name", DEFAULT_CONFIG["sampler_name"])
+            workflow["3"].setdefault("inputs", {})["scheduler"] = cfg_data.get("scheduler", DEFAULT_CONFIG["scheduler"])
+
+        # Inject multi-LoRA chain
+        lora_specs = self._parse_lora_chain(cfg_data)
+        if lora_specs:
+            workflow, last_lora_id = self._inject_lora_chain(workflow, lora_specs)
+            if last_lora_id is None:
+                print("⚠️ Could not inject LoRA chain; proceeding without LoRA.")
+        else:
+            # Không có LoRA => nếu template vốn đòi LoRA thì vẫn chạy, nhưng không sửa dây.
+            pass
+
+        # Bảo đảm có node output base64
+        output_node_id = None
+        for nid, nd in workflow.items():
+            if isinstance(nd, dict) and nd.get('class_type') == 'ImageToBase64_Yuuka':
+                output_node_id = nid
+                break
+        if not output_node_id:
+            # Tạo nhanh output node nối từ VAEDecode nếu có
+            # Tìm VAEDecode node
+            vae_decode_id = None
+            for nid, nd in workflow.items():
+                if isinstance(nd, dict) and nd.get('class_type') == 'VAEDecode':
+                    vae_decode_id = nid
+                    break
+            if vae_decode_id is not None:
+                # Tìm ID mới
+                max_id = 0
+                for k in workflow.keys():
+                    try:
+                        max_id = max(max_id, int(k))
+                    except Exception:
+                        continue
+                output_node_id = str(max_id + 1)
+                workflow[output_node_id] = {
+                    "inputs": {"images": [vae_decode_id, 0]},
+                    "class_type": "ImageToBase64_Yuuka",
+                }
+            else:
+                # Thử các ID phổ biến
+                output_node_id = "15" if "15" in workflow else ("9" if "9" in workflow else "15")
 
         return workflow, output_node_id
