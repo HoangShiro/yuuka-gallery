@@ -284,20 +284,45 @@
     ensureNamespace();
 
 
+    // Global modal state guard to prevent stacking multiple settings modals
+    // and to allow subsequent clicks to focus the already-open modal instead.
     async function openSettingsModal(options) {
+        ensureNamespace();
+        window.Yuuka.plugins = window.Yuuka.plugins || {};
+        const modalPlugin = window.Yuuka.plugins.albumModal = window.Yuuka.plugins.albumModal || {};
+        modalPlugin._state = modalPlugin._state || { opening: false, current: null };
+        const state = modalPlugin._state;
+        // If already opening or open, just bring existing to front and exit early.
+        if (state.opening || state.current) {
+            const existing = state.current;
+            if (existing) {
+                existing.classList.add('modal-flash');
+                setTimeout(() => existing.classList.remove('modal-flash'), 400);
+            }
+            return; // Prevent spawning additional modals
+        }
+        state.opening = true;
         const modal = document.createElement('div');
         modal.className = 'modal-backdrop settings-modal-backdrop';
         if (options.modalClass) {
             modal.classList.add(options.modalClass);
         }
-        document.body.appendChild(modal);
-        modal.innerHTML = `<div class="modal-dialog"><h3>Đang tải...</h3></div>`;
+    document.body.appendChild(modal);
+    modal.innerHTML = `<div class="modal-dialog"><h3>Đang tải...</h3></div>`;
+    // Yield a frame so the modal paints immediately even if subsequent work is heavy
+    await new Promise(resolve => requestAnimationFrame(() => resolve()));
+        state.current = modal;
         const cleanupFns = [];
         const close = () => {
             cleanupFns.forEach(fn => {
                 try { fn(); } catch (err) { /* ignore cleanup errors */ }
             });
-            modal.remove();
+            if (modal.parentNode) modal.remove();
+            // Reset global state so a new modal can be opened again.
+            if (state.current === modal) {
+                state.current = null;
+            }
+            state.opening = false;
         };
 
         try {
@@ -950,10 +975,16 @@
                     // Lazy metadata fetch then rebuild for thumbnails & tags
                     ensureLoraMetadata().then(() => {
                         buildLoraCards(cardGrid, ctx);
-                        // Re-render tags for current selection after metadata arrives
+                        // After metadata arrives, update current selection thumbnail & tags
                         const currentVal = hiddenInput?.value;
                         if (currentVal && currentVal !== 'None') {
-                            renderWrapperTags(tagsWrapper, currentVal);
+                            if (!panelOpen) {
+                                // Safe to update fully (this also updates thumb)
+                                selectLoRA(currentVal, titleEl?.textContent || currentVal);
+                            } else {
+                                // If user opened the panel, avoid closing it; at least update tags
+                                renderWrapperTags(tagsWrapper, currentVal);
+                            }
                         }
                     });
                 }
@@ -990,6 +1021,46 @@
                 }
             });
             reindexLoraWrappers();
+
+            // If there are pre-selected LoRAs, fetch metadata immediately to populate thumbnails without waiting for user to open panel.
+            const hasPreSelected = mountedWrappers.some(w => {
+                const h = w.querySelector('input[type="hidden"][name^="lora_name_"]');
+                return h && h.value && h.value !== 'None';
+            });
+            if (hasPreSelected) {
+                ensureLoraMetadata().then(() => {
+                    mountedWrappers.forEach(w => {
+                        const h = w.querySelector('input[type="hidden"][name^="lora_name_"]');
+                        const val = h ? h.value : 'None';
+                        if (val && val !== 'None') {
+                            // Re-run selection to update thumbnail now that metadata is present.
+                            const selectGroup = w.querySelector('.lora-select-group');
+                            const toggle = selectGroup?.querySelector('.lora-select-toggle');
+                            const titleEl = toggle?.querySelector('.lora-select-toggle__title');
+                            const displayName = titleEl?.textContent || val;
+                            // Use internal update logic: simulate selectLoRA by dispatching a custom event if available
+                            // We may not have direct access to selectLoRA closure; rebuild using same logic inline.
+                            const thumbEl = toggle?.querySelector('.lora-select-toggle__thumb');
+                            const tagsWrapper = w.querySelector('[data-role="lora-tags-wrapper"]');
+                            const meta = loraMetadataMap[val] || findLoraMetadata(val);
+                            const thumbUrl = meta ? getLoraThumbnailUrl(meta) : null;
+                            if (thumbEl) {
+                                thumbEl.innerHTML = thumbUrl ? `<img src="${escapeAttr(thumbUrl)}" alt="${escapeAttr(displayName)}" loading="lazy">` : '';
+                                if (thumbUrl && meta) {
+                                    thumbEl.title = 'Xem ảnh preview';
+                                    thumbEl.style.cursor = 'zoom-in';
+                                    if (!thumbEl._previewHandler) {
+                                        const handler = (e) => { e.preventDefault(); e.stopPropagation(); openSimpleViewer(meta, thumbUrl); };
+                                        thumbEl._previewHandler = handler;
+                                        thumbEl.addEventListener('click', handler);
+                                    }
+                                }
+                            }
+                            renderWrapperTags(tagsWrapper, val);
+                        }
+                    });
+                });
+            }
 
             // Legacy single-LoRA panel removed; per-wrapper selectors handle their own panel state.
 
@@ -1423,5 +1494,22 @@
         }
     }
 
-    window.Yuuka.plugins.albumModal = { openSettingsModal };
+    // Expose helper methods for external code (focus / close) while preserving current API.
+    window.Yuuka.plugins.albumModal = window.Yuuka.plugins.albumModal || {};
+    window.Yuuka.plugins.albumModal.openSettingsModal = openSettingsModal;
+    window.Yuuka.plugins.albumModal.isOpen = () => !!(window.Yuuka.plugins.albumModal._state && window.Yuuka.plugins.albumModal._state.current);
+    window.Yuuka.plugins.albumModal.closeCurrent = () => {
+        const st = window.Yuuka.plugins.albumModal._state;
+        if (st && st.current) {
+            const el = st.current;
+            const evt = el.querySelector('.btn-cancel');
+            if (evt) {
+                evt.click();
+            } else {
+                el.remove();
+                st.current = null;
+                st.opening = false;
+            }
+        }
+    };
 })();
