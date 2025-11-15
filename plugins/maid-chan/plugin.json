@@ -12,10 +12,12 @@
   "assets": {
     "js": [
       "settings/avatar.js",
+      "settings/llm_api.js",
       "main/prompt_suggest.js",
       "main/index.js",
       "modal.js",
-      "maid_chan.js"
+      "maid_chan.js",
+      "maid_chan-bootstrap.js"
     ],
     "css": ["maid_chan.css"]
   },

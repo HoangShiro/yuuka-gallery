@@ -64,6 +64,7 @@
   window.Yuuka.components = window.Yuuka.components || {};
   window.Yuuka.plugins = window.Yuuka.plugins || {};
   window.Yuuka.plugins.maidTriggers = window.Yuuka.plugins.maidTriggers || [];
+  window.Yuuka.plugins.maidQuickActions = window.Yuuka.plugins.maidQuickActions || [];
   if(!window.Yuuka.components.MaidChanBubble){
     window.Yuuka.components.MaidChanBubble = {
       registerTrigger(def){
@@ -82,6 +83,24 @@
       },
       listTriggers(){
         return [...(window.Yuuka.plugins.maidTriggers || [])];
+      },
+      // New: quick menu actions registry (icon buttons under the bubble)
+      registerQuickAction(def){
+        if(!def || typeof def.handler !== 'function') return null;
+        const d = { ...def };
+        d.id = d.id || `maid_qact_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+        if(typeof d.order !== 'number') d.order = 100;
+        if(typeof d.requireEnabled === 'undefined') d.requireEnabled = true;
+        window.Yuuka.plugins.maidQuickActions.push(d);
+        return d.id;
+      },
+      unregisterQuickAction(id){
+        const arr = window.Yuuka.plugins.maidQuickActions || [];
+        const i = arr.findIndex(t=> t.id === id);
+        if(i >= 0) arr.splice(i,1);
+      },
+      listQuickActions(){
+        return [...(window.Yuuka.plugins.maidQuickActions || [])];
       },
       run(ctx={}){
         const inst = window.Yuuka?.plugins?.maidChanInstance;
@@ -107,7 +126,9 @@
       this.element = null;
       this._modalInstance = null; // external modal handler (from modal.js)
       this._idleTimer = null;
-  this._idleDelay = 1000; // ms before dimming when unfocused
+      this._idleDelay = 1000; // ms before dimming when unfocused
+      this._idleDelayTap = 3000; // ms after quick tap on bubble
+      this._idleDisabled = false; // when true, do not dim until re-enabled
       this._idleSetup = false;
       this._suppressNextClick = false; // prevent click trigger after long-press
       this._didDrag = false; // track if pointer moved beyond threshold
@@ -129,6 +150,8 @@
       this._imgEl = null;
       // Chat bubbles state
       this._chat = { container: null, items: [] };
+      // Quick menu state (uses maid idle timer for auto-hide)
+      this._quickMenu = { el: null, isOpen: false };
     }
 
     // Public API: service launcher entry point
@@ -244,23 +267,41 @@
       // Double click: center-open modal as well (optional shortcut)
       el.addEventListener('dblclick', ()=> { this._bumpActivity(); this._openModal(); });
 
-      // Single click: run registered triggers (if not dragging and not a double click)
+      // Single click: open quick menu (instead of running triggers)
       el.addEventListener('click', (e)=>{
         if(this._suppressNextClick){ this._suppressNextClick = false; return; }
         if(this.state.isDragging) return;
         if(e.detail && e.detail > 1) return; // ignore double-click
-        this._bumpActivity();
-        this._runTriggers({ event: e });
+        // Quick tap: keep maid awake until user clicks outside
+        // or uses a quick-menu button. Disable idle timeout.
+        this._idleDisabled = true;
+        this._bumpActivity(null);
+        this._showQuickMenu();
       });
 
-      // Wake from idle on hover
-      el.addEventListener('mouseenter', ()=> this._bumpActivity());
+      // Wake from idle on hover + show quick menu
+      el.addEventListener('mouseenter', ()=>{
+        // While pointer stays over the bubble, keep it awake (no timeout)
+        this._idleDisabled = true;
+        this._bumpActivity(null);
+        this._showQuickMenu();
+      });
+
+      el.addEventListener('mouseleave', ()=>{
+        // Re-enable idle timeout once pointer leaves the bubble area
+        this._idleDisabled = false;
+        this._bumpActivity();
+      });
 
       this.container.appendChild(el);
       this.element = el;
       this._keepInViewport();
       window.addEventListener('resize', ()=> this._keepInViewport());
-  window.addEventListener('resize', ()=> this._positionChatContainer());
+    	window.addEventListener('resize', ()=> this._positionChatContainer());
+
+    	  // Ensure quick menu exists and is kept under the bubble
+    	  this._ensureQuickMenu();
+    	  window.addEventListener('resize', ()=> this._positionQuickMenu());
 
       // Idle/focus management listeners (set up once)
       this._setupIdleManagement();
@@ -345,6 +386,8 @@
       this._save('maid-chan:pos', this.state.pos);
       // Re-anchor chat bubbles alongside the maid bubble
       this._positionChatContainer();
+      // Reposition quick menu directly under bubble
+      this._positionQuickMenu();
     }
 
     _keepInViewport(){
@@ -390,11 +433,24 @@
       // Start initial idle countdown
       this._bumpActivity();
     }
-    _bumpActivity(){
+    _bumpActivity(delay){
       if(!this.element) return;
       this._setIdle(false);
-      if(this._idleTimer) clearTimeout(this._idleTimer);
-      this._idleTimer = setTimeout(()=> this._setIdle(true), this._idleDelay);
+      if(this._idleTimer){
+        clearTimeout(this._idleTimer);
+        this._idleTimer = null;
+      }
+      // When idle is globally disabled (e.g. hovering/click tap),
+      // we do not schedule any timeout. Bubble stays awake until re-enabled.
+      if(this._idleDisabled) return;
+      const useDelay = typeof delay === 'number' ? delay : this._idleDelay;
+      this._idleTimer = setTimeout(()=>{
+        this._setIdle(true);
+        // When maid goes idle, also hide quick menu for synchronized behavior
+        if(this._quickMenu && this._quickMenu.isOpen){
+          this._hideQuickMenu();
+        }
+      }, useDelay);
     }
     _setIdle(flag){
       if(!this.element) return;
@@ -551,6 +607,151 @@
     }
     _load(key, fallback){
       try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }catch(err){ return fallback; }
+    }
+
+    // --- Quick menu helpers ---
+    _ensureQuickMenu(){
+      if(this._quickMenu.el && document.body.contains(this._quickMenu.el)) return this._quickMenu.el;
+      const menu = document.createElement('div');
+      menu.className = 'maid-quick-menu';
+      menu.setAttribute('role', 'menu');
+      menu.style.position = 'fixed';
+      menu.style.display = 'none';
+
+      // Render all quick actions (core + plugins)
+      const renderButtons = ()=>{
+        menu.innerHTML = '';
+        let actions = (window.Yuuka?.plugins?.maidQuickActions || []).slice().sort((a,b)=> (a.order||0)-(b.order||0));
+        // Limit maximum number of quick actions (excluding core settings) to 29
+        if(actions.length > 29){
+          actions = actions.slice(0, 29);
+        }
+
+        // Always include core settings button
+        actions.unshift({
+          id: 'maid_core_settings',
+          icon: 'settings_heart',
+          title: 'Maid settings',
+          order: -999,
+          requireEnabled: false,
+          handler: ({ bubble })=>{
+            bubble?._openModal();
+          }
+        });
+
+        const isFeatureEnabled = (fid)=>{
+          if(!fid) return true;
+          try{ const raw = localStorage.getItem(`maid-chan:feature:${fid}:enabled`); return raw? JSON.parse(raw): false; }catch(_e){ return false; }
+        };
+
+        actions.forEach(act=>{
+          if(act.featureId && act.requireEnabled !== false && !isFeatureEnabled(act.featureId)) return;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'maid-quick-btn';
+          btn.setAttribute('role', 'menuitem');
+          if(act.title) btn.title = act.title;
+          const icon = document.createElement('span');
+          icon.className = 'material-symbols-outlined';
+          icon.textContent = act.icon || 'bolt';
+          btn.appendChild(icon);
+          btn.addEventListener('click', (e)=>{
+            e.stopPropagation();
+            try{
+              // Any quick action click re-enables idle so bubble can dim later
+              this._idleDisabled = false;
+              this._bumpActivity();
+              act.handler({
+                bubble: this,
+                element: this.element,
+                showMessage: (opts)=> this._showChatBubble(opts),
+                openModal: ()=> this._openModal(),
+                closeModal: ()=> this._closeModal()
+              });
+            }catch(err){ console.warn('[Maid-chan] quick action handler error', err); }
+            this._hideQuickMenu();
+          });
+          menu.appendChild(btn);
+        });
+      };
+
+      renderButtons();
+
+      // When pointer is over the quick menu area, keep Maid awake
+      menu.addEventListener('mouseenter', ()=>{
+        this._idleDisabled = true;
+        this._bumpActivity(null);
+      });
+      menu.addEventListener('mouseleave', ()=>{
+        this._idleDisabled = false;
+        this._bumpActivity();
+      });
+
+      // Close when clicking outside
+      document.addEventListener('click', (e)=>{
+        if(!this._quickMenu.isOpen) return;
+        if(this.element && this.element.contains(e.target)) return;
+        if(menu.contains(e.target)) return;
+        // User clicked somewhere else: allow idle again
+        this._idleDisabled = false;
+        this._bumpActivity();
+        this._hideQuickMenu();
+      });
+
+      document.body.appendChild(menu);
+      this._quickMenu.el = menu;
+      this._positionQuickMenu();
+      return menu;
+    }
+
+    _positionQuickMenu(){
+      const menu = this._quickMenu.el;
+      if(!menu || !this.element) return;
+      const r = this.element.getBoundingClientRect();
+      const gap = 6;
+      const menuWidth = menu.offsetWidth || 40;
+      const menuHeight = menu.offsetHeight || 40;
+      // Center horizontally: bubble center minus half menu width, with a tiny tweak
+      // for sub-pixel rendering so it looks visually centered.
+      const x = (r.left + r.right) / 2 - (menuWidth / 2) - 10;
+      const y = r.bottom + gap;
+      const clampedX = Math.max(4, Math.min(x, window.innerWidth - menuWidth - 4));
+      const clampedY = Math.min(y, window.innerHeight - menuHeight - 4);
+      menu.style.left = `${clampedX}px`;
+      menu.style.top = `${clampedY}px`;
+    }
+
+    _showQuickMenu(){
+      const menu = this._ensureQuickMenu();
+      menu.classList.remove('mc-leave');
+      this._quickMenu.isOpen = true;
+      // First position off-screen to measure proper size, then center
+      menu.style.visibility = 'hidden';
+      menu.style.display = 'flex';
+      this._positionQuickMenu();
+      // Now animate it in
+      menu.style.visibility = 'visible';
+      // force reflow to restart animation
+      void menu.offsetWidth;
+      menu.classList.add('mc-enter');
+    }
+
+    _hideQuickMenu(){
+      const menu = this._quickMenu.el;
+      if(!menu) return;
+      menu.classList.remove('mc-enter');
+      menu.classList.add('mc-leave');
+      this._quickMenu.isOpen = false;
+      const done = ()=>{
+        menu.removeEventListener('animationend', done);
+        if(!this._quickMenu.isOpen){ menu.style.display = 'none'; }
+      };
+      menu.addEventListener('animationend', done);
+    }
+
+    _toggleQuickMenu(){
+      if(this._quickMenu.isOpen) this._hideQuickMenu();
+      else this._showQuickMenu();
     }
   }
 

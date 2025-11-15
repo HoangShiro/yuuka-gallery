@@ -7,6 +7,7 @@ window.Yuuka = window.Yuuka || {
     services: {},
     initialPluginState: {},
     pluginState: {},
+    // Lightweight global event bus for cross-plugin communication
     events: {
         _listeners: {},
         on(eventName, callback) {
@@ -22,6 +23,7 @@ window.Yuuka = window.Yuuka || {
             }
         }
     },
+    // Global UI helpers and shared services live under `ui` / `services`
     ui: {
         switchTab(tabId){ switchTab(tabId); },
         confirm(message){
@@ -65,6 +67,223 @@ window.Yuuka = window.Yuuka || {
         }
     }
 };
+
+// --- GLOBAL CAPABILITIES SERVICE (cross-plugin registry) ---
+// Provides a central place for plugins to register capabilities
+// (actions, tools, etc.) that other plugins – including Maid-chan –
+// can discover and invoke without tight coupling.
+//
+// Shape of a capability definition:
+// {
+//   id: string,              // unique capability id, e.g. "image.generate"
+//   pluginId: string,        // owner plugin id, e.g. "album"
+//   title?: string,
+//   description?: string,
+//   type?: string,           // e.g. "action", "query"
+//   tags?: string[],
+//   llmCallable?: boolean,   // if true, can be exposed as LLM function
+//   llmName?: string,        // optional function name override
+//   paramsSchema?: object,   // JSON-schema-like description of args
+//   example?: {              // OPTIONAL: used by Maid-chan playground for default payload
+//     payload?: any,         // default payload to prefill in the Payload textarea
+//     notes?: string,        // short human-readable hint shown in UI / docs
+//   },
+//   invoke: async (args, ctx) => any
+// }
+//
+// Recommended pattern for plugins:
+// - Register capabilities EARLY at script load (in a small IIFE) so
+//   they appear immediately in Maid-chan's Ability tab and any other
+//   discovery UI, even before the plugin's UI/tab is opened.
+// - Provide an `example.payload` whenever possible so Maid-chan's
+//   playground can prefill a meaningful default payload instead of `{}`.
+// - If your invoke handler needs access to a live component instance
+//   (e.g. AlbumComponent), register a generic invoke first, then when
+//   your component is constructed, wrap/override that invoke to bind
+//   `this` to the instance (similar to AlbumComponent._attachInstanceToCapability).
+// - Prefer stable ids like "pluginId.actionName" to avoid collisions.
+;
+(function initCapabilitiesService(){
+    const g = window.Yuuka = window.Yuuka || {};
+    g.services = g.services || {};
+    if (g.services.capabilities) return; // already initialized
+
+    const _registry = new Map(); // key: id, value: { def, version }
+    const _byPlugin = new Map(); // pluginId -> Set<id>
+    let _versionCounter = 1;
+    const _bootstrapStartedAt = Date.now();
+
+    const normalizeId = (id)=> typeof id === 'string' ? id.trim() : '';
+
+    const capabilities = {
+        register(def){
+            if (!def || !def.id) {
+                console.warn('[Capabilities] Missing id in definition:', def);
+                return null;
+            }
+            const id = normalizeId(def.id);
+            if (!id) {
+                console.warn('[Capabilities] Invalid id:', def.id);
+                return null;
+            }
+            if (typeof def.invoke !== 'function') {
+                console.warn('[Capabilities] Capability must provide an invoke(args, ctx) function:', id);
+                return null;
+            }
+            const pluginId = normalizeId(def.pluginId || def.owner || '');
+            if (!pluginId) {
+                console.warn(
+                    '[Capabilities] Capability definition is missing pluginId. ' +
+                    'Plugins must provide a stable pluginId when registering capabilities early.',
+                    def
+                );
+                return null;
+            }
+            const version = (_registry.get(id)?.version || 0) + 1;
+
+            // Normalize example structure so consumers (e.g. Maid-chan) can rely on
+            // a consistent shape: { defaultPayload, variants: [{name, payload, notes}], notes }
+            let normalizedExample;
+            if (def.example && typeof def.example === 'object') {
+                const raw = def.example;
+                const variants = Array.isArray(raw.variants) ? raw.variants : [];
+                // Backwards compatibility: allow old-style example.payload
+                if (!variants.length && typeof raw.payload !== 'undefined') {
+                    variants.push({ name: 'default', payload: raw.payload, notes: raw.notes || '' });
+                }
+                const safeVariants = variants
+                    .map(v => ({
+                        name: (v && v.name) ? String(v.name) : 'preset',
+                        payload: v ? v.payload : undefined,
+                        notes: v && v.notes ? String(v.notes) : '',
+                    }))
+                    .filter(v => typeof v.payload !== 'undefined');
+                const defaultPayload = (typeof raw.defaultPayload !== 'undefined')
+                    ? raw.defaultPayload
+                    : (safeVariants[0] ? safeVariants[0].payload : undefined);
+                normalizedExample = {
+                    defaultPayload,
+                    variants: safeVariants,
+                    notes: raw.notes || '',
+                };
+            }
+
+            const stored = {
+                id,
+                pluginId,
+                title: def.title || id,
+                description: def.description || '',
+                type: def.type || 'action',
+                tags: Array.isArray(def.tags) ? def.tags.slice() : [],
+                llmCallable: !!def.llmCallable,
+                llmName: def.llmName && def.llmName.trim() ? def.llmName.trim() : id,
+                paramsSchema: def.paramsSchema && typeof def.paramsSchema === 'object' ? def.paramsSchema : { type:'object', properties:{} },
+                // Keep raw invoke so caller can execute it
+                invoke: def.invoke,
+                // Example metadata for playgrounds / docs (e.g. Maid-chan Ability tab)
+                example: normalizedExample,
+                // arbitrary extra metadata
+                extra: def.extra || {},
+                version,
+            };
+
+            _registry.set(id, stored);
+            if (pluginId) {
+                if (!_byPlugin.has(pluginId)) _byPlugin.set(pluginId, new Set());
+                _byPlugin.get(pluginId).add(id);
+            }
+            _versionCounter++;
+
+            // Warn if registration happens suspiciously late relative to capabilities bootstrap.
+            try {
+                const elapsedMs = Date.now() - _bootstrapStartedAt;
+                if (elapsedMs > 5000) {
+                    console.warn(
+                        `[Capabilities] Late registration detected for '${id}' (plugin '${pluginId}'). ` +
+                        'Capabilities should be registered at script load time (IIFE) before the plugin UI is constructed.'
+                    );
+                }
+            } catch(_e) { /* ignore */ }
+
+            // Broadcast registration for listeners (e.g. Maid-chan UI)
+            try {
+                g.events && g.events.emit && g.events.emit('capability:registered', stored);
+            } catch(e){ console.error('[Capabilities] Error emitting capability:registered', e); }
+
+            return stored;
+        },
+
+        unregister(id){
+            id = normalizeId(id);
+            if (!id || !_registry.has(id)) return false;
+            const def = _registry.get(id);
+            _registry.delete(id);
+            if (def && def.pluginId && _byPlugin.has(def.pluginId)) {
+                const set = _byPlugin.get(def.pluginId);
+                set.delete(id);
+                if (!set.size) _byPlugin.delete(def.pluginId);
+            }
+            try {
+                g.events && g.events.emit && g.events.emit('capability:unregistered', def);
+            } catch(e){ console.error('[Capabilities] Error emitting capability:unregistered', e); }
+            return true;
+        },
+
+        unregisterByPlugin(pluginId){
+            pluginId = normalizeId(pluginId);
+            if (!pluginId || !_byPlugin.has(pluginId)) return 0;
+            const ids = Array.from(_byPlugin.get(pluginId));
+            ids.forEach(id => this.unregister(id));
+            return ids.length;
+        },
+
+        get(id){
+            id = normalizeId(id);
+            if (!id) return null;
+            const def = _registry.get(id);
+            if (!def) return null;
+            // Return a shallow clone to prevent external mutation
+            return { ...def };
+        },
+
+        list(filterFn){
+            const all = Array.from(_registry.values()).map(d => ({ ...d }));
+            if (typeof filterFn === 'function') return all.filter(filterFn);
+            return all;
+        },
+
+        listByPlugin(pluginId){
+            pluginId = normalizeId(pluginId);
+            if (!pluginId || !_byPlugin.has(pluginId)) return [];
+            const ids = Array.from(_byPlugin.get(pluginId));
+            return ids.map(id => ({ ..._registry.get(id) })).filter(Boolean);
+        },
+
+        listLLMCallable(){
+            return this.list(c => !!c.llmCallable);
+        },
+
+        async invoke(id, args = {}, ctx = {}){
+            const def = _registry.get(normalizeId(id));
+            if (!def || typeof def.invoke !== 'function') {
+                throw new Error(`[Capabilities] Unknown or non-callable capability: ${id}`);
+            }
+            try {
+                return await def.invoke(args, ctx);
+            } catch (e) {
+                console.error(`[Capabilities] Error invoking capability '${id}':`, e);
+                throw e;
+            }
+        },
+
+        getVersion(){
+            return _versionCounter;
+        }
+    };
+
+    g.services.capabilities = capabilities;
+    console.log('[Core] Capabilities service initialized.');
+})();
 // --- DOM Elements ---
 const tabsContainer = document.getElementById('tabs');
 const mainContainer = document.querySelector('.container');
@@ -83,6 +302,11 @@ const state = {
         knownTasks: new Set(),
     },
 };
+
+// Expose core state for plugins that need to discover active plugins
+// (e.g. to lazily bootstrap headless instances for capabilities).
+window.Yuuka = window.Yuuka || {};
+window.Yuuka.coreState = state;
 
 // --- Core Logic ---
 let errorTimeout;

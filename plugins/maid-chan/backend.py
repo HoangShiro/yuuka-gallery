@@ -1,10 +1,13 @@
 # --- NEW FILE: plugins/maid-chan/backend.py ---
 import os
 import io
+import math
 from flask import Blueprint, request, jsonify, abort, Response
 from werkzeug.exceptions import HTTPException
 from PIL import Image, ImageSequence
-import math
+
+from integrations import gemini_api
+from integrations import openai as openai_integration
 
 class MaidChanPlugin:
     """Backend for Maid-chan plugin (avatar upload + serving)."""
@@ -30,7 +33,7 @@ class MaidChanPlugin:
             description = getattr(err, 'description', str(err))
             return jsonify({"error": description}), code
 
-        # GET: serve maid avatar
+        # GET: serve maid avatar at root path (no plugin prefix)
         @self.blueprint.get('/user_image/maid_avatar/<filename>')
         def get_maid_avatar_image(filename):
             image_data, mimetype = self.core_api.get_user_image_data('maid_avatar', filename)
@@ -39,6 +42,7 @@ class MaidChanPlugin:
             abort(404)
 
         # POST: upload maid avatar (multipart)
+        # POST: upload maid avatar (kept at core-level API path)
         @self.blueprint.post('/api/maid/avatar')
         def upload_maid_avatar():
             user_hash = _require_user()
@@ -172,8 +176,53 @@ class MaidChanPlugin:
             avatar_url = f"/user_image/maid_avatar/{filename}"
             return jsonify({"status": "success", "avatar_url": avatar_url})
 
-        print("[Plugin:Maid-chan] Backend routes registered.")
+        @self.blueprint.route('/api/plugin/maid/models', methods=['GET', 'POST'])
+        def list_models():
+            """Return available LLM model ids for Maid-chan.
+
+            Implementation mirrors chat plugin's /models endpoint so both
+            providers behave identically.
+            """
+            user_hash = _require_user()
+
+            # Reuse chat orchestrator settings when available, to keep a
+            # single source of truth for provider/api_key overrides.
+            base_settings: dict = {}
+            try:
+                orchestrator = getattr(self.core_api, 'chat_orchestrator', None)
+                if orchestrator and hasattr(orchestrator, 'get_generation_settings'):
+                    base_settings = orchestrator.get_generation_settings(user_hash) or {}
+            except Exception:  # noqa: BLE001
+                base_settings = {}
+
+            payload = request.json or {} if request.method == 'POST' else {}
+
+            provider = (payload.get('provider') or base_settings.get('provider') or 'openai').strip().lower()
+            user_api_key = payload.get('api_key') or base_settings.get('api_key')
+            overrides = payload.get('overrides') or base_settings.get('overrides') or {}
+
+            try:
+                if provider == 'gemini':
+                    models = gemini_api.list_models(user_api_key=user_api_key)
+
+                    def _is_text_capable(m: dict) -> bool:
+                        methods = m.get('supported_generation_methods') or []
+                        return any(method in methods for method in ('generateContent', 'create', 'text')) or not methods
+
+                    models = [m for m in models if _is_text_capable(m)]
+                    return jsonify({'models': models})
+
+                # Default: OpenAI-compatible (same integration as chat plugin)
+                models = openai_integration.list_models(
+                    provider=provider,
+                    user_api_key=user_api_key,
+                    overrides=overrides,
+                )
+                return jsonify({'models': models})
+            except Exception as exc:  # noqa: BLE001
+                return jsonify({'error': str(exc)}), 400
 
     def get_blueprint(self):
-        # Keep existing paths stable to avoid touching core
+        # Mount at root so avatar URLs /user_image/maid_avatar/... remain stable
+        # and models endpoint stays at /api/plugin/maid/models via absolute route.
         return self.blueprint, '/'

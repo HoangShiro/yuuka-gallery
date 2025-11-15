@@ -1,5 +1,24 @@
 // Maid-chan modal component extracted from maid_chan.js
 (function(){
+  // Early global registry + stub so features can register before modal opens
+  window.Yuuka = window.Yuuka || {};
+  window.Yuuka.components = window.Yuuka.components || {};
+  window.Yuuka.plugins = window.Yuuka.plugins || {};
+  const __maidFeatureRegistry = (window.Yuuka.plugins.maidMainFeatures = window.Yuuka.plugins.maidMainFeatures || []);
+  if(!window.Yuuka.components.MaidChanMainFrame){
+    window.Yuuka.components.MaidChanMainFrame = {
+      getContainer: ()=> null,
+      createFeatureCard: ()=> null,
+      registerFeature: (def)=>{
+        if(!def || !def.id) return null;
+        const i = __maidFeatureRegistry.findIndex(d=> d && d.id === def.id);
+        if(i >= 0) __maidFeatureRegistry[i] = { ...__maidFeatureRegistry[i], ...def };
+        else __maidFeatureRegistry.push(def);
+        return def;
+      },
+      listRegistered: ()=> __maidFeatureRegistry.slice()
+    };
+  }
   class MaidChanModal {
     constructor(){
       this.overlay = null;
@@ -9,6 +28,7 @@
       this._title = this._load('maid-chan:title', 'Maid-chan');
       this._titleSaveTimer = null;
       this._els = { modal: null, tabsBar: null, panels: {} };
+      this._vvHandlers = [];
     }
 
     open(){
@@ -16,6 +36,26 @@
       const overlay = document.createElement('div');
       overlay.className = 'maid-chan-modal-overlay';
       overlay.addEventListener('click', (e)=>{ if(e.target === overlay) this.close(); });
+      // Ensure overlay respects safe areas on mobile/narrow screens
+      overlay.style.boxSizing = 'border-box';
+      const applySafeArea = ()=>{
+        try{
+          const vv = window.visualViewport;
+          const offTop = vv && typeof vv.offsetTop === 'number' ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+          // Combine visualViewport offset with CSS env() safe-area if supported
+          overlay.style.paddingTop = offTop > 0 ? `${offTop}px` : 'max(12px, env(safe-area-inset-top, 0px))';
+        }catch(_e){
+          overlay.style.paddingTop = 'max(12px, env(safe-area-inset-top, 0px))';
+        }
+      };
+      applySafeArea();
+      if(window.visualViewport){
+        const onVVResize = ()=> applySafeArea();
+        const onVVScroll = ()=> applySafeArea();
+        window.visualViewport.addEventListener('resize', onVVResize);
+        window.visualViewport.addEventListener('scroll', onVVScroll);
+        this._vvHandlers.push(['resize', onVVResize], ['scroll', onVVScroll]);
+      }
 
       const modal = document.createElement('div');
       modal.className = 'maid-chan-modal';
@@ -75,6 +115,7 @@
       tabsBar.innerHTML = `
         <div class="maid-chan-tab-buttons" role="tablist" aria-label="Maid-chan Tabs">
           <button role="tab" data-tab="main" aria-selected="false">Main</button>
+          <button role="tab" data-tab="ability" aria-selected="false">Ability</button>
           <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
         </div>
       `;
@@ -112,6 +153,24 @@
         </div>
       `;
 
+      const abilityPanel = document.createElement('div');
+      abilityPanel.className = 'maid-chan-tab-panel';
+      abilityPanel.setAttribute('role', 'tabpanel');
+      abilityPanel.setAttribute('data-tab', 'ability');
+      abilityPanel.innerHTML = `
+        <div class="maid-chan-panel-card">
+          <div class="maid-chan-ability-header">
+            <div class="maid-chan-ability-title">Capabilities</div>
+            <div class="maid-chan-ability-actions">
+              <button class="maid-chan-ability-refresh" title="Refresh capability list">Refresh</button>
+            </div>
+          </div>
+          <div class="maid-chan-ability-body">
+            <!-- capability groups will be rendered here -->
+          </div>
+        </div>
+      `;
+
       const settingsPanel = document.createElement('div');
       settingsPanel.className = 'maid-chan-tab-panel';
       settingsPanel.setAttribute('role', 'tabpanel');
@@ -132,13 +191,74 @@
               </div>
             </div>
           </div>
+
+          <hr style="border:none;border-top:1px solid rgba(255,255,255,.08);margin:16px 0;" />
+
+          <div class="maid-chan-llm-settings">
+            <div class="maid-chan-llm-row">
+              <div class="maid-chan-llm-label">LLM Provider</div>
+              <div class="maid-chan-llm-provider-row">
+                <select class="maid-chan-llm-provider">
+                  <option value="openai">OpenAI / compatible</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="maid-chan-llm-row">
+              <div class="maid-chan-llm-label">API key</div>
+              <div class="maid-chan-llm-apikey-row">
+                <input type="password" class="maid-chan-llm-apikey" placeholder="Enter API key" />
+                <button type="button" class="maid-chan-llm-connect">Connect</button>
+              </div>
+            </div>
+
+            <div class="maid-chan-llm-row maid-chan-llm-models-wrapper">
+              <div class="maid-chan-llm-label">Model</div>
+              <select class="maid-chan-llm-models" disabled>
+                <option value="">Press Connect to load models</option>
+              </select>
+            </div>
+
+            <div class="maid-chan-llm-row">
+              <div class="maid-chan-llm-label">Generation</div>
+              <div class="maid-chan-llm-sliders">
+                <div class="maid-chan-llm-slider-row">
+                  <div class="maid-chan-llm-slider-label">Temperature</div>
+                  <div class="maid-chan-llm-slider-input">
+                    <input type="range" min="0" max="2" step="0.01" class="maid-chan-llm-slider-temp" />
+                  </div>
+                  <div class="maid-chan-llm-slider-value maid-chan-llm-slider-temp-value">1.00</div>
+                </div>
+
+                <div class="maid-chan-llm-slider-row">
+                  <div class="maid-chan-llm-slider-label">Top-p</div>
+                  <div class="maid-chan-llm-slider-input">
+                    <input type="range" min="0" max="1" step="0.01" class="maid-chan-llm-slider-top-p" />
+                  </div>
+                  <div class="maid-chan-llm-slider-value maid-chan-llm-slider-top-p-value">1.00</div>
+                </div>
+
+                <div class="maid-chan-llm-slider-row">
+                  <div class="maid-chan-llm-slider-label">Max tokens</div>
+                  <div class="maid-chan-llm-slider-input">
+                    <input type="range" min="16" max="4096" step="16" class="maid-chan-llm-slider-max-tokens" />
+                  </div>
+                  <div class="maid-chan-llm-slider-value maid-chan-llm-slider-max-tokens-value">512</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="maid-chan-llm-status" aria-live="polite"></div>
+          </div>
         </div>
         <footer>Tip: Right-click (desktop) or long-press (touch) to open this menu. Drop/paste an image onto the bubble to set an avatar.</footer>
       `;
 
       modal.appendChild(mainPanel);
+      modal.appendChild(abilityPanel);
       modal.appendChild(settingsPanel);
-      this._els.panels = { main: mainPanel, settings: settingsPanel };
+      this._els.panels = { main: mainPanel, ability: abilityPanel, settings: settingsPanel };
 
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
@@ -151,9 +271,19 @@
       if(this._els.panels.main){
         try { this._initMainFeatureFrame(this._els.panels.main); } catch(e){ /* ignore */ }
       }
+      // Initialize ability tab (capability list)
+      if(this._els.panels.ability){
+        try { this._initAbilityTab(this._els.panels.ability); } catch(e){ /* ignore */ }
+      }
       // Initialize external tab modules
       if(this._els.panels.settings){
-        try { window.Yuuka?.components?.MaidChanSettings?.init?.(this._els.panels.settings); } catch(e){ /* ignore */ }
+        try {
+          window.Yuuka?.components?.MaidChanSettings?.init?.(this._els.panels.settings);
+        } catch(e){ /* ignore */ }
+        // Ensure LLM settings UI is wired even if MaidChanSettings is missing
+        try {
+          window.Yuuka?.components?.MaidChanLLMSettings?.init?.(this._els.panels.settings);
+        } catch(e){ /* ignore */ }
       }
       if(this._els.panels.main){
         try { window.Yuuka?.components?.MaidChanMain?.init?.(this._els.panels.main); } catch(e){ /* ignore */ }
@@ -281,9 +411,336 @@
       }
     }
 
+    // Initialize Ability tab: grouped capability list with toggles (styled like Main tab)
+    _initAbilityTab(panelEl){
+      const bodyEl = panelEl.querySelector('.maid-chan-ability-body');
+      const refreshBtn = panelEl.querySelector('.maid-chan-ability-refresh');
+      const titleEl = panelEl.querySelector('.maid-chan-ability-title');
+      if(!bodyEl) return;
+
+      const capsService = window.Yuuka?.services?.capabilities;
+      const save = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(_e){} };
+      const load = (k, fb)=>{ try{ const r = localStorage.getItem(k); return r? JSON.parse(r): fb; }catch(_e){ return fb; } };
+      const CAP_NS = 'maid-chan:capability:';
+
+      const render = ()=>{
+        if(!capsService){
+          bodyEl.innerHTML = '<div class="maid-chan-ability-empty">Capabilities service is not available.</div>';
+          return;
+        }
+        const all = capsService.list();
+        if(!all.length){
+          bodyEl.innerHTML = '<div class="maid-chan-ability-empty">No capabilities registered yet.</div>';
+          if(titleEl){
+            titleEl.innerHTML = 'Capabilities <span class="maid-chan-ability-count">(0)</span>';
+          }
+          return;
+        }
+
+        // Update overall capabilities title with total count
+        if(titleEl){
+          const totalCount = all.length;
+          titleEl.innerHTML = `Capabilities <span class="maid-chan-ability-count">(${totalCount})</span>`;
+        }
+
+        // Group by pluginId
+        const groups = new Map();
+        all.forEach(c => {
+          const pid = c.pluginId || 'core';
+          if(!groups.has(pid)) groups.set(pid, []);
+          groups.get(pid).push(c);
+        });
+
+        // Sort groups and items
+        const sortedPluginIds = Array.from(groups.keys()).sort();
+        const htmlParts = [];
+
+        sortedPluginIds.forEach(pluginId => {
+          const caps = groups.get(pluginId).slice().sort((a,b)=> (a.id||'').localeCompare(b.id||''));
+          const groupKey = CAP_NS + pluginId + ':enabledAll';
+          const groupEnabled = !!load(groupKey, true);
+          const groupCount = caps.length;
+
+          const itemsHTML = caps.map(c => {
+            const llm = c.llmCallable ? '<span class="maid-chan-ability-tag">LLM</span>' : '';
+            const desc = (c.description || '').trim();
+            const type = (c.type || 'action');
+            const capKey = CAP_NS + pluginId + ':' + (c.id || '');
+            const enabled = !!load(capKey, groupEnabled);
+            return `
+              <div class="maid-chan-ability-item maid-chan-feature ${enabled ? 'is-enabled' : ''}" data-cap-id="${c.id}" data-plugin-id="${pluginId}">
+                <div class="feature-toggle-panel">
+                  <button type="button" class="maid-chan-ability-playground-toggle" title="Toggle playground">
+                    <span class="material-symbols-outlined">terminal</span>
+                  </button>
+                  <label class="mc-switch" title="Enable/Disable capability">
+                    <input type="checkbox" class="cap-toggle" role="switch" aria-checked="${enabled ? 'true':'false'}" ${enabled ? 'checked' : ''} />
+                    <span class="mc-slider"></span>
+                  </label>
+                </div>
+                <div class="maid-chan-ability-item-main feature-content-panel" tabindex="0">
+                  <div class="maid-chan-ability-row maid-chan-ability-row-main">
+                    <div class="maid-chan-ability-name">${c.title || c.id}</div>
+                    <div class="maid-chan-ability-meta">
+                      <span class="maid-chan-ability-plugin">${pluginId}</span>
+                      <span class="maid-chan-ability-type">${type}</span>
+                      ${llm}
+                    </div>
+                  </div>
+                  ${desc ? `<div class="maid-chan-ability-row maid-chan-ability-row-desc"><div class="maid-chan-ability-desc">${desc}</div></div>` : ''}
+                </div>
+                <div class="maid-chan-ability-playground" data-playground="1">
+                  <div class="maid-chan-ability-playground-inner">
+                    <div class="maid-chan-ability-playground-input">
+                      <label class="prompt-suggest-field-label">Payload</label>
+                      <textarea class="maid-chan-ability-payload" rows="4" spellcheck="false"></textarea>
+                    </div>
+                    <div class="maid-chan-ability-playground-actions">
+                      <button type="button" class="maid-chan-ability-run">Run</button>
+                      <button type="button" class="maid-chan-ability-reset">Reset</button>
+                    </div>
+                    <div class="maid-chan-ability-playground-result" aria-live="polite"></div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          htmlParts.push(`
+            <section class="maid-chan-cap-group" data-plugin-id="${pluginId}">
+              <div class="maid-chan-features-header maid-chan-ability-header">
+                <div class="maid-chan-features-title maid-chan-ability-title">${pluginId} <span class="maid-chan-ability-count">(${groupCount})</span></div>
+                <div class="maid-chan-features-actions maid-chan-ability-actions">
+                  <button class="maid-chan-ability-toggle-all" data-plugin-id="${pluginId}" title="Toggle all capabilities for this plugin">Toggle all</button>
+                </div>
+              </div>
+              <div class="maid-chan-ability-group-list">
+                ${itemsHTML}
+              </div>
+            </section>
+          `);
+        });
+
+        bodyEl.innerHTML = htmlParts.join('');
+
+        // Wire per-capability toggles for persistence + styling
+        bodyEl.querySelectorAll('.maid-chan-ability-item').forEach(itemEl => {
+          const capId = itemEl.dataset.capId;
+          const pluginId = itemEl.dataset.pluginId;
+          const toggle = itemEl.querySelector('.cap-toggle');
+          if(!toggle || !capId || !pluginId) return;
+          const capKey = CAP_NS + pluginId + ':' + capId;
+          toggle.addEventListener('change', () => {
+            const on = !!toggle.checked;
+            toggle.setAttribute('aria-checked', on ? 'true':'false');
+            itemEl.classList.toggle('is-enabled', on);
+            save(capKey, on);
+          });
+
+          // Playground wiring
+          const capDef = all.find(c => c.id === capId && (c.pluginId || 'core') === pluginId);
+          const pgToggle = itemEl.querySelector('.maid-chan-ability-playground-toggle');
+          const pgRoot = itemEl.querySelector('.maid-chan-ability-playground');
+          const pgInput = itemEl.querySelector('.maid-chan-ability-payload');
+          const pgRun = itemEl.querySelector('.maid-chan-ability-run');
+          const pgReset = itemEl.querySelector('.maid-chan-ability-reset');
+          const pgResult = itemEl.querySelector('.maid-chan-ability-playground-result');
+          if(!pgToggle || !pgRoot || !pgInput || !pgRun || !pgReset || !pgResult) return;
+
+          const playgroundKey = CAP_NS + pluginId + ':' + capId + ':playgroundPayload';
+          const example = capDef && capDef.example ? capDef.example : null;
+          const defaultPayload = example && typeof example.defaultPayload !== 'undefined'
+            ? example.defaultPayload
+            : (capDef && capDef.paramsSchema ? { } : '');
+          const storedPayload = load(playgroundKey, null);
+          const initialPayload = storedPayload !== null ? storedPayload : defaultPayload;
+
+          const serialize = (val)=>{
+            if(val == null) return '';
+            if(typeof val === 'string') return val;
+            try{ return JSON.stringify(val, null, 2); }catch(_e){ return String(val); }
+          };
+          const parse = (text)=>{
+            const trimmed = text.trim();
+            if(!trimmed) return {};
+            try{ return JSON.parse(trimmed); }catch(_e){ return trimmed; }
+          };
+
+          pgInput.value = serialize(initialPayload);
+
+          // Inject preset payload buttons next to the label if variants exist
+          try {
+            const labelEl = itemEl.querySelector('.maid-chan-ability-playground-input .prompt-suggest-field-label');
+            if (labelEl && example && Array.isArray(example.variants) && example.variants.length) {
+              const presetsContainer = document.createElement('span');
+              presetsContainer.className = 'maid-chan-ability-presets';
+
+              example.variants.forEach((variant, idx) => {
+                if (!variant || typeof variant.payload === 'undefined') return;
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'maid-chan-ability-preset-btn';
+                btn.textContent = variant.name || `Preset ${idx + 1}`;
+                btn.title = variant.notes || '';
+                btn.addEventListener('click', () => {
+                  const payloadToApply = variant.payload;
+                  pgInput.value = serialize(payloadToApply);
+                  save(playgroundKey, payloadToApply);
+                  pgResult.textContent = '';
+                  pgResult.dataset.kind = '';
+                });
+                presetsContainer.appendChild(btn);
+              });
+
+              if (presetsContainer.childElementCount > 0) {
+                labelEl.appendChild(presetsContainer);
+              }
+            }
+          } catch(_e) {/* ignore UI preset errors */}
+
+          // Start collapsed via CSS (max-height:0); toggle .is-expanded on the item
+          itemEl.classList.remove('is-expanded');
+
+          pgToggle.addEventListener('click', ()=>{
+            const expanded = itemEl.classList.toggle('is-expanded');
+            // no-op: CSS handles visibility via .is-expanded
+          });
+
+          pgReset.addEventListener('click', ()=>{
+            pgInput.value = serialize(defaultPayload);
+            save(playgroundKey, defaultPayload);
+            pgResult.textContent = '';
+            pgResult.dataset.kind = '';
+          });
+
+          pgRun.addEventListener('click', async ()=>{
+            if(!capDef) return;
+            const raw = pgInput.value || '';
+            const args = parse(raw);
+            save(playgroundKey, args);
+            pgResult.textContent = 'Running...';
+            pgResult.dataset.kind = 'text';
+            try{
+              const res = await capsService.invoke(capDef.id, args, { source: 'maid-playground', pluginId });
+              this._renderPlaygroundResult(pgResult, res);
+            }catch(err){
+              this._renderPlaygroundError(pgResult, err);
+            }
+          });
+        });
+
+        // Wire group "toggle all" buttons
+        bodyEl.querySelectorAll('.maid-chan-ability-toggle-all').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const pluginId = btn.dataset.pluginId;
+            if(!pluginId) return;
+            const groupKey = CAP_NS + pluginId + ':enabledAll';
+            const current = !!load(groupKey, true);
+            const next = !current;
+            save(groupKey, next);
+            const groupEl = bodyEl.querySelector(`.maid-chan-cap-group[data-plugin-id="${pluginId}"]`);
+            if(!groupEl) return;
+            const toggles = groupEl.querySelectorAll('.cap-toggle');
+            toggles.forEach(inp => {
+              if(!!inp.checked !== next){
+                inp.checked = next;
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+            });
+          });
+        });
+      };
+
+      render();
+
+      if(refreshBtn){
+        refreshBtn.addEventListener('click', ()=> render());
+      }
+
+      // React to runtime capability changes
+      if(window.Yuuka?.events){
+        try{
+          const rebuilder = ()=> render();
+          window.Yuuka.events.on('capability:registered', rebuilder);
+          window.Yuuka.events.on('capability:unregistered', rebuilder);
+        }catch(_e){/* ignore */}
+      }
+    }
+
+    // Generic renderer for playground result payloads
+    _renderPlaygroundResult(container, value){
+      if(!container) return;
+      container.innerHTML = '';
+      container.dataset.kind = '';
+
+      const isBlobLike = (v)=> v && typeof v === 'object' && typeof v.type === 'string' && typeof v.data === 'string';
+
+      const renderText = (txt)=>{
+        const pre = document.createElement('pre');
+        pre.textContent = txt;
+        container.appendChild(pre);
+        container.dataset.kind = 'text';
+      };
+
+      if(isBlobLike(value)){
+        const { type, data } = value;
+        if(type.startsWith('image/')){
+          const img = document.createElement('img');
+          img.src = data;
+          img.alt = 'Capability image result';
+          container.appendChild(img);
+          container.dataset.kind = 'image';
+          return;
+        }
+        if(type.startsWith('audio/')){
+          const audio = document.createElement('audio');
+          audio.controls = true;
+          audio.src = data;
+          container.appendChild(audio);
+          container.dataset.kind = 'audio';
+          return;
+        }
+        if(type.startsWith('video/')){
+          const video = document.createElement('video');
+          video.controls = true;
+          video.src = data;
+          container.appendChild(video);
+          container.dataset.kind = 'video';
+          return;
+        }
+      }
+
+      if(typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'){
+        renderText(String(value));
+        return;
+      }
+
+      try{
+        const pretty = JSON.stringify(value, null, 2);
+        renderText(pretty);
+      }catch(_e){
+        renderText(String(value));
+      }
+    }
+
+    _renderPlaygroundError(container, err){
+      if(!container) return;
+      container.innerHTML = '';
+      const pre = document.createElement('pre');
+      pre.textContent = err && err.message ? String(err.message) : String(err);
+      pre.className = 'maid-chan-ability-error';
+      container.appendChild(pre);
+      container.dataset.kind = 'error';
+    }
+
     close(){
       if(!this.overlay) return;
       document.removeEventListener('keydown', this._escHandler);
+      // Remove visualViewport listeners used for safe-area padding
+      if(this._vvHandlers && window.visualViewport){
+        try{ this._vvHandlers.forEach(([ev, fn])=> window.visualViewport.removeEventListener(ev, fn)); }catch(_e){}
+      }
+      this._vvHandlers = [];
       this.overlay.remove();
       this.overlay = null;
       this._escHandler = null;

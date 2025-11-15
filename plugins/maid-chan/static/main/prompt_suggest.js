@@ -100,6 +100,8 @@
 
   function collectText(value, out){
     if(typeof value !== 'string') return;
+    // Basic normalization: strip parentheses first
+    value = value.replace(/[()]/g, '');
     // Split by commas / newlines
     value.split(/[,\n]/).map(s=> s.trim()).forEach(tok=>{
       if(!tok) return;
@@ -136,540 +138,337 @@
     };
   }
 
-  function weightedRandomSample(model, k){
-    if(!model || !Array.isArray(model.items) || !model.items.length) return [];
-    // Copy array for partial sampling without replacement; recompute cumulative weights each pick
-    const pool = model.items.slice();
-    const chosen = [];
-    while(chosen.length < k && pool.length){
-      const sum = pool.reduce((a,it)=> a + it.weight, 0) || 1;
-      let r = Math.random()*sum;
-      let idx = 0;
-      for(let i=0;i<pool.length;i++){
-        r -= pool[i].weight;
-        if(r <= 0){ idx = i; break; }
-      }
-      const picked = pool.splice(idx,1)[0];
-      chosen.push(picked.tag);
-    }
-    return chosen;
-  }
-
-  function generateSuggestions(model, count=2){
-    // Fallback: map default strings into objects
-    const fallback = DEFAULT_SUGGESTIONS.slice(0, count).map(str=> ({ text: String(str), parts: null }));
-    if(!model || !model.outfits || !model.expression || !model.action || !model.context){
-      return fallback;
-    }
-    const pickCat = (catModel, minN, maxN)=>{
-      const n = Math.max(minN, Math.min(maxN, Math.round(minN + Math.random()*(maxN-minN))));
-      return weightedRandomSample(catModel, n);
-    };
+  // ---- Sampling helpers ----
+  function weightedRandomSample(bucket, n){
+    if(!bucket || !Array.isArray(bucket.items) || !bucket.items.length || !n) return [];
+    const items = bucket.items;
     const out = [];
-    const seen = new Set();
-    for(let i=0;i<count;i++){
-      const outfits = pickCat(model.outfits, 1, 2);
-      const expression = pickCat(model.expression, 1, 2);
-      const action = pickCat(model.action, 1, 2);
-      const context = pickCat(model.context, 2, 4);
-      // Render combined string
-      const prompt = [
-        ...outfits,
-        ...expression,
-        ...action,
-        ...context
-      ].filter(Boolean).join(', ');
-      if(seen.has(prompt)) { i--; continue; }
-      seen.add(prompt);
-      out.push({ text: prompt, parts: { outfits, expression, action, context } });
+    for(let i=0;i<n;i++){
+      let r = Math.random();
+      let acc = 0;
+      for(const it of items){
+        acc += it.weight || 0;
+        if(r <= acc){ out.push(it.tag); break; }
+      }
     }
     return out;
   }
 
-  // ---- UI ----
+  function generateSuggestions(modelOrNull){
+    const model = modelOrNull || loadModel();
+    if(!model) return {
+      outfits: 'school uniform, ribbon',
+      expression: 'smile',
+      action: 'sitting',
+      context: 'classroom, soft lighting'
+    };
+    const pick = (catKey, minN, maxN)=>{
+      if(!model[catKey]) return '';
+      const n = Math.max(minN, Math.min(maxN, Math.round(minN + Math.random()*(maxN-minN))));
+      const arr = weightedRandomSample(model[catKey], n);
+      return arr.filter(Boolean).join(', ');
+    };
+    return {
+      outfits: pick('outfits', 1, 3),
+      expression: pick('expression', 1, 2),
+      action: pick('action', 1, 2),
+      context: pick('context', 1, 3)
+    };
+  }
+
+  // ---- Maid quick menu integration (use MaidChanBubble quick actions) ----
+  function registerQuickMenuAction(retries=25){
+    const maid = window.Yuuka?.components?.MaidChanBubble;
+    if(maid && typeof maid.registerQuickAction === 'function'){
+      // Main quick-generate button
+      maid.registerQuickAction({
+        id: 'prompt_suggest_quick_generate',
+        featureId: FEATURE_ID,
+        icon: 'auto_awesome',
+        title: 'Prompt Suggest auto-generate',
+        order: 30,
+        async handler(ctx={}){
+          const showMessage = ctx.showMessage || (msg=>console.info('[PromptSuggest]', msg?.text || msg));
+
+          if(!loadTriggerEnabled()){
+            showMessage({ text: 'Prompt Suggest: (Tắt auto-generate)', duration: 2200, type: 'info' });
+            return;
+          }
+
+          const caps = window.Yuuka?.services?.capabilities;
+          if(!caps || typeof caps.invoke !== 'function'){
+            showMessage({ text: 'Capabilities chưa sẵn sàng.', duration: 2500, type: 'error' });
+            return;
+          }
+
+          let ctxAlbum;
+          try{
+            ctxAlbum = await caps.invoke('album.get_context', {});
+          }catch(err){
+            console.warn('[PromptSuggest] album.get_context failed', err);
+            showMessage({ text: 'Không đọc được trạng thái album.', duration: 3000, type: 'error' });
+            return;
+          }
+
+          const current = ctxAlbum?.current;
+          if(!current || !current.hash){
+            showMessage({ text: 'Chưa mở album nhân vật nào.', duration: 3000, type: 'warning' });
+            return;
+          }
+          const characterHash = current.hash;
+          const characterName = current.name || 'nhân vật';
+
+          let promptText = (loadPromptText() || '').trim();
+          if(!promptText){
+            const sug = generateSuggestions(loadModel());
+            promptText = `outfits: ${sug.outfits}; expression: ${sug.expression}; action: ${sug.action}; context: ${sug.context}`;
+            savePromptText(promptText);
+          }
+
+          const extraTags = (loadCustomTags() || '').trim();
+          let finalPrompt = promptText;
+          if(extraTags){
+            finalPrompt = `${promptText.replace(/[.,\s]*$/, '')}, ${extraTags}`;
+          }
+
+          try{
+            await caps.invoke('image.generate', {
+              character_hash: characterHash,
+              prompt: finalPrompt,
+            });
+          }catch(err){
+            console.warn('[PromptSuggest] image.generate failed', err);
+            showMessage({ text: 'Không thể tạo ảnh (capability lỗi).', duration: 3500, type: 'error' });
+            return;
+          }
+
+          showMessage({ text: `Đã tạo ảnh cho ${characterName}~!`, duration: 3500, type: 'success' });
+        }
+      });
+
+      // Info / open-feature button so quick menu always has at least two buttons
+      maid.registerQuickAction({
+        id: 'prompt_suggest_info',
+        featureId: FEATURE_ID,
+        icon: 'chat_info',
+        title: 'Mở tab Prompt Suggestions',
+        order: 31,
+        async handler(ctx={}){
+          const showMessage = ctx.showMessage || (msg=>console.info('[PromptSuggest]', msg?.text || msg));
+          const frame = window.Yuuka?.components?.MaidChanMainFrame;
+          if(frame && typeof frame.open === 'function'){
+            try{
+              await frame.open({ focusFeatureId: FEATURE_ID });
+              showMessage({ text: 'Đã mở tab Prompt Suggestions.', duration: 2600, type: 'info' });
+            }catch(err){
+              console.warn('[PromptSuggest] open Prompt Suggestions failed', err);
+              showMessage({ text: 'Không mở được tab Prompt Suggestions.', duration: 2800, type: 'error' });
+            }
+          }else{
+            showMessage({ text: 'UI Maid-chan chưa sẵn sàng để mở tab.', duration: 2600, type: 'warning' });
+          }
+        }
+      });
+      return true;
+    }
+    if(retries<=0) return false;
+    setTimeout(()=> registerQuickMenuAction(retries-1), 350);
+    return false;
+  }
+
+  // ---- Main tab UI ----
   function buildUI(container){
     container.innerHTML = '';
-    const wrapper = document.createElement('div');
-    wrapper.className = 'prompt-suggest-wrapper';
+    const root = document.createElement('div');
+    root.className = 'prompt-suggest-wrapper';
 
-    const header = document.createElement('div');
-    header.className = 'prompt-suggest-header';
-    // Title removed per requirement; feature title is registered separately
-    header.innerHTML = '';
+    const currentPrompt = loadPromptText();
+    const parts = (currentPrompt || '').split(';');
+    const parsePart = (label)=>{
+      const match = parts.find(p=> p.trim().toLowerCase().startsWith(label+':'));
+      if(!match) return '';
+      return match.split(':').slice(1).join(':').trim();
+    };
+
+    const outfitsInitial = parsePart('outfits');
+    const expressionInitial = parsePart('expression');
+    const actionInitial = parsePart('action');
+    const contextInitial = parsePart('context');
+
+    function composePromptText(){
+      const outfits = outfitsArea.value.trim();
+      const expr = expressionArea.value.trim();
+      const act = actionArea.value.trim();
+      const ctx = contextArea.value.trim();
+      const segments = [];
+      if(outfits) segments.push(`outfits: ${outfits}`);
+      if(expr) segments.push(`expression: ${expr}`);
+      if(act) segments.push(`action: ${act}`);
+      if(ctx) segments.push(`context: ${ctx}`);
+      const text = segments.join('; ');
+      savePromptText(text);
+      return text;
+    }
+
+    function autoResize(ta){
+      ta.style.height = 'auto';
+      ta.style.height = (ta.scrollHeight||40) + 'px';
+    }
+
+    function createLabeledArea(labelText, placeholder, initial){
+      const wrapper = document.createElement('div');
+      wrapper.className = 'prompt-suggest-field';
+      const label = document.createElement('div');
+      label.className = 'prompt-suggest-field-label';
+      label.textContent = labelText;
+      const ta = document.createElement('textarea');
+      ta.className = 'prompt-suggest-textarea';
+      ta.placeholder = placeholder;
+      ta.value = initial || '';
+      autoResize(ta);
+      ta.addEventListener('input', ()=>{
+        autoResize(ta);
+        composePromptText();
+      });
+      wrapper.appendChild(label);
+      wrapper.appendChild(ta);
+      return { wrapper, textarea: ta, labelEl: label };
+    }
+
+    const outfitsField = createLabeledArea('Outfits', 'VD: school uniform, ribbon', outfitsInitial);
+    const expressionField = createLabeledArea('Expression', 'VD: smile, cheerful', expressionInitial);
+    const actionField = createLabeledArea('Action', 'VD: sitting, waving', actionInitial);
+    const contextField = createLabeledArea('Context', 'VD: classroom, soft lighting', contextInitial);
+
+    const outfitsArea = outfitsField.textarea;
+    const expressionArea = expressionField.textarea;
+    const actionArea = actionField.textarea;
+    const contextArea = contextField.textarea;
+
+    root.appendChild(outfitsField.wrapper);
+    root.appendChild(expressionField.wrapper);
+    root.appendChild(actionField.wrapper);
+    root.appendChild(contextField.wrapper);
+
+    const extraArea = document.createElement('textarea');
+    extraArea.className = 'prompt-custom-tags-textarea';
+    extraArea.placeholder = 'Custom tags thêm (optional)';
+    extraArea.value = loadCustomTags();
+    autoResize(extraArea);
+    extraArea.addEventListener('input', ()=>{
+      autoResize(extraArea);
+      saveCustomTags(extraArea.value);
+    });
+    root.appendChild(extraArea);
 
     const actions = document.createElement('div');
     actions.className = 'prompt-suggest-actions';
 
     const refreshBtn = document.createElement('button');
-    refreshBtn.className = 'prompt-suggest-refresh';
-    refreshBtn.textContent = 'Refresh';
-    refreshBtn.title = 'Quét dữ liệu ảnh & tạo gợi ý mới';
-
-    // Android-style internal toggle for trigger auto-generate
-    const toggleWrap = document.createElement('label');
-    toggleWrap.className = 'ps-trigger-toggle';
-    toggleWrap.innerHTML = `
-      <span class="ps-toggle-label">Quick-Generate</span>
-      <div class="ps-switch">
-        <input type="checkbox" class="ps-switch-input" />
-        <div class="ps-switch-track"><div class="ps-switch-thumb"></div></div>
-      </div>`;
-    const toggleInput = toggleWrap.querySelector('input');
-    toggleInput.checked = loadTriggerEnabled();
-
+    refreshBtn.textContent = 'Refresh gợi ý';
     actions.appendChild(refreshBtn);
-    actions.appendChild(toggleWrap);
 
-    const statusLine = document.createElement('div');
-    statusLine.className = 'prompt-suggest-status';
-    statusLine.textContent = 'Đang chờ...';
-
-  // Removed combined prompt preview per requirement
-
-    // Category inputs
-    const catGrid = document.createElement('div');
-    catGrid.className = 'prompt-suggest-cat-grid';
-    const mkCat = (label, lsKey, cls, catKey, minN=1, maxN=2) => {
-      const wrap = document.createElement('div');
-      wrap.className = 'prompt-suggest-cat-item';
-      const header = document.createElement('div');
-      header.className = 'ps-cat-header';
-      const rerollCfg = loadRerollCats();
-      header.innerHTML = `
-        <span class="ps-cat-label">${label}</span>
-        <div class="ps-cat-controls">
-          <label class="ps-switch ps-cat-toggle" title="Include in Refresh">
-            <input type="checkbox" class="ps-switch-input ps-cat-reroll-input" aria-label="Include ${label} in Refresh" />
-            <div class="ps-switch-track"><div class="ps-switch-thumb"></div></div>
-          </label>
-          <button type="button" class="ps-cat-random-btn" title="Randomize ${label}">
-            <span class="material-symbols-outlined">casino</span>
-          </button>
-        </div>`;
-      wrap.appendChild(header);
-      const ta = document.createElement('textarea');
-      ta.className = cls;
-      ta.rows = 1; ta.style.resize='none'; ta.style.overflow='hidden';
-      ta.placeholder = `${label} tags...`;
-      ta.value = loadCat(lsKey);
-      wrap.appendChild(ta);
-      catGrid.appendChild(wrap);
-      // Attach randomize action
-      const btn = header.querySelector('.ps-cat-random-btn');
+    const makeFieldReroll = (fieldKey, area)=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'prompt-suggest-reroll-btn';
+      btn.innerHTML = '<span class="material-symbols-outlined">ifl</span>';
       btn.addEventListener('click', async ()=>{
+        btn.disabled = true;
         try{
-          btn.disabled = true;
-          const model = await ensureModel();
-          const picked = pickFromModel(model, catKey, minN, maxN);
-          if(picked){ ta.value = picked; saveCat(lsKey, ta.value); autoResize(ta); recomputeCombinedPrompt(); }
-        } finally { btn.disabled = false; }
+          const imgs = await fetchAllImages();
+          const model = buildFrequencyModel(imgs);
+          saveModel(model);
+          const part = generateSuggestions(model)[fieldKey] || '';
+          area.value = part;
+          autoResize(area);
+          composePromptText();
+        }finally{
+          btn.disabled = false;
+        }
       });
-      // Initialize and wire reroll toggle
-      const toggle = header.querySelector('.ps-cat-reroll-input');
-      if(toggle){
-        toggle.checked = !!rerollCfg[catKey];
-        toggle.addEventListener('change', ()=>{
-          const cfg = loadRerollCats();
-          cfg[catKey] = !!toggle.checked;
-          saveRerollCats(cfg);
-        });
-      }
-      return ta;
+      return btn;
     };
-    const outfitsBox = mkCat('Outfits', LS_CAT_OUTFITS, 'ps-outfits-textarea', 'outfits', 1, 2);
-    const expressionBox = mkCat('Expression', LS_CAT_EXPRESSION, 'ps-expression-textarea', 'expression', 1, 2);
-    const actionBox = mkCat('Action', LS_CAT_ACTION, 'ps-action-textarea', 'action', 1, 2);
-    const contextBox = mkCat('Context', LS_CAT_CONTEXT, 'ps-context-textarea', 'context', 2, 4);
 
-    // Secondary textarea for custom tags appended on generation
-    const customTagsBox = document.createElement('textarea');
-    customTagsBox.className = 'prompt-custom-tags-textarea';
-    customTagsBox.placeholder = 'Tags bổ sung (sẽ tự động thêm vào prompt khi tạo ảnh)';
-    customTagsBox.style.resize = 'none';
-    customTagsBox.style.overflow = 'hidden';
-    customTagsBox.rows = 1;
+    outfitsField.labelEl.prepend(makeFieldReroll('outfits', outfitsArea));
+    expressionField.labelEl.prepend(makeFieldReroll('expression', expressionArea));
+    actionField.labelEl.prepend(makeFieldReroll('action', actionArea));
+    contextField.labelEl.prepend(makeFieldReroll('context', contextArea));
 
-    wrapper.appendChild(header);
-    wrapper.appendChild(actions);
-    wrapper.appendChild(statusLine);
-  wrapper.appendChild(catGrid);
-    wrapper.appendChild(customTagsBox);
-    container.appendChild(wrapper);
-
-    function setStatus(txt){ statusLine.textContent = txt || ''; }
-
-    // Auto-resize helper
-    function autoResize(el){
+    refreshBtn.addEventListener('click', async ()=>{
+      refreshBtn.disabled = true;
       try{
-        el.style.height = 'auto';
-        el.style.height = Math.max(40, el.scrollHeight) + 'px';
-      }catch(_e){}
-    }
-
-    // Initialize textareas with saved values
-    function recomputeCombinedPrompt(){
-      const parts = [outfitsBox.value, expressionBox.value, actionBox.value, contextBox.value]
-        .map(s=> s.split(/[,\n]/).map(t=>t.trim()).filter(Boolean).join(', '))
-        .filter(Boolean);
-      const combined = parts.join(', ');
-      savePromptText(combined);
-      return combined;
-    }
-
-    function initTextareas(){
-      const savedPrompt = loadPromptText();
-      const savedTags = loadCustomTags();
-      if(savedTags){ customTagsBox.value = savedTags; }
-      // If category boxes empty but we have a savedPrompt, attempt naive split into context
-      [outfitsBox, expressionBox, actionBox, contextBox].forEach(autoResize);
-      if(!outfitsBox.value && !expressionBox.value && !actionBox.value && !contextBox.value && savedPrompt){
-        contextBox.value = savedPrompt; saveCat(LS_CAT_CONTEXT, contextBox.value);
+        const imgs = await fetchAllImages();
+        const model = buildFrequencyModel(imgs);
+        saveModel(model);
+        const sug = generateSuggestions(model);
+        outfitsArea.value = sug.outfits || '';
+        expressionArea.value = sug.expression || '';
+        actionArea.value = sug.action || '';
+        contextArea.value = sug.context || '';
+        autoResize(outfitsArea);
+        autoResize(expressionArea);
+        autoResize(actionArea);
+        autoResize(contextArea);
+        composePromptText();
+      }finally{
+        refreshBtn.disabled = false;
       }
-      recomputeCombinedPrompt();
-      autoResize(customTagsBox);
-    }
+    });
 
-    async function doRefresh(){
-      if(refreshBtn.disabled) return;
-      refreshBtn.disabled = true; setStatus('Đang quét dữ liệu ảnh...');
-      const imgs = await fetchAllImages();
-      setStatus(`Đã tải ${imgs.length} ảnh. Đang phân tích...`);
-      const model = buildFrequencyModel(imgs);
-      saveModel(model);
-      const suggestions = generateSuggestions(model, 1);
-      saveSuggestions(suggestions);
-      const first = suggestions[0]?.text || '';
-      if(first){
-        const parts = suggestions[0]?.parts || null;
-        const reroll = loadRerollCats();
-        if(parts){
-          if(reroll.outfits){ outfitsBox.value = parts.outfits.join(', '); saveCat(LS_CAT_OUTFITS, outfitsBox.value); }
-          if(reroll.expression){ expressionBox.value = parts.expression.join(', '); saveCat(LS_CAT_EXPRESSION, expressionBox.value); }
-          if(reroll.action){ actionBox.value = parts.action.join(', '); saveCat(LS_CAT_ACTION, actionBox.value); }
-          if(reroll.context){ contextBox.value = parts.context.join(', '); saveCat(LS_CAT_CONTEXT, contextBox.value); }
-        } else {
-          if(loadRerollCats().context){ contextBox.value = first; saveCat(LS_CAT_CONTEXT, contextBox.value); }
-        }
-        recomputeCombinedPrompt();
-      }
-      setStatus('Hoàn tất!');
-      refreshBtn.disabled = false;
-    }
+    root.appendChild(actions);
 
-    refreshBtn.addEventListener('click', ()=>{ doRefresh(); });
-    toggleInput.addEventListener('change', ()=>{ saveTriggerEnabled(toggleInput.checked); });
-
-    // Auto-save + auto-resize on input
-    customTagsBox.addEventListener('input', ()=>{ saveCustomTags(customTagsBox.value); autoResize(customTagsBox); });
-  const catInputHandler = (box,key)=>{ box.addEventListener('input', ()=>{ saveCat(key, box.value); autoResize(box); recomputeCombinedPrompt(); }); };
-  catInputHandler(outfitsBox, LS_CAT_OUTFITS);
-  catInputHandler(expressionBox, LS_CAT_EXPRESSION);
-  catInputHandler(actionBox, LS_CAT_ACTION);
-  catInputHandler(contextBox, LS_CAT_CONTEXT);
-
-    // Initial render
-    initTextareas();
-    const existing = loadPromptText();
-    if(existing){ setStatus('Sẵn sàng (đã lưu)'); }
-    else {
-      const cachedList = loadSuggestions();
-      if(cachedList.length){
-        const first = cachedList[0]?.text || '';
-        if(first){
-          const parts = cachedList[0]?.parts || null;
-          if(parts){
-            outfitsBox.value = parts.outfits.join(', ');
-            expressionBox.value = parts.expression.join(', ');
-            actionBox.value = parts.action.join(', ');
-            contextBox.value = parts.context.join(', ');
-            saveCat(LS_CAT_OUTFITS, outfitsBox.value);
-            saveCat(LS_CAT_EXPRESSION, expressionBox.value);
-            saveCat(LS_CAT_ACTION, actionBox.value);
-            saveCat(LS_CAT_CONTEXT, contextBox.value);
-          } else { contextBox.value = first; saveCat(LS_CAT_CONTEXT, contextBox.value); }
-          recomputeCombinedPrompt();
-          setStatus('Sẵn sàng (cache)');
-        }
-      } else {
-        const def = String(DEFAULT_SUGGESTIONS[0] || '');
-        contextBox.value = def; saveCat(LS_CAT_CONTEXT, contextBox.value); recomputeCombinedPrompt(); setStatus('Gợi ý mặc định');
-      }
-    }
+    container.appendChild(root);
   }
 
-  function mount(container){ buildUI(container); }
-  function unmount(container){ container.innerHTML=''; }
+    function mount(container){ buildUI(container); }
+    function unmount(container){ container.innerHTML=''; }
 
-  // ---- Trigger (bubble) ----
-  function attemptRegisterTrigger(retries=25){
-    const bubble = window.Yuuka?.components?.MaidChanBubble;
-    if(bubble && bubble.registerTrigger){
-      bubble.registerTrigger({
-        id: 'prompt_suggest_chat',
-        featureId: FEATURE_ID,
-        requireEnabled: true,
-        handler: async ({ showMessage })=>{
-          // Respect internal toggle
-            if(!loadTriggerEnabled()){
-              showMessage?.({ text: 'Prompt Suggest: (Tắt auto-generate)', duration: 2200, type: 'info' });
-              return;
-            }
-            // Find selected album / character (robust scan)
-            const selectedChar = findSelectedCharacter();
-            if(!selectedChar){
-              showMessage?.({ text: 'Chưa mở album nhân vật nào.', duration: 3000, type: 'warning' });
-              return;
-            }
-            const characterName = selectedChar?.name || selectedChar?.character || 'nhân vật';
-            // Determine prompt text: prefer saved textarea, else model, else default
-            let promptText = (loadPromptText() || '').trim();
-            if(!promptText){
-              const model = loadModel();
-              const generated = generateSuggestions(model, 1);
-              const first = generated[0]?.text || '';
-              promptText = first || String(DEFAULT_SUGGESTIONS[0] || '');
-              // cache
-              saveSuggestions(generated);
-              savePromptText(promptText);
-            }
-            const picked = { text: promptText, parts: null };
-            // Build generation config minimal (fill category fields if available)
-            // FIX: ensure we await async config builder (was returning a Promise, causing empty Object.keys & abort)
-            const genConfig = await buildGenerationConfigFromPrompt(picked, selectedChar);
-            // Debug trace to help diagnose 400/401 issues
-            console.debug('[PromptSuggest] Trigger generation debug', {
-              selectedChar,
-              characterHash: selectedChar.hash,
-              hasConfig: !!genConfig,
-              configKeys: Object.keys(genConfig||{}),
-              sampleFields: {
-                character: genConfig.character,
-                width: genConfig.width,
-                height: genConfig.height,
-                steps: genConfig.steps
-              }
-            });
-            const result = await startGeneration(selectedChar.hash, genConfig);
-            if(result && result.task_id){
-              // Notify album UI immediately
-              try{ window.Yuuka?.events?.emit('generation:task_created_locally', { task_id: result.task_id, character_hash: selectedChar.hash }); }catch(_e){}
-              try{ window.Yuuka?.events?.emit('album:request_refresh'); }catch(_e){}
-              showMessage?.({ text: `Đã tạo ảnh cho ${characterName}~!`, duration: 3500, type: 'success' });
-            }else{
-              showMessage?.({ text: 'Không thể tạo ảnh (lỗi).', duration: 3500, type: 'error' });
-            }
-        }
-      });
-      return true;
-    }
-    if(retries<=0) return false;
-    setTimeout(()=> attemptRegisterTrigger(retries-1), 350);
-    return false;
-  }
-
-  async function buildGenerationConfigFromPrompt(suggestion, selectedChar){
-    // Fetch album last_config (without global choices for speed)
-    let albumConfig = null;
-    try {
-      if(selectedChar?.hash){
-        // Prefer unified plugin API client if available
-        const token = localStorage.getItem('yuuka-auth-token') || '';
-        const apiAlbum = (window.Yuuka?.coreApi?.album) || (window.Yuuka?.api?.album); // two naming variants
-        let data = null;
-        if(apiAlbum?.get){
-          try {
-            data = await apiAlbum.get(`/comfyui/info?character_hash=${encodeURIComponent(selectedChar.hash)}&no_choices=true`);
-          } catch(e){ console.warn('[PromptSuggest] Album API client get failed', e); }
-        }
-        if(!data){
-          const infoUrl = `/api/plugin/album/comfyui/info?character_hash=${encodeURIComponent(selectedChar.hash)}&no_choices=true`;
-          const headers = token ? { 'Authorization': 'Bearer '+token } : {};
-          const res = await fetch(infoUrl, { headers });
-          if(res.ok){
-            data = await res.json().catch(()=>null);
-          } else {
-            console.warn('[PromptSuggest] Album info fetch failed', res.status);
-          }
-        }
-        albumConfig = data?.last_config || null;
+    // ---- Feature registration ----
+    function attemptRegisterFeature(retries=25){
+      const frame = window.Yuuka?.components?.MaidChanMainFrame;
+      if(frame && frame.registerFeature){
+        frame.registerFeature({
+          id: FEATURE_ID,
+          title: 'Prompt Suggestions',
+          description: 'Quét lịch sử ảnh để tạo prompt gợi ý & auto-generate.',
+          defaultEnabled: true,
+          mount,
+          unmount
+        });
+        return true;
       }
-    }catch(_e){ /* ignore, fallback below */ }
-    const extraTags = (loadCustomTags() || '').trim();
-    const outfits = loadCat(LS_CAT_OUTFITS);
-    const expression = loadCat(LS_CAT_EXPRESSION);
-    const action = loadCat(LS_CAT_ACTION);
-    const contextRaw = loadCat(LS_CAT_CONTEXT);
-    const combinedContext = extraTags ? [contextRaw, extraTags].filter(Boolean).join(', ') : contextRaw;
-    // Clone album config or default skeleton
-    // Always layer defaults first, then albumConfig (may be empty object). Prevent empty final config.
-    const defaults = {
-      quality: 'masterpiece, best quality',
-      negative: 'bad quality, worst quality, lowres',
-      steps: 12,
-      cfg: 2.2,
-      width: 832,
-      height: 1216,
-      batch_size: 1,
-      sampler_name: 'dpmpp_sde',
-      scheduler: 'beta',
-      hires_enabled: false,
-      workflow_type: 'standard'
+      if(retries<=0) return false;
+      setTimeout(()=> attemptRegisterFeature(retries-1), 350);
+      return false;
+    }
+
+    if(document.readyState === 'loading'){
+      document.addEventListener('DOMContentLoaded', ()=>{ attemptRegisterFeature(); registerQuickMenuAction(); });
+    }else{
+      attemptRegisterFeature();
+      registerQuickMenuAction();
+    }
+
+    // Expose (debug)
+    window.Yuuka = window.Yuuka || {}; window.Yuuka.components = window.Yuuka.components || {};
+    window.Yuuka.components.PromptSuggestFeature = { regenerate: async ()=>{
+        const imgs = await fetchAllImages();
+        const model = buildFrequencyModel(imgs); saveModel(model); const sugg = generateSuggestions(model,5); saveSuggestions(sugg); return sugg;
+      }
     };
-    const base = { ...defaults, ...(albumConfig || {}) };
-    // Minimal sanity: number coercion & presence
-    const coerceInt = (v, d)=>{ const n = parseInt(v,10); return Number.isFinite(n) && n>0? n: d; };
-    base.width = coerceInt(base.width, defaults.width);
-    base.height = coerceInt(base.height, defaults.height);
-    base.steps = coerceInt(base.steps, defaults.steps);
-    const coerceFloat = (v,d)=>{ const n = parseFloat(v); return Number.isFinite(n)&&n>0? n: d; };
-    base.cfg = coerceFloat(base.cfg, defaults.cfg);
-    base.batch_size = coerceInt(base.batch_size, defaults.batch_size);
-    if(!base.sampler_name) base.sampler_name = defaults.sampler_name;
-    if(!base.scheduler) base.scheduler = defaults.scheduler;
-    if(typeof base.quality !== 'string' || !base.quality.trim()) base.quality = defaults.quality;
-    if(typeof base.negative !== 'string' || !base.negative.trim()) base.negative = defaults.negative;
-    if(!base.workflow_type) base.workflow_type = defaults.workflow_type;
-    // Only override fields if user has explicitly provided category values.
-    const overrideIf = (val, existing) => (val && String(val).trim()) ? String(val).trim() : (existing||'');
-    base.character = overrideIf(selectedChar?.name || selectedChar?.character, base.character);
-    base.outfits = overrideIf(outfits, albumConfig?.outfits || base.outfits);
-    base.expression = overrideIf(expression, albumConfig?.expression || base.expression);
-    base.action = overrideIf(action, albumConfig?.action || base.action);
-    base.context = overrideIf(combinedContext, albumConfig?.context || base.context);
-    console.debug('[PromptSuggest] Built generation config', { character: base.character, width: base.width, height: base.height, steps: base.steps, sampler: base.sampler_name });
-    return base;
-  }
 
-  async function startGeneration(characterHash, config){
-    try {
-      // Defensive: if a Promise was accidentally passed, resolve it.
-      if(config && typeof config.then === 'function'){
-        try { config = await config; } catch(e){ console.warn('[PromptSuggest] Failed to resolve config promise', e); return null; }
-      }
-      if(!characterHash){ console.warn('[PromptSuggest] Missing character hash; aborting generation.'); return null; }
-      if(!config || Object.keys(config).length === 0){ console.warn('[PromptSuggest] Empty generation config; aborting.'); return null; }
-      // Prefer unified core API client if available for consistent headers & events
-      const apiClient = window.Yuuka?.coreApi?.generation || window.Yuuka?.api?.generation;
-      if(apiClient?.start){
-        console.debug('[PromptSuggest] Using unified generation API start()', { characterHash, cfg: { steps: config.steps, width: config.width, height: config.height } });
-        return await apiClient.start(characterHash, config, { origin: 'prompt_suggest.auto' });
-      }
-      // Fallback manual fetch
-      const token = localStorage.getItem('yuuka-auth-token') || '';
-      if(!token){ console.warn('[PromptSuggest] No auth token present, manual generation may fail.'); }
-      const payload = { character_hash: characterHash, generation_config: config, context: { origin: 'prompt_suggest.auto' } };
-      const res = await fetch('/api/core/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token? { 'Authorization': 'Bearer '+token }: {}) },
-        body: JSON.stringify(payload)
-      });
-      let json = null;
-      try{ json = await res.json(); }catch(_e){ json = null; }
-      if(res.status === 401){ console.warn('[PromptSuggest] Unauthorized generation attempt.'); }
-      if(!res.ok){ console.warn('[PromptSuggest] generate failed', json || payload); return null; }
-      // Emit local event similar to core API for UI consistency
-      try { window.Yuuka?.events?.emit('generation:task_created_locally', json); }catch(_e){}
-      return json;
-    } catch(err){ console.warn('[PromptSuggest] generate error', err); return null; }
-  }
-
-  function findSelectedCharacter(){
-    const LS_LAST = 'maid-chan:prompt-suggest:last-selection';
-    const persist = (sel)=>{ try{ localStorage.setItem(LS_LAST, JSON.stringify(sel)); }catch(_e){} };
-    const loadPersisted = ()=>{ try{ return JSON.parse(localStorage.getItem(LS_LAST)||'null'); }catch(_e){ return null; } };
-    try {
-      const yuuka = window.Yuuka || {};
-      // 0. Prefer DOM marker set by AlbumComponent
-      const albumRoot = document.querySelector('.plugin-album[data-character-hash]');
-      if (albumRoot) {
-        const sel = { hash: albumRoot.getAttribute('data-character-hash'), name: albumRoot.getAttribute('data-character-name') || '' };
-        if (sel.hash) { persist(sel); return sel; }
-      }
-      // 1. Direct known instance path
-      const direct = yuuka?.instances?.AlbumComponent?.state?.selectedCharacter;
-      if(direct){ persist(direct); return direct; }
-      // 2. Components namespace scan
-      const comps = yuuka.components || {};
-      for(const key of Object.keys(comps)){
-        const obj = comps[key];
-        if(!obj) continue;
-        // Instance with state
-        if(obj.state?.selectedCharacter){ persist(obj.state.selectedCharacter); return obj.state.selectedCharacter; }
-        // Wrapper holding instance
-        if(obj.instance?.state?.selectedCharacter){ persist(obj.instance.state.selectedCharacter); return obj.instance.state.selectedCharacter; }
-      }
-      // 3. Generic scan of top-level Yuuka properties
-      for(const key of Object.keys(yuuka)){
-        const val = yuuka[key];
-        if(val && typeof val === 'object'){
-          const sc = val.state?.selectedCharacter;
-            if(sc){ persist(sc); return sc; }
-            if(val.viewMode === 'album' && val.state?.selectedCharacter){ persist(val.state.selectedCharacter); return val.state.selectedCharacter; }
-        }
-      }
-      // 4. Plugins namespace scan
-      const plugins = yuuka.plugins || {};
-      for(const k of Object.keys(plugins)){
-        const p = plugins[k];
-        if(p && p.state?.selectedCharacter){ persist(p.state.selectedCharacter); return p.state.selectedCharacter; }
-      }
-      // 5. DOM heuristic: look for album container with data-hash
-      const albumEl = document.querySelector('.plugin-album .character-header,[data-character-hash]');
-      if(albumEl){
-        const hash = albumEl.getAttribute('data-character-hash') || null;
-        const name = albumEl.getAttribute('data-character-name') || albumEl.textContent?.trim() || '';
-        if(hash){ const sel = { hash, name }; persist(sel); return sel; }
-      }
-    }catch(_e){ /* ignore */ }
-    // 6. Fallback to last persisted selection
-    return loadPersisted();
-  }
-
-  // ---- Feature registration ----
-  function attemptRegisterFeature(retries=25){
-    const frame = window.Yuuka?.components?.MaidChanMainFrame;
-    if(frame && frame.registerFeature){
-      frame.registerFeature({
-        id: FEATURE_ID,
-        title: 'Prompt Suggestions',
-        description: 'Quét lịch sử ảnh để tạo prompt gợi ý & auto-generate.',
-        defaultEnabled: true,
-        mount,
-        unmount
-      });
-      return true;
-    }
-    if(retries<=0) return false;
-    setTimeout(()=> attemptRegisterFeature(retries-1), 350);
-    return false;
-  }
-
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>{ attemptRegisterFeature(); attemptRegisterTrigger(); });
-  }else{
-    attemptRegisterFeature();
-    attemptRegisterTrigger();
-  }
-
-  // Expose (debug)
-  window.Yuuka = window.Yuuka || {}; window.Yuuka.components = window.Yuuka.components || {};
-  window.Yuuka.components.PromptSuggestFeature = { regenerate: async ()=>{
+    // Helpers for per-category randomization
+    async function ensureModel(){
+      let m = loadModel();
+      if(m && m.outfits && m.expression && m.action && m.context) return m;
       const imgs = await fetchAllImages();
-      const model = buildFrequencyModel(imgs); saveModel(model); const sugg = generateSuggestions(model,5); saveSuggestions(sugg); return sugg;
+      m = buildFrequencyModel(imgs); saveModel(m); return m;
     }
-  };
-
-  // Helpers for per-category randomization
-  async function ensureModel(){
-    let m = loadModel();
-    if(m && m.outfits && m.expression && m.action && m.context) return m;
-    const imgs = await fetchAllImages();
-    m = buildFrequencyModel(imgs); saveModel(m); return m;
-  }
-  function pickFromModel(model, catKey, minN, maxN){
-    if(!model || !model[catKey]) return '';
-    const n = Math.max(minN, Math.min(maxN, Math.round(minN + Math.random()*(maxN-minN))));
-    const arr = weightedRandomSample(model[catKey], n);
-    return arr.filter(Boolean).join(', ');
-  }
-})();
+    function pickFromModel(model, catKey, minN, maxN){
+      if(!model || !model[catKey]) return '';
+      const n = Math.max(minN, Math.min(maxN, Math.round(minN + Math.random()*(maxN-minN))));
+      const arr = weightedRandomSample(model[catKey], n);
+      return arr.filter(Boolean).join(', ');
+    }
+  })();

@@ -12,7 +12,8 @@
     "assets": {
         "js": [
             "modal.js",
-            "album.js"
+            "album.js",
+            "capabilities.js"
         ],
         "css": [
             "album.css"
