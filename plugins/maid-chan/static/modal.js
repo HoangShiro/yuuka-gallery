@@ -23,7 +23,7 @@
     constructor(){
       this.overlay = null;
       this._escHandler = null;
-      this._activeTab = this._load('maid-chan:lastTab', 'main');
+      this._activeTab = this._load('maid-chan:lastTab', 'features');
       // Title (editable) loads from storage, default 'Maid-chan'
       this._title = this._load('maid-chan:title', 'Maid-chan');
       this._titleSaveTimer = null;
@@ -36,26 +36,12 @@
       const overlay = document.createElement('div');
       overlay.className = 'maid-chan-modal-overlay';
       overlay.addEventListener('click', (e)=>{ if(e.target === overlay) this.close(); });
-      // Ensure overlay respects safe areas on mobile/narrow screens
+      // Giữ overlay full-screen cố định, để CSS + 100vh xử lý chiều cao.
+      // Không dịch chuyển overlay theo visualViewport nữa để tránh lệch layout
+      // ở các trình duyệt mobile khác nhau.
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
       overlay.style.boxSizing = 'border-box';
-      const applySafeArea = ()=>{
-        try{
-          const vv = window.visualViewport;
-          const offTop = vv && typeof vv.offsetTop === 'number' ? Math.max(0, Math.round(vv.offsetTop)) : 0;
-          // Combine visualViewport offset with CSS env() safe-area if supported
-          overlay.style.paddingTop = offTop > 0 ? `${offTop}px` : 'max(12px, env(safe-area-inset-top, 0px))';
-        }catch(_e){
-          overlay.style.paddingTop = 'max(12px, env(safe-area-inset-top, 0px))';
-        }
-      };
-      applySafeArea();
-      if(window.visualViewport){
-        const onVVResize = ()=> applySafeArea();
-        const onVVScroll = ()=> applySafeArea();
-        window.visualViewport.addEventListener('resize', onVVResize);
-        window.visualViewport.addEventListener('scroll', onVVScroll);
-        this._vvHandlers.push(['resize', onVVResize], ['scroll', onVVScroll]);
-      }
 
       const modal = document.createElement('div');
       modal.className = 'maid-chan-modal';
@@ -96,10 +82,17 @@
       titleInput.addEventListener('input', ()=>{
         if(this._titleSaveTimer) clearTimeout(this._titleSaveTimer);
         this._titleSaveTimer = setTimeout(()=>{ commitTitle(); }, 500);
+        // Live-update persona label if present
+        try {
+          this._updatePersonaMaidLabel(titleInput.value || 'Maid-chan');
+        } catch(_e){}
       });
       titleInput.addEventListener('blur', ()=>{
         if(this._titleSaveTimer) clearTimeout(this._titleSaveTimer);
         commitTitle();
+        try {
+          this._updatePersonaMaidLabel(titleInput.value || 'Maid-chan');
+        } catch(_e){}
       });
       titleInput.addEventListener('keydown', (e)=>{
         if(e.key === 'Enter'){
@@ -114,19 +107,41 @@
       tabsBar.className = 'maid-chan-tabs';
       tabsBar.innerHTML = `
         <div class="maid-chan-tab-buttons" role="tablist" aria-label="Maid-chan Tabs">
-          <button role="tab" data-tab="main" aria-selected="false">Main</button>
-          <button role="tab" data-tab="ability" aria-selected="false">Ability</button>
-          <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+          <button role="tab" data-tab="chat" aria-selected="false">
+            <span class="material-symbols-outlined" aria-hidden="true">chat_bubble</span>
+            <span class="maid-chan-tab-label">Chat</span>
+          </button>
+          <button role="tab" data-tab="persona" aria-selected="false">
+            <span class="material-symbols-outlined" aria-hidden="true">person_heart</span>
+            <span class="maid-chan-tab-label">Persona</span>
+          </button>
+          <button role="tab" data-tab="features" aria-selected="false">
+            <span class="material-symbols-outlined" aria-hidden="true">app_registration</span>
+            <span class="maid-chan-tab-label">Features</span>
+          </button>
+          <button role="tab" data-tab="ability" aria-selected="false">
+            <span class="material-symbols-outlined" aria-hidden="true">code_blocks</span>
+            <span class="maid-chan-tab-label">Ability</span>
+          </button>
+          <button role="tab" data-tab="settings" aria-selected="false">
+            <span class="material-symbols-outlined" aria-hidden="true">settings_heart</span>
+            <span class="maid-chan-tab-label">Settings</span>
+          </button>
         </div>
       `;
       modal.appendChild(tabsBar);
       this._els.tabsBar = tabsBar;
 
       // Panels
+      const chatPanel = document.createElement('div');
+      chatPanel.className = 'maid-chan-tab-panel';
+      chatPanel.setAttribute('role', 'tabpanel');
+      chatPanel.setAttribute('data-tab', 'chat');
+
       const mainPanel = document.createElement('div');
       mainPanel.className = 'maid-chan-tab-panel';
       mainPanel.setAttribute('role', 'tabpanel');
-      mainPanel.setAttribute('data-tab', 'main');
+      mainPanel.setAttribute('data-tab', 'features');
       // Feature frame: a reusable card template that modules can mount content into
       mainPanel.innerHTML = `
         <div class="maid-chan-panel-card">
@@ -150,6 +165,35 @@
               <div class="feature-content-panel" tabindex="0" aria-label="Feature content area"></div>
             </section>
           </template>
+        </div>
+      `;
+
+      const personaPanel = document.createElement('div');
+      personaPanel.className = 'maid-chan-tab-panel';
+      personaPanel.setAttribute('role', 'tabpanel');
+      personaPanel.setAttribute('data-tab', 'persona');
+      personaPanel.innerHTML = `
+        <div class="maid-chan-panel-card maid-chan-persona-card">
+          <div class="maid-chan-persona-header">
+            <div class="maid-chan-persona-title">Persona notes</div>
+          </div>
+          <div class="maid-chan-persona-body">
+            <div class="maid-chan-persona-field">
+              <label class="maid-chan-persona-label maid-chan-persona-label-maid">About &lt;maid_name&gt;</label>
+              <textarea class="maid-chan-persona-textarea" data-key="maid-chan:persona:aboutMaid" placeholder="Ví dụ: tính cách, cách xưng hô, giọng nói, bối cảnh anime maid..."></textarea>
+            </div>
+            <div class="maid-chan-persona-field">
+              <label class="maid-chan-persona-label">About you</label>
+              <textarea class="maid-chan-persona-textarea" data-key="maid-chan:persona:aboutUser" placeholder="Ví dụ: bạn thích kiểu reply nào, sở thích, điều Maid-chan cần lưu ý..."></textarea>
+            </div>
+            <div class="maid-chan-persona-field">
+              <label class="maid-chan-persona-label">
+                <span class="maid-chan-persona-samples-label">Chat samples</span>
+                <span class="maid-chan-persona-samples-count">(0)</span>
+              </label>
+              <textarea class="maid-chan-persona-textarea" data-key="maid-chan:persona:chatSamples" placeholder="Vài đoạn hội thoại mẫu giữa bạn và Maid-chan để giữ đúng vibe anime maid..."></textarea>
+            </div>
+          </div>
         </div>
       `;
 
@@ -255,10 +299,12 @@
         <footer>Tip: Right-click (desktop) or long-press (touch) to open this menu. Drop/paste an image onto the bubble to set an avatar.</footer>
       `;
 
+      modal.appendChild(chatPanel);
+      modal.appendChild(personaPanel);
       modal.appendChild(mainPanel);
       modal.appendChild(abilityPanel);
       modal.appendChild(settingsPanel);
-      this._els.panels = { main: mainPanel, ability: abilityPanel, settings: settingsPanel };
+      this._els.panels = { chat: chatPanel, features: mainPanel, persona: personaPanel, ability: abilityPanel, settings: settingsPanel };
 
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
@@ -266,10 +312,20 @@
 
       // Wire tab events
       this._wireTabs();
+      // default to chat tab if first time
+      if(!this._activeTab){ this._activeTab = 'chat'; }
       this._switchTab(this._activeTab);
       // Initialize feature frame helper API before external modules mount
-      if(this._els.panels.main){
-        try { this._initMainFeatureFrame(this._els.panels.main); } catch(e){ /* ignore */ }
+      if(this._els.panels.features){
+        try { this._initMainFeatureFrame(this._els.panels.features); } catch(e){ /* ignore */ }
+      }
+      // Initialize chat tab
+      if(this._els.panels.chat){
+        try { window.Yuuka?.components?.MaidChanChatPanel?.init?.(this._els.panels.chat); } catch(e){ /* ignore */ }
+      }
+      // Initialize persona tab
+      if(this._els.panels.persona){
+        try { this._initPersonaTab(this._els.panels.persona); } catch(e){ /* ignore */ }
       }
       // Initialize ability tab (capability list)
       if(this._els.panels.ability){
@@ -285,9 +341,14 @@
           window.Yuuka?.components?.MaidChanLLMSettings?.init?.(this._els.panels.settings);
         } catch(e){ /* ignore */ }
       }
-      if(this._els.panels.main){
-        try { window.Yuuka?.components?.MaidChanMain?.init?.(this._els.panels.main); } catch(e){ /* ignore */ }
+      if(this._els.panels.features){
+        try { window.Yuuka?.components?.MaidChanMain?.init?.(this._els.panels.features); } catch(e){ /* ignore */ }
       }
+
+      // Ensure Persona label reflects current title on first open
+      try {
+        this._updatePersonaMaidLabel(this._title || 'Maid-chan');
+      } catch(_e){}
 
       // ESC to close
       this._escHandler = (e)=>{ if(e.key === 'Escape') this.close(); };
@@ -667,6 +728,15 @@
       }
     }
 
+    _updatePersonaMaidLabel(rawTitle){
+      const name = (rawTitle || '').trim() || 'Maid-chan';
+      const labelText = `About ${name}`;
+      const root = this._els && this._els.panels && this._els.panels.persona;
+      if(!root) return;
+      const label = root.querySelector('.maid-chan-persona-label-maid');
+      if(label) label.textContent = labelText;
+    }
+
     // Generic renderer for playground result payloads
     _renderPlaygroundResult(container, value){
       if(!container) return;
@@ -721,6 +791,105 @@
       }catch(_e){
         renderText(String(value));
       }
+    }
+
+    // Persona tab: multi-textarea with autosave + auto-resize
+    _initPersonaTab(panelEl){
+      if(!panelEl) return;
+      const areas = panelEl.querySelectorAll('.maid-chan-persona-textarea');
+      if(!areas.length) return;
+
+      // Helper: parse chat samples using same rules as AI core
+      const parseChatSamples = (personaChatSamples)=>{
+        if(!personaChatSamples) return [];
+        const lines = personaChatSamples.split(/\r?\n/);
+        const messages = [];
+
+        for(const rawLine of lines){
+          if(!rawLine) continue;
+          const line = String(rawLine).trim();
+          if(!line) continue;
+
+          const m = /^([^:]+):\s*(.*)$/.exec(line);
+          if(!m) continue;
+
+          const prefix = m[1].trim();
+          const text = m[2].trim();
+          if(!text) continue;
+
+          const p = prefix.toLowerCase();
+
+          const isMaid = (
+            p === 'char' ||
+            p === '{{char}}' ||
+            p === 'maid' ||
+            /^<[^>]+>$/.test(prefix)
+          );
+
+          const isUser = (
+            p === 'user' ||
+            p === '{{user}}' ||
+            /^<[^>]+>$/.test(prefix)
+          );
+
+          if(isMaid && !isUser){
+            messages.push({ role: 'assistant', content: text });
+          }else if(isUser && !isMaid){
+            messages.push({ role: 'user', content: text });
+          }
+        }
+
+        return messages;
+      };
+
+      const autoResize = (ta)=>{
+        ta.style.height = 'auto';
+        ta.style.height = (ta.scrollHeight || 0) + 'px';
+      };
+
+      const updateSamplesCount = ()=>{
+        try{
+          const samplesRaw = this._load('maid-chan:persona:chatSamples', '');
+          const samples = parseChatSamples(samplesRaw);
+          const count = Array.isArray(samples) ? samples.length : 0;
+          const counterEl = panelEl.querySelector('.maid-chan-persona-samples-count');
+          if(counterEl){
+            counterEl.textContent = `(${count})`;
+          }
+        }catch(_e){}
+      };
+
+      areas.forEach(ta => {
+        const key = ta.dataset.key;
+        if(!key) return;
+        // Load stored value; keep textarea empty if none
+        const stored = this._load(key, '');
+        if(typeof stored === 'string'){
+          ta.value = stored;
+        }
+        autoResize(ta);
+
+        let timer = null;
+        const saveNow = ()=>{
+          this._save(key, ta.value || '');
+          if(key === 'maid-chan:persona:chatSamples') updateSamplesCount();
+        };
+
+        ta.addEventListener('input', ()=>{
+          autoResize(ta);
+          if(timer) clearTimeout(timer);
+          timer = setTimeout(saveNow, 500);
+        });
+
+        ta.addEventListener('blur', ()=>{
+          if(timer) clearTimeout(timer);
+          saveNow();
+          if(key === 'maid-chan:persona:chatSamples') updateSamplesCount();
+        });
+      });
+
+      // Initial count on open
+      updateSamplesCount();
     }
 
     _renderPlaygroundError(container, err){

@@ -213,6 +213,8 @@ class GeminiProvider(BaseAIProvider):
                     temperature=kwargs.get("temperature"),
                     max_tokens=kwargs.get("max_tokens"),
                     user_api_key=api_key,
+                    tools=payload.get("tools"),
+                    tool_mode=payload.get("tool_mode"),
                 )
             )
 

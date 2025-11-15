@@ -238,32 +238,32 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
             safeRegister({
                 id: 'album.open_main_ui',
                 pluginId: 'album',
-                title: 'Open Album UI',
-                description: 'Open the Album plugin main UI (character selection grid).',
+                title: 'Open Album',
+                description: 'Open the album view or character grid so the user can see and select characters.',
                 type: 'action',
                 tags: ['album', 'ui', 'open'],
                 llmCallable: true,
-                llmName: 'open_album_ui',
+                llmName: 'open_album',
                 example: {
                     variants: [
                         {
-                            name: 'open grid',
+                            name: 'open album grid',
                             payload: {},
-                            notes: 'Open the main album character grid.',
+                            notes: 'Open the main album character grid so the user can choose a character.',
                         },
                         {
                             name: 'open by character hash',
                             payload: { character_hash: 'demo_hash_123' },
-                            notes: 'Open the album UI directly for the given character hash.',
+                            notes: 'Open the album for the given character hash.',
                         },
                         {
                             name: 'open by character name',
                             payload: { character_name: 'Shiina Mahiru' },
-                            notes: 'Open the album UI for the first album matching this character name.',
+                            notes: 'Open the album for the first character matching this name.',
                         },
                     ],
                     defaultPayload: {},
-                    notes: 'Show the main Album character grid UI, or jump directly into a specific character album when character_hash / character_name is provided.',
+                    notes: 'Use this to show the album screen or open a specific character album if a character is provided.',
                 },
                 paramsSchema: {
                     type: 'object',
@@ -430,73 +430,100 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
             safeRegister({
                 id: 'album.open_or_create',
                 pluginId: 'album',
-                title: 'Open or create album',
-                description: 'Open an existing album by hash, or create a new custom album if not found.',
+                title: 'Create album',
+                description: 'Create a new custom album for a character and open it.',
                 type: 'action',
-                tags: ['album', 'open', 'create'],
+                tags: ['album', 'create'],
                 llmCallable: true,
-                llmName: 'open_or_create_album',
+                llmName: 'create_album',
                 example: {
                     variants: [
                         {
-                            name: 'open demo album',
+                            name: 'create demo album',
                             payload: {
                                 character_hash: 'demo_hash_123',
                                 name: 'Demo album',
                             },
-                            notes: 'Open a demo album (or create it if missing).',
+                            notes: 'Create or reuse an album for this character hash.',
                         },
                         {
-                            name: 'create custom album',
+                            name: 'create custom album by name',
                             payload: {
-                                character_hash: 'custom_hash_001',
+                                character_name: 'Custom character',
                                 name: 'Custom character album',
                             },
-                            notes: 'Create a new custom album with a friendly name.',
+                            notes: 'Create a new custom album for the given character name.',
                         },
                     ],
                     defaultPayload: {
-                        character_hash: 'demo_hash_123',
+                        character_name: 'Demo character',
                         name: 'Demo album',
                     },
-                    notes: 'Open or create an album with a specific hash.',
+                    notes: 'Use this when you want to create a new album for a character.',
                 },
                 paramsSchema: {
                     type: 'object',
                     properties: {
                         character_hash: {
                             type: 'string',
-                            description: 'Hash of the album to open or create.',
+                            description: 'Optional hash for the album to create or reuse.',
+                        },
+                        character_name: {
+                            type: 'string',
+                            description: 'Character name for the new album when hash is unknown.',
                         },
                         name: {
                             type: 'string',
-                            description: 'Optional display name when creating a new album.',
+                            description: 'Display name for the new album.',
                         },
                     },
-                    required: ['character_hash'],
+                    anyOf: [
+                        { required: ['character_hash'] },
+                        { required: ['character_name'] },
+                    ],
                 },
                 async invoke(args = {}, ctx = {}) {
                     const self = (this && this.loadAndDisplayCharacterAlbum)
                         ? this
                         : resolveAlbumInstance();
-                    const { character_hash, name } = args;
+                    const { character_hash, character_name, name } = args;
                     if (!self || typeof self.loadAndDisplayCharacterAlbum !== 'function') {
                         throw new Error('Album capability is not attached to an active AlbumComponent instance.');
                     }
-                    if (!character_hash || typeof character_hash !== 'string') {
-                        throw new Error('Missing or invalid character_hash for album.open_or_create');
+
+                    let effectiveHash = null;
+                    let effectiveName = null;
+
+                    if (typeof character_hash === 'string' && character_hash.trim()) {
+                        effectiveHash = character_hash.trim();
                     }
 
+                    if (!effectiveHash && typeof character_name === 'string' && character_name.trim()) {
+                        // If only character_name is provided, use it as both display name
+                        // and a synthetic hash seed so the album can still be opened/created.
+                        effectiveName = character_name.trim();
+                        effectiveHash = `name:${effectiveName}`;
+                    }
+
+                    if (!effectiveHash) {
+                        throw new Error('Missing or invalid character identifier for album.create (need character_hash or character_name).');
+                    }
+
+                    const resolvedName = (typeof name === 'string' && name.trim())
+                        || effectiveName
+                        || self.state.selectedCharacter?.name
+                        || 'Album mới';
+
                     self.state.selectedCharacter = {
-                        hash: character_hash,
-                        name: (typeof name === 'string' && name.trim()) || self.state.selectedCharacter?.name || 'Album mới',
+                        hash: effectiveHash,
+                        name: resolvedName,
                         isCustom: true,
                     };
                     self.state.viewMode = 'album';
                     self.state.cachedComfyGlobalChoices = null;
                     self.state.cachedComfySettings = null;
                     await self.loadAndDisplayCharacterAlbum();
-                    return { status: 'opened', character_hash: character_hash };
+                    return { status: 'opened', character_hash: effectiveHash, character_name: resolvedName };
                 },
             });
 

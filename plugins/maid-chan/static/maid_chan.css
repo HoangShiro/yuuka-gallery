@@ -160,7 +160,46 @@
 
 @media (max-width: 540px) {
   .maid-chan-bubble { width: 64px; height: 64px; bottom: 16px; right: 16px; }
-  .maid-chan-modal { width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh; border-radius: 0; box-shadow: none; padding: 20px 20px 34px; }
+
+  .maid-chan-modal-overlay {
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 0;
+  }
+
+  .maid-chan-modal {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    margin-top: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 20px 34px;
+  }
+
+  .maid-chan-tab-buttons button {
+    padding: 8px 10px;
+    min-width: 40px;
+    justify-content: center;
+  }
+
+  .maid-chan-tab-buttons button .material-symbols-outlined {
+    margin-right: 0;
+  }
+
+  .maid-chan-tab-label {
+    display: none !important;
+  }
+
+  /* Browsers hỗ trợ dynamic viewport height: cập nhật theo vùng nhìn thực tế
+     giúp chat-input luôn được đẩy sát đáy khi header/keyboard xuất hiện */
+  @supports (height: 100dvh) {
+    .maid-chan-modal {
+      height: 100dvh;
+      max-height: 100dvh;
+    }
+  }
 }
 
 /* Tabs */
@@ -170,9 +209,11 @@
   gap: 12px;
 }
 .maid-chan-tab-buttons { display: flex; gap: 10px; }
-.maid-chan-tab-buttons button { flex: 0 0 auto; padding: 8px 18px; background: #2a2b33; color: #d0d1d7; border: 1px solid #3a3b44; border-radius: 999px; cursor: pointer; font-size: 13px; letter-spacing: .5px; transition: background .2s, color .2s, box-shadow .25s; position: relative; }
+.maid-chan-tab-buttons button { flex: 0 0 auto; padding: 8px 18px; background: #2a2b33; color: #d0d1d7; border: 1px solid #3a3b44; border-radius: 999px; cursor: pointer; font-size: 13px; letter-spacing: .5px; transition: background .2s, color .2s, box-shadow .25s; position: relative; display: inline-flex; align-items: center; justify-content: center; }
 .maid-chan-tab-buttons button:hover { background: #33343d; color: #fff; }
 .maid-chan-tab-buttons button.active { background: linear-gradient(135deg, #ff6fa9, #ff9fbf); color: #fff; border-color: #ff6fa9; box-shadow: 0 4px 14px rgba(255,105,180,.35); }
+.maid-chan-tab-buttons button .material-symbols-outlined { font-size: 18px; margin-right: 6px; }
+.maid-chan-tab-label { display: inline; }
 .maid-chan-tab-panel {
   display: none;
   animation: maidChanFade .35s ease;
@@ -201,9 +242,317 @@
 }
 .maid-chan-panel-placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: #bdbdc7; font-size: 14px; }
 
+/* Chat tab specific layout (only affects inner card; visibility handled by .maid-chan-tab-panel/.active) */
+.maid-chan-tab-panel[data-tab="chat"] .maid-chan-chat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.maid-chan-chat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0; /* allow chat body to shrink inside modal flex column */
+}
+
+.maid-chan-chat-header {
+  padding-bottom: 4px;
+}
+
+.maid-chan-chat-body {
+  flex: 1 1 auto;
+  min-height: 0; /* let scroll area determine height; important on mobile when viewport changes */
+  display: flex;
+  flex-direction: column;
+}
+
+.maid-chan-chat-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.maid-chan-chat-prompt-view {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  background: rgba(0,0,0,.22);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.maid-chan-chat-prompt-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.4;
+  font-family: Consolas, Menlo, Monaco, "Fira Code", monospace;
+}
+
+
+.maid-chan-chat-item {
+  background: rgba(0,0,0,.22);
+  border-radius: 10px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.maid-chan-chat-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.maid-chan-chat-meta {
+  font-size: 11px;
+  opacity: .75;
+}
+
+.maid-chan-chat-meta-status.is-loading::after {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: maid-chan-meta-spin .8s linear infinite;
+}
+
+@keyframes maid-chan-meta-spin {
+  to { transform: rotate(360deg); }
+}
+
+.maid-chan-chat-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.maid-chan-chat-btn {
+  padding: 2px 4px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: #bdbdc7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.maid-chan-chat-btn .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.maid-chan-chat-btn:hover {
+  color: #ffffff;
+  background: rgba(255,105,180,.18);
+}
+
+.maid-chan-chat-prompt-btn {
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 999px;
+  color: #bdbdc7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.maid-chan-chat-prompt-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.maid-chan-chat-prompt-btn:hover {
+  color: #ffffff;
+  background: rgba(255,105,180,.18);
+}
+
+/* Chat header: tool buttons and hint popover, styled in line with Ability tab */
+.maid-chan-chat-tools { display: inline-flex; align-items: center; gap: 6px; }
+.maid-chan-chat-tools-item { position: relative; display: inline-flex; }
+.maid-chan-chat-tools-btn {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.18);
+  color: #d0d1d7;
+  font-size: 11px;
+  cursor: pointer;
+}
+.maid-chan-chat-tools-btn:hover { background: #33343d; color: #fff; }
+.maid-chan-chat-tools-hint {
+  position: absolute;
+  top: 125%;
+  right: 0;
+  min-width: 200px;
+  max-width: 360px;
+  background: linear-gradient(135deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.5);
+  padding: 8px 10px;
+  z-index: 10;
+}
+.maid-chan-chat-tools-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.maid-chan-chat-tools-list li { font-size: 12px; color: #cbcad4; }
+
+/* Disabled state for snapshot/navigation buttons */
+.maid-chan-chat-btn.is-disabled,
+.maid-chan-chat-btn:disabled {
+  opacity: .45;
+  cursor: default;
+  background: transparent;
+}
+
+.maid-chan-chat-btn.is-disabled:hover,
+.maid-chan-chat-btn:disabled:hover {
+  color: #bdbdc7;
+  background: transparent;
+}
+
+.maid-chan-chat-text {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.maid-chan-chat-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.maid-chan-chat-input {
+  width: 100%;
+  min-height: 32px;
+  max-height: 80px;
+  resize: none;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #3a3b44;
+  background: #181920;
+  color: #f0eff4;
+  font-size: 13px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.maid-chan-chat-input::placeholder {
+  color: rgba(255,255,255,.45);
+}
+
+.maid-chan-chat-input:focus {
+  outline: none;
+  border-color: #ff6fa9;
+  box-shadow: 0 0 0 2px rgba(255,105,180,.25);
+}
+
+.maid-chan-chat-send {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #3a3b44;
+  background: #2a2b33;
+  color: #f0eff4;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.maid-chan-chat-send:hover:not(:disabled) {
+  background: #33343d;
+}
+
+.maid-chan-chat-status {
+  font-size: 11px;
+  opacity: .8;
+}
+
 /* Settings tab: single scroll area for whole card */
 .maid-chan-tab-panel[data-tab="settings"] .maid-chan-panel-card {
   overflow: auto;
+}
+
+/* Persona tab */
+.maid-chan-tab-panel[data-tab="persona"] .maid-chan-panel-card {
+  overflow: auto;
+}
+
+.maid-chan-persona-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.maid-chan-persona-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.maid-chan-persona-title {
+  font-weight: 600;
+  letter-spacing: .3px;
+  color: #e9e9f1;
+}
+
+.maid-chan-persona-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.maid-chan-persona-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+.maid-chan-persona-samples-count {
+  font-size: 11px;
+  color: #bdbdc7;
+  opacity: .9;
+  margin-left: 4px;
+}
+}
+
+.maid-chan-persona-label {
+  font-size: 12px;
+  color: #d0d1d7;
+  opacity: .9;
+}
+
+.maid-chan-persona-textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: none;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #3a3b44;
+  background: #181920;
+  color: #f0eff4;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.maid-chan-persona-textarea::placeholder {
+  color: rgba(255,255,255,.45);
+}
+
+.maid-chan-persona-textarea:focus {
+  outline: none;
+  border-color: #ff6fa9;
+  box-shadow: 0 0 0 2px rgba(255,105,180,.25);
 }
 
 /* Upload UI */

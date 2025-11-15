@@ -11,6 +11,9 @@
   },
   "assets": {
     "js": [
+      "ai/maid_storage.js",
+      "ai/ai_core.js",
+      "main/chat_panel.js",
       "settings/avatar.js",
       "settings/llm_api.js",
       "main/prompt_suggest.js",
