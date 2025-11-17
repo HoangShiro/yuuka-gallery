@@ -662,6 +662,17 @@
         deleteBtn.title = 'Delete message';
         deleteBtn.innerHTML = '<span class="material-symbols-outlined">delete</span>';
 
+        // Replay button for user messages: rollback to this message and resend it without creating a new user entry
+        if(isUser){
+          const replayBtn = document.createElement('button');
+          replayBtn.type = 'button';
+          replayBtn.className = 'maid-chan-chat-btn';
+          replayBtn.dataset.action = 'replay';
+          replayBtn.title = 'Replay this message';
+          replayBtn.innerHTML = '<span class="material-symbols-outlined">replay</span>';
+          toolbar.appendChild(replayBtn);
+        }
+
         // Snapshot navigation chỉ dành cho assistant, nếu có snapshot state
         if(isAssistant && snapshotState){
           const atFirst = snapshotState.activeIndex <= 0;
@@ -974,6 +985,123 @@
           if(action === 'snapshot-prev'){
             moveSnapshotPrev(msg);
             updateSnapshotDisplay();
+          }else if(action === 'replay'){
+            // Only for user messages: rollback conversation to this message and resend it to LLM
+            if(msg.role !== 'user') return;
+            const id = msg.id;
+            // Capture the current displayed text (may include unsaved edits)
+            const replayText = (body.textContent || msg.text || '').trim();
+            if(!replayText){ return; }
+
+            // Disable toolbar while processing
+            const toolbarBtns = toolbar.querySelectorAll('.maid-chan-chat-btn');
+            toolbarBtns.forEach(b => { b.disabled = true; });
+            metaStatus.classList.add('is-loading');
+            setStatus('Replaying...');
+
+            // Compute index and prior history BEFORE removing from UI
+            const idx = state.messages.findIndex(m => m.id === id);
+            const priorMessages = idx > 0 ? state.messages.slice(0, idx) : [];
+            const nextMsg = (idx !== -1 && (idx + 1) < state.messages.length) ? state.messages[idx + 1] : null;
+
+            // Rollback locally (same behavior as delete) and best-effort persist
+            if(idx !== -1){ state.messages.splice(idx + 1); }
+            if(MaidStorage && typeof MaidStorage.saveLocal === 'function'){
+              try{ MaidStorage.saveLocal(state.messages); }catch(_e){}
+            }
+            if(item.parentElement){
+              let cursor = item.nextSibling;
+              while(cursor){ const next = cursor.nextSibling; item.parentElement.removeChild(cursor); cursor = next; }
+              // keep current item; do not remove it for rollback-to-this-message behavior
+            }
+            // Notify backend to truncate history after this message: delete starting from the next message if it exists
+            if(nextMsg && nextMsg.id){
+              apiPost('/api/plugin/maid/chat/delete', { id: nextMsg.id }).catch(()=>{});
+            }
+
+            // Build LLM history mapping (mirror send() conversion honoring assistant snapshots/tools)
+            const history = priorMessages.map(m => {
+              if(m.role === 'assistant'){
+                const s = getSnapshotState(m) || ensureSnapshotForMessage(m);
+                if(s && Array.isArray(s.entries) && typeof s.activeIndex === 'number'){
+                  const i = s.activeIndex;
+                  const partText = s.entries[i] || '';
+                  let toolText = '';
+                  if(m.snapshots && m.snapshots.parts && m.snapshots.parts[i] && typeof m.snapshots.parts[i].tool_results_text === 'string'){
+                    toolText = m.snapshots.parts[i].tool_results_text;
+                  }
+                  return { role: 'assistant', content: toolText ? (partText + '\n\n' + toolText) : partText };
+                }
+                return { role: 'assistant', content: '' };
+              }
+              return { role: m.role, content: m.text || '' };
+            });
+
+            // Ask Maid without creating new user message in UI or backend
+            const MaidCoreDynamic = (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore) || MaidCore;
+            const doReplay = async ()=>{
+              try{
+                const result = (MaidCoreDynamic && typeof MaidCoreDynamic.askMaid === 'function')
+                  ? await MaidCoreDynamic.askMaid(replayText, { history })
+                  : null;
+
+                let assistantText = '';
+                const toolResultsText = (result && typeof result === 'object' && typeof result.tool_results_text === 'string') ? result.tool_results_text.trim() : '';
+                const toolContents = (result && typeof result === 'object' && Array.isArray(result.tool_contents)) ? result.tool_contents : [];
+                if(result && typeof result === 'string'){
+                  assistantText = result;
+                }else if(result && typeof result === 'object'){
+                  assistantText = result.text || result.message || result.content || '';
+                  if(!assistantText && Array.isArray(result.choices) && result.choices.length){
+                    const choice = result.choices[0];
+                    if(choice?.message?.content) assistantText = choice.message.content;
+                  }
+                  if(!assistantText && Array.isArray(result.candidates) && result.candidates.length){
+                    const cand = result.candidates[0];
+                    const parts = cand?.content?.parts || [];
+                    if(parts.length && typeof parts[0].text === 'string') assistantText = parts[0].text;
+                  }
+                }
+
+                if(assistantText){
+                  const part = { text: assistantText, timestamp: Date.now() };
+                  if(toolResultsText) part.tool_results_text = toolResultsText;
+                  if(toolContents && toolContents.length){
+                    part.tool_info = toolContents.map(c=>({
+                      name: c.name || c.id,
+                      type: (c.type||'').toLowerCase(),
+                      pluginId: c.pluginId || '',
+                      stage: c.stage,
+                      arguments_list: Array.isArray(c?.arguments_list) ? c.arguments_list.slice() : (function(v){
+                        const src = (v!==undefined ? v : (c.arguments!==undefined ? c.arguments : c.args));
+                        if(src==null) return [];
+                        if(Array.isArray(src)) return src.slice();
+                        if(typeof src==='object') return Object.values(src);
+                        return [src];
+                      })(c.arguments_list),
+                      result_list: Array.isArray(c?.result_list) ? c.result_list.slice() : (function(v){
+                        const src = (v!==undefined ? v : c.result);
+                        if(src==null) return [];
+                        if(Array.isArray(src)) return src.slice();
+                        if(typeof src==='object') return Object.values(src);
+                        return [src];
+                      })(c.result_list)
+                    })).filter(t=> t.name);
+                  }
+                  const maidMsg = { role: 'assistant', kind: 'chat', snapshots: { parts: [part], current_index: 0 } };
+                  if(toolContents && toolContents.length){ maidMsg.tool_contents = toolContents; }
+                  appendMessage(maidMsg);
+                  await persistMessage(maidMsg);
+                }
+              }catch(err){
+                console.warn('[Maid-chan chat] Replay failed', err);
+              }finally{
+                metaStatus.classList.remove('is-loading');
+                toolbarBtns.forEach(b => { b.disabled = false; });
+                setStatus('');
+              }
+            };
+            doReplay();
           }else if(action === 'delete'){
             const id = msg.id;
             if(!id) return;
