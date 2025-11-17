@@ -2,6 +2,7 @@
 import os
 import io
 import math
+import time
 from flask import Blueprint, request, jsonify, abort, Response
 from werkzeug.exceptions import HTTPException
 from PIL import Image, ImageSequence
@@ -14,6 +15,16 @@ class MaidChanPlugin:
     def __init__(self, core_api):
         self.core_api = core_api
         self.blueprint = Blueprint('maid_chan', __name__)
+
+        # Local helper for current timestamp in milliseconds (CoreAPI has no get_timestamp_ms)
+        def _ts_ms() -> int:
+            try:
+                # Prefer CoreAPI method if ever added
+                if hasattr(self.core_api, 'get_timestamp_ms') and callable(getattr(self.core_api, 'get_timestamp_ms')):
+                    return int(self.core_api.get_timestamp_ms())
+            except Exception:
+                pass
+            return int(time.time() * 1000)
 
         def _require_user():
             try:
@@ -189,12 +200,24 @@ class MaidChanPlugin:
             user_hash = _require_user()
 
             settings_file = 'maid_chat_history.json'
-            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=True)
+            # Debug mode: store plain JSON (no obfuscation) for maid chat history
+            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=False)
             user_items = data.get(user_hash) or []
             # Ensure list of dicts
             if not isinstance(user_items, list):
                 user_items = []
-            return jsonify({'items': user_items})
+
+            # Strip legacy top-level fields from assistant items (no conversion)
+            cleaned = []
+            for it in user_items:
+                if isinstance(it, dict) and it.get('role') == 'assistant':
+                    it = dict(it)
+                    it.pop('text', None)
+                    it.pop('timestamp', None)
+                    it.pop('metadata', None)
+                cleaned.append(it)
+
+            return jsonify({'items': cleaned})
 
         # Preferred route for plugins: /api/plugin/maid/chat/append
         @self.blueprint.post('/api/plugin/maid/chat/append')
@@ -211,75 +234,90 @@ class MaidChanPlugin:
             if not isinstance(message, dict):
                 abort(400, 'Invalid message payload.')
 
-            # Normalise fields
-            item = {
-                'id': message.get('id'),
-                'role': message.get('role') or 'user',
-                'text': message.get('text') or '',
-                'kind': message.get('kind') or 'chat',
-                'timestamp': message.get('timestamp') or int(self.core_api.get_timestamp_ms()),
-            }
-            # Optional metadata (e.g., used_tools, selected_snapshot_index, etc.)
-            meta = message.get('metadata')
-            if isinstance(meta, dict):
-                item['metadata'] = meta
+            # Build item according to role
+            role = (message.get('role') or 'user').strip().lower()
+            if role == 'assistant':
+                snapshots = message.get('snapshots')
+                if not (isinstance(snapshots, dict) and isinstance(snapshots.get('parts'), list)):
+                    abort(400, description='Assistant message must include snapshots.parts and current_index')
+                parts = []
+                for p in snapshots.get('parts'):
+                    if not isinstance(p, dict):
+                        abort(400, description='Each snapshot part must be an object with text/timestamp')
+                    part_entry = {
+                        'text': str(p.get('text') or ''),
+                        'tool_results_text': p.get('tool_results_text') if isinstance(p.get('tool_results_text'), str) else None,
+                        'timestamp': int(p.get('timestamp') or _ts_ms())
+                    }
+                    # Optional per-part tool info array
+                    if isinstance(p.get('tool_info'), list):
+                        # Convert arguments/result to arrays (arguments_list/result_list) preserving existing list fields.
+                        sanitized = []
+                        for ti in p.get('tool_info'):
+                            if not isinstance(ti, dict):
+                                continue
+                            entry = {
+                                'name': ti.get('name'),
+                                'type': ti.get('type'),
+                                'pluginId': ti.get('pluginId'),
+                                'stage': ti.get('stage')
+                            }
+                            # Prefer already-normalized arrays if provided; fall back to singular fields.
+                            if 'arguments_list' in ti and isinstance(ti.get('arguments_list'), list):
+                                args_val = ti.get('arguments_list')
+                            else:
+                                args_val = ti.get('arguments') if 'arguments' in ti else ti.get('args')
+                            if 'result_list' in ti and isinstance(ti.get('result_list'), list):
+                                res_val = ti.get('result_list')
+                            else:
+                                res_val = ti.get('result')
+                            def _normalize_to_list(v):
+                                if v is None:
+                                    return []
+                                if isinstance(v, list):
+                                    return v
+                                if isinstance(v, dict):
+                                    return list(v.values())
+                                return [v]
+                            entry['arguments_list'] = _normalize_to_list(args_val)
+                            entry['result_list'] = _normalize_to_list(res_val)
+                            sanitized.append(entry)
+                        if sanitized:
+                            part_entry['tool_info'] = sanitized
+                    parts.append(part_entry)
+                try:
+                    idx = int(snapshots.get('current_index') or 0)
+                except Exception:
+                    idx = 0
+                idx = max(0, min(idx, max(0, len(parts)-1)))
+                item = {
+                    'id': message.get('id'),
+                    'role': 'assistant',
+                    'kind': message.get('kind') or 'chat',
+                    'snapshots': { 'parts': parts, 'current_index': idx }
+                }
+                tc = message.get('tool_contents')
+                if isinstance(tc, list):
+                    item['tool_contents'] = tc
+            else:
+                item = {
+                    'id': message.get('id'),
+                    'role': role,
+                    'text': message.get('text') or '',
+                    'kind': message.get('kind') or 'chat',
+                    'timestamp': message.get('timestamp') or int(_ts_ms()),
+                }
 
             settings_file = 'maid_chat_history.json'
-            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=True)
+            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=False)
             user_items = data.get(user_hash)
             if not isinstance(user_items, list):
                 user_items = []
             user_items.append(item)
             data[user_hash] = user_items
-            self.core_api.data_manager.save_json(data, settings_file, obfuscated=True)
+            self.core_api.data_manager.save_json(data, settings_file, obfuscated=False)
 
             return jsonify({'status': 'ok', 'item': item})
-
-        @self.blueprint.post('/api/plugin/maid/chat/update')
-        def maid_chat_update():
-            """Update text for a single chat/event item in user's Maid-chan history.
-
-            Body JSON:
-            {
-              "id": "message-id",
-              "text": "new text"
-            }
-            """
-            user_hash = _require_user()
-
-            try:
-                payload = request.get_json(force=True, silent=False) or {}
-            except Exception:
-                abort(400, description='Invalid JSON payload')
-
-            msg_id = payload.get('id')
-            if not msg_id:
-                abort(400, description='Missing message id')
-
-            new_text = payload.get('text')
-            if new_text is None:
-                abort(400, description='Missing text')
-
-            settings_file = 'maid_chat_history.json'
-            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=True)
-            user_items = data.get(user_hash)
-            if not isinstance(user_items, list):
-                user_items = []
-
-            updated = None
-            for it in user_items:
-                if str(it.get('id')) == str(msg_id):
-                    it['text'] = str(new_text)
-                    updated = it
-                    break
-
-            if updated is None:
-                abort(404, description='Message not found')
-
-            data[user_hash] = user_items
-            self.core_api.data_manager.save_json(data, settings_file, obfuscated=True)
-
-            return jsonify({'status': 'ok', 'item': updated})
 
         @self.blueprint.post('/api/plugin/maid/chat/snapshot')
         def maid_chat_snapshot():
@@ -305,8 +343,8 @@ class MaidChanPlugin:
                 abort(400, description='Missing message id')
 
             snapshots = payload.get('snapshots')
-            if snapshots is not None and not isinstance(snapshots, list):
-                abort(400, description='Invalid snapshots payload')
+            if not (isinstance(snapshots, dict) and isinstance(snapshots.get('parts'), list)):
+                abort(400, description='Invalid snapshots payload; expecting object with parts and current_index')
 
             active_index = payload.get('active_index')
             if active_index is not None:
@@ -324,69 +362,76 @@ class MaidChanPlugin:
             used_tools = payload.get('used_tools')
 
             settings_file = 'maid_chat_history.json'
-            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=True)
+            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=False)
             user_items = data.get(user_hash)
             if not isinstance(user_items, list):
                 user_items = []
 
+            def _normalize_snapshot_entries(seq):
+                norm = []
+                for x in seq or []:
+                    if isinstance(x, dict):
+                        txt = str(x.get('text') or '')
+                        entry = {
+                            'text': txt,
+                            'tool_results_text': x.get('tool_results_text') if isinstance(x.get('tool_results_text'), str) else None,
+                            'timestamp': int(x.get('timestamp') or _ts_ms())
+                        }
+                        if isinstance(x.get('tool_info'), list):
+                            sanitized = []
+                            for ti in x.get('tool_info'):
+                                if not isinstance(ti, dict):
+                                    continue
+                                entry2 = {
+                                    'name': ti.get('name'),
+                                    'type': ti.get('type'),
+                                    'pluginId': ti.get('pluginId'),
+                                    'stage': ti.get('stage')
+                                }
+                                # Support existing normalized arrays.
+                                if 'arguments_list' in ti and isinstance(ti.get('arguments_list'), list):
+                                    args_val = ti.get('arguments_list')
+                                else:
+                                    args_val = ti.get('arguments') if 'arguments' in ti else ti.get('args')
+                                if 'result_list' in ti and isinstance(ti.get('result_list'), list):
+                                    res_val = ti.get('result_list')
+                                else:
+                                    res_val = ti.get('result')
+                                def _normalize_to_list(v):
+                                    if v is None:
+                                        return []
+                                    if isinstance(v, list):
+                                        return v
+                                    if isinstance(v, dict):
+                                        return list(v.values())
+                                    return [v]
+                                entry2['arguments_list'] = _normalize_to_list(args_val)
+                                entry2['result_list'] = _normalize_to_list(res_val)
+                                sanitized.append(entry2)
+                            if sanitized:
+                                entry['tool_info'] = sanitized
+                        norm.append(entry)
+                    else:
+                        norm.append({'text': str(x), 'timestamp': int(_ts_ms())})
+                return norm
+
             updated = None
             for it in user_items:
                 if str(it.get('id')) == str(msg_id):
-                    # Ensure snapshots list exists if we are going to update text
-                    snap_list = it.get('snapshots')
-                    if snapshots is not None:
-                        snap_list = list(snapshots)
-
-                    # If a direct text update is requested for current snapshot,
-                    # make sure the list and index are valid first.
-                    if new_text is not None:
-                        if snap_list is None:
-                            # Initialise snapshots from existing text when absent
-                            base_text = it.get('text') or ''
-                            snap_list = [base_text]
-
-                        idx = active_index if active_index is not None else None
-                        # If active_index is not provided, prefer metadata value
-                        if idx is None:
-                            meta_existing = it.get('metadata') or {}
-                            if 'selected_snapshot_index' in meta_existing:
-                                try:
-                                    idx = int(meta_existing['selected_snapshot_index'])
-                                except Exception:
-                                    idx = None
-                        # Fallback to last index
-                        if idx is None:
-                            idx = len(snap_list) - 1 if snap_list else 0
-                        if idx < 0:
-                            idx = 0
-                        if idx >= len(snap_list):
-                            # Extend list with empty strings up to idx
-                            snap_list.extend([''] * (idx + 1 - len(snap_list)))
-
-                        snap_list[idx] = str(new_text)
-                        snapshots = snap_list
-                        # Keep selected index in sync with the edited snapshot
-                        active_index = idx
-
-                    if snap_list is not None:
-                        it['snapshots'] = snap_list
-
-                    if active_index is not None:
-                        meta = it.get('metadata') or {}
-                        meta['selected_snapshot_index'] = active_index
-                        it['metadata'] = meta
-
-                    # Optionally store used_tools reported by frontend regen
-                    if isinstance(used_tools, list):
-                        meta2 = it.get('metadata') or {}
-                        meta2['used_tools'] = used_tools
-                        it['metadata'] = meta2
-
-                    # Always keep top-level text in sync with current active snapshot
-                    if it.get('snapshots') and isinstance(it['snapshots'], list):
-                        idx_for_text = active_index if active_index is not None else 0
-                        if 0 <= idx_for_text < len(it['snapshots']):
-                            it['text'] = it['snapshots'][idx_for_text]
+                    existing = it.get('snapshots')
+                    # Normalize incoming snapshots parts
+                    new_parts = _normalize_snapshot_entries(snapshots.get('parts') or [])
+                    try:
+                        idx = int(snapshots.get('current_index') or 0)
+                    except Exception:
+                        idx = 0
+                    idx = max(0, min(idx, max(0, len(new_parts)-1)))
+                    it['snapshots'] = { 'parts': new_parts, 'current_index': idx }
+                    # Remove legacy top-level fields from assistant
+                    if it.get('role') == 'assistant':
+                        it.pop('text', None)
+                        it.pop('timestamp', None)
+                        it.pop('metadata', None)
 
                     updated = it
                     break
@@ -395,7 +440,98 @@ class MaidChanPlugin:
                 abort(404, description='Message not found')
 
             data[user_hash] = user_items
-            self.core_api.data_manager.save_json(data, settings_file, obfuscated=True)
+            self.core_api.data_manager.save_json(data, settings_file, obfuscated=False)
+
+            return jsonify({'status': 'ok', 'item': updated})
+
+        @self.blueprint.post('/api/plugin/maid/chat/update')
+        def maid_chat_update():
+            """Update a single chat item text.
+
+            Used by the chat panel's inline edit on blur.
+            - For `user` messages: updates top-level `text` and `timestamp`.
+            - For `assistant` messages:
+                * If snapshots exist, updates the active snapshot part's `text`
+                  (or the part at `active_index` if provided).
+                * If no snapshots exist (legacy), updates top-level `text`.
+
+            Body JSON:
+            { "id": "...", "text": "...", "active_index"?: int, "timestamp"?: int }
+            """
+            user_hash = _require_user()
+
+            try:
+                payload = request.get_json(force=True, silent=False) or {}
+            except Exception:
+                abort(400, description='Invalid JSON payload')
+
+            msg_id = payload.get('id')
+            if not msg_id:
+                abort(400, description='Missing message id')
+
+            new_text = str(payload.get('text') or '')
+            try:
+                active_index = int(payload.get('active_index')) if payload.get('active_index') is not None else None
+            except Exception:
+                abort(400, description='active_index must be an integer if provided')
+            try:
+                new_ts = int(payload.get('timestamp')) if payload.get('timestamp') is not None else int(_ts_ms())
+            except Exception:
+                new_ts = int(_ts_ms())
+
+            settings_file = 'maid_chat_history.json'
+            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=False)
+            user_items = data.get(user_hash)
+            if not isinstance(user_items, list):
+                user_items = []
+
+            updated = None
+            for it in user_items:
+                if str(it.get('id')) != str(msg_id):
+                    continue
+
+                role = (it.get('role') or 'user').lower()
+                if role == 'assistant':
+                    snaps = it.get('snapshots') or {}
+                    parts = snaps.get('parts') if isinstance(snaps, dict) else None
+                    if isinstance(parts, list) and parts:
+                        # Determine target index
+                        idx = snaps.get('current_index') if active_index is None else active_index
+                        try:
+                            idx = int(idx or 0)
+                        except Exception:
+                            idx = 0
+                        idx = max(0, min(idx, len(parts) - 1))
+                        part = parts[idx] if isinstance(parts[idx], dict) else None
+                        if part is None:
+                            part = {'text': ''}
+                            parts[idx] = part
+                        part['text'] = new_text
+                        # Only bump timestamp for the edited part
+                        part['timestamp'] = new_ts
+                        # Persist back
+                        it['snapshots'] = {'parts': parts, 'current_index': idx}
+                        # Ensure legacy assistant top-level fields are removed
+                        it.pop('text', None)
+                        it.pop('timestamp', None)
+                        it.pop('metadata', None)
+                    else:
+                        # Legacy assistant without snapshots: update top-level
+                        it['text'] = new_text
+                        it['timestamp'] = new_ts
+                else:
+                    # user or other roles: plain text update
+                    it['text'] = new_text
+                    it['timestamp'] = new_ts
+
+                updated = it
+                break
+
+            if updated is None:
+                abort(404, description='Message not found')
+
+            data[user_hash] = user_items
+            self.core_api.data_manager.save_json(data, settings_file, obfuscated=False)
 
             return jsonify({'status': 'ok', 'item': updated})
 
@@ -418,7 +554,7 @@ class MaidChanPlugin:
                 abort(400, description='Missing message id')
 
             settings_file = 'maid_chat_history.json'
-            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=True)
+            data = self.core_api.data_manager.read_json(settings_file, default_value={}, obfuscated=False)
             user_items = data.get(user_hash)
             if not isinstance(user_items, list):
                 user_items = []
@@ -436,7 +572,7 @@ class MaidChanPlugin:
             else:
                 new_items = user_items[:cut_index]
             data[user_hash] = new_items
-            self.core_api.data_manager.save_json(data, settings_file, obfuscated=True)
+            self.core_api.data_manager.save_json(data, settings_file, obfuscated=False)
 
             return jsonify({'status': 'ok', 'removed_id': msg_id, 'remaining': len(new_items)})
 

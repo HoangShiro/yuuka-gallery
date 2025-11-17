@@ -115,10 +115,40 @@
     if(!Array.isArray(items) || !items.length) return [];
 
     const tools = [];
+    // Ability tab stores per-capability enable state in localStorage keys:
+    //   maid-chan:capability:<pluginId>:<capId> (boolean JSON)
+    // and group default key:
+    //   maid-chan:capability:<pluginId>:enabledAll (boolean JSON, default true)
+    // If the per-cap key is absent we fall back to group key. This allows
+    // users to disable capabilities and immediately prevent the LLM from
+    // calling them. Previously we exposed all llmCallable capabilities
+    // unconditionally which caused function calling to occur even when
+    // toggled off in the UI.
+    const CAP_NS = 'maid-chan:capability:';
+    const loadFlag = (k, fb)=>{
+      try {
+        const raw = window.localStorage.getItem(k);
+        if(raw === null) return fb;
+        return JSON.parse(raw);
+      } catch(_e){ return fb; }
+    };
     for(const c of items){
       if(!c || !c.llmCallable) continue;
       const fnName = (c.llmName && String(c.llmName).trim()) || String(c.id || '').trim();
       if(!fnName) continue;
+      const pluginId = (c.pluginId || 'core').trim();
+      const capId = (c.id || '').trim();
+      if(!capId) continue;
+      // Determine enabled state
+      const perKey = CAP_NS + pluginId + ':' + capId;
+      const groupKey = CAP_NS + pluginId + ':enabledAll';
+      let enabled = loadFlag(perKey, undefined);
+      if(enabled === undefined){
+        enabled = loadFlag(groupKey, true); // default group enabled
+      }
+      if(!enabled){
+        continue; // skip disabled capabilities
+      }
       const paramsSchema = (c.paramsSchema && typeof c.paramsSchema === 'object')
         ? c.paramsSchema
         : { type: 'object', properties: {} };
@@ -133,7 +163,7 @@
     return tools;
   }
 
-  async function callLLMChat({ messages, signal } = {}){
+  async function callLLMChat({ messages, signal, disableTools } = {}){
     const cfg = loadLLMConfig();
     const provider = cfg.provider || 'openai';
     const model = cfg.model || '';
@@ -154,13 +184,16 @@
 
     // When using Gemini, attach tools built from capabilities so the model
     // can perform function calling. Other providers simply ignore this field.
-    if(provider === 'gemini'){
+    // Support explicit disabling of tools in final stage
+    if(provider === 'gemini' && !disableTools){
       const tools = buildToolsFromCapabilities();
       if(tools.length){
         payload.tools = tools;
-        // Default tool calling mode: "auto" lets the model decide.
         payload.tool_mode = 'auto';
       }
+    }else if(provider === 'gemini' && disableTools){
+      // Explicitly disable tools for this round
+      payload.tool_mode = 'none';
     }
 
     // Prefer using plugin API client
@@ -194,12 +227,41 @@
 
     // Inject parsed chat samples as few-shot history before real history.
     const sampleMessages = base && Array.isArray(base.samples) ? base.samples : [];
-    const history = Array.isArray(opts.history) ? opts.history : (opts.history ? [opts.history] : []);
+    const rawHistory = Array.isArray(opts.history) ? opts.history : (opts.history ? [opts.history] : []);
 
-      const messages = [
+    // Convert our UI history to LLM chat messages format, honoring snapshots.current_index
+    function toLLMMessages(items){
+      const msgs = [];
+      for(const it of items){
+        if(!it) continue;
+        const role = it.role || 'user';
+        if(role !== 'user' && role !== 'assistant') continue;
+
+        if(role === 'assistant'){
+          const snap = it.snapshots;
+          const idx = (snap && typeof snap === 'object' && Array.isArray(snap.parts))
+            ? Math.max(0, Math.min((snap.current_index|0), snap.parts.length - 1))
+            : 0;
+          const part = snap && snap.parts ? (snap.parts[idx] || {}) : {};
+          const t = String(part.text || '');
+          const tr = typeof part.tool_results_text === 'string' ? part.tool_results_text : '';
+          const content = tr ? (t + "\n\n" + tr) : t;
+          msgs.push({ role: 'assistant', content });
+        }else{
+          // user message
+          const t = String(it.text || it.content || '');
+          msgs.push({ role: 'user', content: t });
+        }
+      }
+      return msgs;
+    }
+
+    const convertedHistory = toLLMMessages(rawHistory);
+
+    const messages = [
       systemMsg,
       ...sampleMessages,
-      ...history,
+      ...convertedHistory,
       { role: 'user', content: text }
     ];
 
@@ -212,8 +274,14 @@
       }
     }
 
-    // Orchestrate up to 3 tool-calling rounds for Gemini.
-    // Other providers fall back to a single plain chat call.
+    // Multi-stage orchestration (up to 4 stages by default; can be limited via opts.maxStages):
+    // Stage 1: initial chat
+    // If tool_call -> execute tool, append system summary, proceed Stage 2
+    // Stage 2: chat with tool result context
+    // If tool_call -> execute tool, append system summary, proceed Stage 3
+    // Stage 3: chat with second tool result context
+    // If tool_call -> execute tool, append system summary, Stage 4 final forced plain chat (tools disabled)
+    // Stage 4: final response (tools disabled regardless of model output intent)
     const cfg = loadLLMConfig();
     const provider = cfg.provider || 'openai';
 
@@ -252,98 +320,181 @@
     }
 
     let historyMessages = messages.slice();
-    let lastResponse = null;
-    // Track executed tools for UI hints
     const executedTools = [];
+    const stageSummaries = [];
+    const stageToolContentsAll = [];
+    let stage = 1;
+    const maxStages = Math.max(1, Number.isFinite(opts.maxStages) ? opts.maxStages : 4);
+    let lastResponse = null;
 
-    for(let round=0; round<3; round++){
-      const res = await callLLMChat({ messages: historyMessages, signal: controller.signal });
+    function formatJson(value, maxLen){
+      try{
+        const s = JSON.stringify(value, null, 2);
+        if(!maxLen || s.length <= maxLen) return s;
+        return s.slice(0, maxLen) + '...';
+      }catch(_e){
+        try{ return String(value); }catch(__e){ return '[Unserializable]'; }
+      }
+    }
 
-      // When tools are enabled, gemini_api.chat returns structured payload.
+    function summarizeToolBatch(items, stage){
+      const lines = [];
+      lines.push(`[TOOL RESULTS - STAGE ${stage}]`);
+      for(const it of items){
+        const name = it && it.name ? String(it.name) : 'unknown';
+        const argsStr = formatJson(it.arguments || it.args || {}, 500);
+        const resStr = 'error' in it && it.error ? String(it.error) : formatJson(it.result, 1000);
+        const type = (it.capType || it.type || '').toLowerCase();
+        const plugin = it.pluginId ? ` · ${it.pluginId}` : '';
+        lines.push(`- ${name}${plugin}${type?` [${type}]`:''}`);
+        lines.push(`  args: ${argsStr}`);
+        lines.push(`  -> result: ${resStr}`);
+      }
+      return lines.join('\n');
+    }
+
+    async function executeToolAndAppend(fnName, args){
+      const cap = resolveCapabilityByFunctionName(fnName);
+      if(!cap) {
+        historyMessages.push({ role: 'assistant', content: `[SYSTEM]: Unknown function ${fnName}. Continue without it.` });
+        return { error: 'Unknown function '+fnName };
+      }
+      const root = window.Yuuka || {}; const services = root.services || {}; const capsSvc = services.capabilities;
+      if(!capsSvc || typeof capsSvc.invoke !== 'function'){
+        historyMessages.push({ role: 'assistant', content: '[SYSTEM]: Capability service unavailable. Continue conversation.' });
+        return { error: 'Capabilities unavailable' };
+      }
+      try {
+        const result = await capsSvc.invoke(cap.id, args, { source: 'maid' });
+        executedTools.push({ name: fnName, id: cap.id, pluginId: cap.pluginId || '', type: (cap.type || 'action').toLowerCase(), stage });
+        return { ok: true, result, fnName, capType: (cap.type || '').toLowerCase() };
+      }catch(err){
+        const msg = (err && err.message) ? err.message : String(err);
+        historyMessages.push({ role: 'assistant', content: `[SYSTEM]: Tool ${fnName} failed (${msg}). Continue conversation.` });
+        return { error: msg };
+      }
+    }
+
+    while(stage <= maxStages){
+      // Determine if tools should be disabled (final stage or flagged by prior action tool)
+      const disableToolsNow = (stage === maxStages) || historyMessages.__forceDisableTools === true || (opts.forceDisableAfterFirst === true && stage >= 2);
+      const res = await callLLMChat({ messages: historyMessages, signal: controller.signal, disableTools: disableToolsNow });
       if(!res || typeof res !== 'object' || !res.type || res.type === 'message' || res.type === 'error'){
         lastResponse = res;
         break;
       }
-
-      if(res.type === 'tool_call'){
-        const fnName = res.name;
-        const args = res.arguments || {};
-        try { console.debug('[MaidCore] Tool call received:', fnName, args); } catch(_logErr) {}
-        const cap = resolveCapabilityByFunctionName(fnName);
-        if(!cap){
-          // Unknown tool: inform model and let it try another one.
-          historyMessages.push({
-            role: 'assistant',
-            content: `[SYSTEM]: This tool is not available, please try other tools. Error: Unknown function: ${fnName}`
-          });
-          lastResponse = { type: 'error', error: `Unknown function: ${fnName}` };
-          continue;
+      if(res.type === 'tool_call' || res.type === 'tool_calls'){
+        // Normalize to an array of calls
+        const calls = res.type === 'tool_calls' ? (Array.isArray(res.calls) ? res.calls : []) : [{ name: res.name, arguments: res.arguments || {} }];
+        const batchExec = [];
+        for(const c of calls){
+          const fn = c && c.name ? String(c.name) : '';
+          const args = (c && (c.arguments || c.args)) || {};
+          const exec = await executeToolAndAppend(fn, args);
+          batchExec.push({ name: fn, arguments: args, ...(exec.ok?{ result: exec.result }: { error: exec.error }), capType: exec.capType, pluginId: (function(){
+            const last = executedTools[executedTools.length - 1];
+            return last && last.name === fn ? last.pluginId : undefined;
+          })() });
         }
-
-        const root = window.Yuuka || {};
-        const services = root.services || {};
-        const capsSvc = services.capabilities;
-        if(!capsSvc || typeof capsSvc.invoke !== 'function'){
-          historyMessages.push({
-            role: 'assistant',
-            content: '[SYSTEM]: Capability service is not available, please try other tools.'
+        // Append Gemini-style function_response parts FIRST so model sees structured tool output (all in one message)
+        const parts = batchExec.map(b=> ({ function_response: { name: b.name, response: ('error' in b && b.error) ? { error: b.error } : (b.result || null) } }));
+        historyMessages.push({ role: 'user', parts });
+        // Build a summarized system directive and readable log for next stage
+        const readable = summarizeToolBatch(batchExec, stage);
+        stageSummaries.push(readable);
+        // Collect structured tool contents for final embedding on assistant message
+        for(const b of batchExec){
+          stageToolContentsAll.push({
+            stage,
+            name: b.name,
+            arguments: b.arguments || b.args || {},
+            result: ('error' in b && b.error) ? { error: b.error } : (b.result || null),
+            type: (b.capType || b.type || ''),
+            pluginId: b.pluginId || ''
           });
-          lastResponse = { type: 'error', error: 'Capabilities service is not available' };
-          continue;
         }
-
-        try{
-          const toolResult = await capsSvc.invoke(cap.id, args, { source: 'maid' });
-          try { console.debug('[MaidCore] Tool executed:', fnName, 'result:', toolResult); } catch(_e) {}
-          try{
-            executedTools.push({
-              name: fnName,
-              id: cap.id,
-              pluginId: cap.pluginId || '',
-              type: (cap.type || 'action').toLowerCase()
-            });
-          }catch(_e){/* ignore */}
-          const capType = (cap.type || '').toLowerCase();
-
-          if(capType === 'query'){
-            // Feed back to model for next round
-            historyMessages.push({
-              role: 'assistant',
-              content: JSON.stringify({ function: fnName, result: toolResult })
-            });
-            lastResponse = { type: 'tool_result', name: fnName, result: toolResult };
-            continue;
+        // Build system context message summarizing tool result for next stage
+        function extractLastUserText(msgs){
+          for(let i = msgs.length - 1; i >= 0; i--){
+            const m = msgs[i];
+            if(m && m.role === 'user'){
+              if(typeof m.content === 'string' && m.content.trim()) return m.content.trim();
+              if(Array.isArray(m.parts)){
+                const t = m.parts.map(p => (p && p.text) ? p.text : '').join(' ').trim();
+                if(t) return t;
+              }
+            }
           }
-
-          // Action or other: finish immediately
-          lastResponse = { type: 'tool_result', name: fnName, result: toolResult };
-          break;
-        }catch(err){
-          // Tool execution failed: surface as system note so LLM can pick another tool.
-          const safeMsg = (err && err.message) ? String(err.message) : String(err);
-          try { console.warn('[MaidCore] Tool execution error for', fnName, safeMsg); } catch(_e) {}
-          historyMessages.push({
-            role: 'assistant',
-            content: `[SYSTEM]: This tool is not available, please try other tools. Error: ${safeMsg}`
-          });
-          lastResponse = { type: 'error', error: safeMsg };
-          continue;
+          return '';
         }
+        const lastUserText = extractLastUserText(historyMessages);
+        let directive;
+        if(stage < Math.min(3, maxStages)){
+          directive = 'Use the tool result (already provided as function_response) to continue the conversation. Only call another tool if strictly necessary.';
+        }else if(stage === Math.min(3, maxStages)){
+          directive = 'Use the tool result (function_response) and provide a final helpful answer. If you still insist on a tool, the system will force a plain answer next.';
+        }else{ // stage 4 should not reach here because disableTools true
+          directive = 'Provide the final answer.';
+        }
+        const sysLines = [];
+        sysLines.push(`[TOOL_RESULT_STAGE_${stage}]`);
+        if(lastUserText){ sysLines.push(`Last user request: ${lastUserText}`); }
+        if(res.type === 'tool_calls'){
+          try{
+            const names = calls.map(c=> c && c.name).filter(Boolean).join(', ');
+            sysLines.push(`([System]: Executed tool calls: ${names}. Function responses are attached. Continue naturally.)`);
+          }catch(_e){
+            sysLines.push('([System]: Executed multiple tool calls. Function responses are attached. Continue naturally.)');
+          }
+        }else{
+          sysLines.push(`([System]: Executed tool call ${calls[0] && calls[0].name}. The structured result is already included as function_response. Please continue the conversation naturally.)`);
+        }
+        sysLines.push('\n' + readable);
+        sysLines.push(directive);
+        historyMessages.push({ role: 'system', content: sysLines.join('\n') });
+        // If the tool was an ACTION we generally expect completion -> disable tools next stage
+        if(batchExec.some(b=> (b.capType||'').toLowerCase() === 'action')){ historyMessages.__forceDisableTools = true; }
+        if(stage === Math.min(3, maxStages)){
+          // Next stage (4) disable tools to force answer
+        }
+        stage += 1;
+        if(stage > maxStages){
+          // Safety fallback
+          lastResponse = { type: 'message', text: 'Tool execution sequence ended without final answer.' };
+          break;
+        }
+        continue; // proceed to next stage loop
+      } else {
+        // Non tool structured type: treat as final
+        lastResponse = res;
+        break;
       }
-
-      // Anything else: treat as final.
-      lastResponse = res;
-      break;
     }
 
-    // Attach used_tools metadata for UI consumers when possible
-    try{
+    // Final forced round if we ended at stage 4 with last response still a tool_call (edge case)
+    if(stage === maxStages && lastResponse && lastResponse.type === 'tool_call'){
+      historyMessages.push({ role: 'system', content: 'Provide a final answer in plain text without calling tools.' });
+      const resFinal = await callLLMChat({ messages: historyMessages, signal: controller.signal, disableTools: true });
+      lastResponse = resFinal;
+    }
+
+    try {
       if(lastResponse && typeof lastResponse === 'object'){
         lastResponse.used_tools = executedTools.slice();
+        if(stageSummaries.length){
+          lastResponse.tool_results_text = stageSummaries.join('\n\n');
+        }
+        if(stageToolContentsAll.length){
+          lastResponse.tool_contents = stageToolContentsAll.slice();
+        }
+        lastResponse._stages_executed = stage;
         return lastResponse;
       }
       if(typeof lastResponse === 'string'){
-        return { type: 'message', text: lastResponse, used_tools: executedTools.slice() };
+        const obj = { type: 'message', text: lastResponse, used_tools: executedTools.slice(), _stages_executed: stage };
+        if(stageSummaries.length){ obj.tool_results_text = stageSummaries.join('\n\n'); }
+        if(stageToolContentsAll.length){ obj.tool_contents = stageToolContentsAll.slice(); }
+        return obj;
       }
     }catch(_e){/* ignore */}
     return lastResponse;

@@ -178,13 +178,18 @@ class GeminiProvider(BaseAIProvider):
                 return "\n".join(fragments)
         return str(content)
 
-    def _convert_messages(self, messages: Any) -> list[dict[str, str]]:
-        converted: list[dict[str, str]] = []
+    def _convert_messages(self, messages: Any) -> list[dict]:
+        converted: list[dict] = []
         if not isinstance(messages, list):
             return converted
         for message in messages:
             if not isinstance(message, dict):
                 continue
+            # Preserve Gemini-style messages with explicit parts (for tool-calling)
+            if isinstance(message.get("parts"), list) and message.get("role"):
+                converted.append(message)
+                continue
+
             role = message.get("role", "user")
             text = self._normalize_text_from_content(message.get("content"))
             if not text:

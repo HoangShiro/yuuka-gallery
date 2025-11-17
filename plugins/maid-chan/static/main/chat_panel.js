@@ -130,7 +130,8 @@
       loading: true,
       sending: false,
       messages: [], // newest last
-      snapshots: new Map() // messageId -> { entries, activeIndex, latestIndex, followLatest, pending }
+      snapshots: new Map(), // messageId -> { entries, activeIndex, latestIndex, followLatest, pending }
+      loadingAssistant: null // { el, startedAt, timerId, timeoutId }
     };
 
     const setStatus = (txt)=>{
@@ -139,38 +140,189 @@
     };
 
     const togglePromptView = ()=>{
-      if(!promptView || !promptTextEl) return;
+      if(!promptView) return;
       const showing = !promptView.hasAttribute('hidden');
       if(showing){
         promptView.setAttribute('hidden', 'hidden');
-        if(scrollBox) scrollBox.removeAttribute('hidden');
+        if(scrollBox){
+          scrollBox.style.display = '';
+          scrollBox.removeAttribute('aria-hidden');
+          scrollBox.removeAttribute('hidden');
+        }
         return;
       }
 
-      // Build full prompt using MaidCore.buildBasePrompt if available
-      let promptStr = '';
+      let inputPrompt = '';
+      let toolsConfig = [];
+      let llmOutput = '';
+      let chatSamplesRaw = '';
+      let userRequest = '';
+      let llmToolOutput = '';
+
+      try {
+        chatSamplesRaw = String(window.localStorage.getItem('maid-chan:persona:chatSamples') || '').trim();
+      }catch(_e){ chatSamplesRaw=''; }
+
       try{
         const core = (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore) || MaidCore;
         if(core && typeof core.buildBasePrompt === 'function'){
           const base = core.buildBasePrompt({});
-          if(typeof base === 'string'){
-            promptStr = base;
-          }else if(base && typeof base.prompt === 'string'){
-            promptStr = base.prompt;
-            // Append Chat samples section (use raw stored text for faithful preview)
-            try{
-              const rawSamples = window.localStorage.getItem('maid-chan:persona:chatSamples');
-              const trimmed = rawSamples ? rawSamples.trim() : '';
-              if(trimmed){
-                promptStr += '\n\n## Chat samples\n\n' + trimmed;
+          inputPrompt = (typeof base === 'string') ? base : (base && base.prompt) || '';
+        }
+        if(core && typeof core.buildToolsFromCapabilities === 'function'){
+          const tools = core.buildToolsFromCapabilities();
+          if(Array.isArray(tools)) toolsConfig = tools;
+        }
+      }catch(_e){ /* ignore */ }
+
+      try{
+        // Find latest assistant message and its preceding user request
+        let lastAssistantIndex = -1;
+        for(let i = state.messages.length - 1; i >= 0; i--){
+          const m = state.messages[i];
+            if(m && m.role === 'assistant') { lastAssistantIndex = i; break; }
+        }
+        if(lastAssistantIndex !== -1){
+          const m = state.messages[lastAssistantIndex];
+          const s = getSnapshotState(m) || ensureSnapshotForMessage(m);
+          if(s && Array.isArray(s.entries) && typeof s.activeIndex === 'number'){
+            llmOutput = String(s.entries[s.activeIndex] || '');
+            // tool output from snapshot part metadata
+            if(m.snapshots && m.snapshots.parts){
+              const idx = s.activeIndex;
+              const partMeta = m.snapshots.parts[idx];
+              if(partMeta && typeof partMeta.tool_results_text === 'string'){
+                llmToolOutput = partMeta.tool_results_text;
               }
-            }catch(_e){}
+            }
+          }else{
+            llmOutput = String(m.text || '');
+          }
+          // Find preceding user request
+          for(let j = lastAssistantIndex - 1; j >= 0; j--){
+            const u = state.messages[j];
+            if(u && u.role === 'user' && typeof u.text === 'string' && u.text.trim()){
+              userRequest = u.text.trim();
+              break;
+            }
+          }
+        } else {
+          // Fallback: last user message if no assistant yet
+          for(let i = state.messages.length - 1; i >= 0; i--){
+            const u = state.messages[i];
+            if(u && u.role === 'user' && typeof u.text === 'string' && u.text.trim()){
+              userRequest = u.text.trim();
+              break;
+            }
           }
         }
-      }catch(_e){}
+      }catch(_e){ /* ignore */ }
 
-      promptTextEl.textContent = promptStr || '[No prompt configured]';
-      if(scrollBox) scrollBox.setAttribute('hidden', 'hidden');
+      // Build prompt items UI
+      while(promptView.firstChild) promptView.removeChild(promptView.firstChild);
+
+      function createPromptItem(key, raw){
+        const wrap = document.createElement('div');
+        wrap.className = 'maid-chan-prompt-item';
+        wrap.dataset.key = key;
+        const header = document.createElement('div');
+        header.className = 'maid-chan-prompt-header';
+        const title = document.createElement('span');
+        title.className = 'maid-chan-prompt-title';
+        title.textContent = key;
+        const toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'maid-chan-prompt-toggle';
+        toggleBtn.innerHTML = '<span class="material-symbols-outlined">unfold_less</span>';
+        toggleBtn.setAttribute('aria-expanded','true');
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'maid-chan-prompt-copy';
+        copyBtn.title = 'Copy contents';
+        copyBtn.innerHTML = '<span class="material-symbols-outlined">content_copy</span>';
+        const body = document.createElement('pre');
+        body.className = 'maid-chan-prompt-body';
+        body.textContent = raw || '';
+        const actionsWrap = document.createElement('div');
+        actionsWrap.className = 'maid-chan-prompt-actions';
+        actionsWrap.appendChild(copyBtn);
+        actionsWrap.appendChild(toggleBtn);
+        header.appendChild(title);
+        header.appendChild(actionsWrap);
+        wrap.appendChild(header);
+        wrap.appendChild(body);
+        function collapse(){
+          wrap.classList.add('is-collapsed');
+          body.style.display = 'none';
+          toggleBtn.innerHTML = '<span class="material-symbols-outlined">unfold_more</span>';
+          toggleBtn.setAttribute('aria-expanded','false');
+        }
+        function expand(){
+          wrap.classList.remove('is-collapsed');
+          body.style.display = '';
+          toggleBtn.innerHTML = '<span class="material-symbols-outlined">unfold_less</span>';
+          toggleBtn.setAttribute('aria-expanded','true');
+        }
+        toggleBtn.addEventListener('click', (e)=>{
+          e.preventDefault(); e.stopPropagation();
+          if(wrap.classList.contains('is-collapsed')) expand(); else collapse();
+        });
+        // Double-click header toggles
+        header.addEventListener('dblclick', ()=>{ if(wrap.classList.contains('is-collapsed')) expand(); else collapse(); });
+        copyBtn.addEventListener('click', (e)=>{
+          e.preventDefault(); e.stopPropagation();
+          const text = body.textContent || '';
+          const attempt = async ()=>{
+            try{
+              if(navigator.clipboard && typeof navigator.clipboard.writeText === 'function'){
+                await navigator.clipboard.writeText(text);
+                copyBtn.classList.add('is-copied');
+                setTimeout(()=> copyBtn.classList.remove('is-copied'), 1200);
+                return true;
+              }
+            }catch(_e){}
+            try{
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              ta.style.position = 'fixed';
+              ta.style.left = '-9999px';
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              document.body.removeChild(ta);
+              copyBtn.classList.add('is-copied');
+              setTimeout(()=> copyBtn.classList.remove('is-copied'), 1200);
+              return true;
+            }catch(_e2){ return false; }
+          };
+          attempt();
+        });
+        return wrap;
+      }
+
+      // Prepare text forms
+      let toolsJson = '[]';
+      try { toolsJson = JSON.stringify(toolsConfig || [], null, 2); }catch(_e){ toolsJson='[]'; }
+
+      const items = [
+        ['INPUT_PROMPT', inputPrompt],
+        ['CHAT_SAMPLES', chatSamplesRaw],
+        ['INPUT_TOOLS_CONFIG', toolsJson],
+        ['USER_REQUEST', userRequest],
+        ['LLM_TOOL_OUTPUT', llmToolOutput],
+        ['LLM_CHAT_OUTPUT', llmOutput]
+      ];
+
+      items.forEach(([k,v])=>{
+        const el = createPromptItem(k, v || '');
+        promptView.appendChild(el);
+      });
+
+      // Hide chat scroll while prompt view shown
+      if(scrollBox){
+        scrollBox.style.display = 'none';
+        scrollBox.setAttribute('aria-hidden','true');
+      }
       promptView.removeAttribute('hidden');
     };
 
@@ -188,17 +340,17 @@
       const id = msg.id;
       if(!id) return null;
       let snap = state.snapshots.get(id);
-      const text = msg.text || '';
       if(!snap){
-        const entries = Array.isArray(msg.snapshots) && msg.snapshots.length ? [...msg.snapshots] : [text];
-        const latestIndex = entries.length - 1;
-        let activeIndex = latestIndex;
-        if(msg.metadata && typeof msg.metadata.selected_snapshot_index === 'number'){
-          const idx = msg.metadata.selected_snapshot_index;
-          if(idx >= 0 && idx <= latestIndex) activeIndex = idx;
-        }
+        const parts = (msg.snapshots && msg.snapshots.parts) ? msg.snapshots.parts : [];
+        const entries = parts.map(p => String((p && p.text) || ''));
+        const timestamps = parts.map(p => (p && p.timestamp) ? Number(p.timestamp) : Date.now());
+        const latestIndex = Math.max(0, entries.length - 1);
+        const activeIndex = (msg.snapshots && Number.isFinite(msg.snapshots.current_index))
+          ? Math.max(0, Math.min(Number(msg.snapshots.current_index), latestIndex))
+          : latestIndex;
         snap = {
           entries,
+          timestamps,
           activeIndex,
           latestIndex,
           followLatest: activeIndex === latestIndex,
@@ -207,40 +359,88 @@
         };
         state.snapshots.set(id, snap);
       }else{
-        // Sync from msg.snapshots + metadata if provided.
-        // Ưu tiên dữ liệu từ history (snapshots + selected_snapshot_index),
-        // không cố "đoán" lại dựa trên msg.text để tránh lệch index.
-        if(Array.isArray(msg.snapshots) && msg.snapshots.length){
-          snap.entries = [...msg.snapshots];
-          snap.latestIndex = snap.entries.length - 1;
-          // Không override activeIndex bằng metadata nữa để giữ lựa chọn của user
-          if(typeof snap.activeIndex !== 'number' || snap.activeIndex < 0 || snap.activeIndex > snap.latestIndex){
+        // Only update from msg.snapshots if it carries more parts than our local cache
+        const parts = (msg.snapshots && msg.snapshots.parts) ? msg.snapshots.parts : [];
+        const incomingCount = Array.isArray(parts) ? parts.length : 0;
+        if(incomingCount > (Array.isArray(snap.entries) ? snap.entries.length : 0)){
+          snap.entries = parts.map(p => String((p && p.text) || ''));
+          snap.timestamps = parts.map(p => (p && Number.isFinite(p.timestamp)) ? Number(p.timestamp) : Date.now());
+          snap.latestIndex = Math.max(0, snap.entries.length - 1);
+          // Adopt server current_index if provided; otherwise keep local
+          if(msg.snapshots && Number.isFinite(msg.snapshots.current_index)){
+            snap.activeIndex = Math.max(0, Math.min(Number(msg.snapshots.current_index), snap.latestIndex));
+          }else if(typeof snap.activeIndex !== 'number' || snap.activeIndex < 0 || snap.activeIndex > snap.latestIndex){
             snap.activeIndex = snap.latestIndex;
           }
           snap.followLatest = (snap.activeIndex === snap.latestIndex);
           snap.lastSyncedText = snap.entries[snap.latestIndex] || '';
-        }else{
-          const textNow = msg.text || '';
-          if(textNow && (!snap.entries.length || textNow !== snap.entries[snap.latestIndex])){
-            const existingIndex = snap.entries.findIndex(t => t === textNow);
-            if(existingIndex >= 0){
-              snap.latestIndex = existingIndex;
-              snap.entries[existingIndex] = textNow;
-            }else{
-              snap.entries.push(textNow);
-              snap.latestIndex = snap.entries.length - 1;
-            }
-          }
-          if(snap.followLatest || snap.entries.length === 1){
-            snap.activeIndex = snap.latestIndex;
-          }else if(typeof snap.activeIndex !== 'number'){
-            snap.activeIndex = snap.latestIndex;
-          }
-          snap.followLatest = snap.activeIndex === snap.latestIndex;
-          snap.lastSyncedText = snap.entries[snap.latestIndex] || '';
         }
       }
       return snap;
+    };
+
+    // Helper: build parts array from current UI state while preserving existing
+    // per-part properties like tool_results_text if present in msg.snapshots.
+    const buildPartsPreservingMeta = (msg, snap)=>{
+      const now = Date.now();
+      const existingParts = (msg && msg.snapshots && Array.isArray(msg.snapshots.parts)) ? msg.snapshots.parts : [];
+      const out = [];
+      const count = Array.isArray(snap.entries) ? snap.entries.length : 0;
+      for(let i=0;i<count;i++){
+        const prev = existingParts[i] || {};
+        const part = {
+          text: String(snap.entries[i] || ''),
+          timestamp: (snap.timestamps && Number.isFinite(snap.timestamps[i])) ? snap.timestamps[i] : (Number.isFinite(prev.timestamp) ? prev.timestamp : now)
+        };
+        // Prefer freshly captured tool results stored on snap.toolResultsTexts; fallback to previous part metadata
+        if(Array.isArray(snap.toolResultsTexts) && typeof snap.toolResultsTexts[i] === 'string' && snap.toolResultsTexts[i].trim()){
+          part.tool_results_text = snap.toolResultsTexts[i].trim();
+        }else if(typeof prev.tool_results_text === 'string'){
+          part.tool_results_text = prev.tool_results_text;
+        }
+        // Copy or update tool_info if available (parallel array snap.toolInfos)
+        if(Array.isArray(snap.toolInfos) && Array.isArray(snap.toolInfos[i])){
+          part.tool_info = snap.toolInfos[i].map(t=>({
+            name: t && t.name,
+            type: t && t.type,
+            pluginId: t && t.pluginId,
+            stage: t && t.stage,
+            arguments_list: Array.isArray(t?.arguments_list) ? t.arguments_list.slice() : (function(v){
+              if(v==null) return [];
+              if(Array.isArray(v)) return v.slice();
+              if(typeof v==='object') return Object.values(v);
+              return [v];
+            })(t && (t.arguments!==undefined ? t.arguments : t?.args)),
+            result_list: Array.isArray(t?.result_list) ? t.result_list.slice() : (function(v){
+              if(v==null) return [];
+              if(Array.isArray(v)) return v.slice();
+              if(typeof v==='object') return Object.values(v);
+              return [v];
+            })(t && t.result)
+          })).filter(t=> t.name);
+        }else if(Array.isArray(prev.tool_info)){
+          part.tool_info = prev.tool_info.map(t=>({
+            name: t && t.name,
+            type: t && t.type,
+            pluginId: t && t.pluginId,
+            stage: t && t.stage,
+            arguments_list: Array.isArray(t?.arguments_list) ? t.arguments_list.slice() : (function(v){
+              if(v==null) return [];
+              if(Array.isArray(v)) return v.slice();
+              if(typeof v==='object') return Object.values(v);
+              return [v];
+            })(t && (t.arguments!==undefined ? t.arguments : t?.args)),
+            result_list: Array.isArray(t?.result_list) ? t.result_list.slice() : (function(v){
+              if(v==null) return [];
+              if(Array.isArray(v)) return v.slice();
+              if(typeof v==='object') return Object.values(v);
+              return [v];
+            })(t && t.result)
+          })).filter(t=> t.name);
+        }
+        out.push(part);
+      }
+      return out;
     };
 
     const moveSnapshotPrev = (msg)=>{
@@ -249,11 +449,15 @@
       if(snap.activeIndex > 0){
         snap.activeIndex -= 1;
         snap.followLatest = snap.activeIndex === snap.latestIndex;
-        // persist active index best-effort
-        apiPatch('/api/plugin/maid/chat/snapshot', {
+        // persist snapshots + active index (new structure)
+        const parts = buildPartsPreservingMeta(msg, snap);
+        const payload = {
           id: msg.id,
-          active_index: snap.activeIndex
-        }).catch(()=>{});
+          snapshots: { parts, current_index: snap.activeIndex }
+        };
+        // Reflect on message object to keep UI in sync without reload
+        msg.snapshots = payload.snapshots;
+        apiPatch('/api/plugin/maid/chat/snapshot', payload).catch(()=>{});
       }
     };
 
@@ -263,19 +467,54 @@
       if(snap.activeIndex < snap.entries.length - 1){
         snap.activeIndex += 1;
         snap.followLatest = snap.activeIndex === snap.latestIndex;
-        return apiPatch('/api/plugin/maid/chat/snapshot', {
+        const parts = buildPartsPreservingMeta(msg, snap);
+        const payload = {
           id: msg.id,
-          active_index: snap.activeIndex
-        }).catch(()=>{});
+          snapshots: { parts, current_index: snap.activeIndex }
+        };
+        msg.snapshots = payload.snapshots;
+        return apiPatch('/api/plugin/maid/chat/snapshot', payload).catch(()=>{});
       }
       if(snap.pending) return Promise.resolve();
 
       // At latest snapshot: trigger regeneration via backend (similar to chat plugin)
       snap.pending = true;
 
-      // Backend /api/plugin/maid/chat expects full LLM config similar to MaidCore.callLLMChat.
-      // Reuse localStorage config (provider/model/api_key/temperature/...) so backend has enough info.
-      const historyForApi = state.messages.map(m => ({ role: m.role, content: m.text }));
+      // Build conversation for snapshot regeneration by rewinding to just BEFORE this assistant message.
+      // Use only prior history so we regenerate this message as a fresh reply to the last user.
+      const msgIndex = state.messages.findIndex(m => m.id === msg.id);
+      const priorMessages = msgIndex > 0 ? state.messages.slice(0, msgIndex) : [];
+      const historyForApi = priorMessages.map(m => {
+        if(m.role === 'assistant'){
+          const s = getSnapshotState(m) || ensureSnapshotForMessage(m);
+          if(s && Array.isArray(s.entries) && typeof s.activeIndex === 'number'){
+            const idx = s.activeIndex;
+            const partText = s.entries[idx] || '';
+            let toolText = '';
+            if(m.snapshots && m.snapshots.parts && m.snapshots.parts[idx] && typeof m.snapshots.parts[idx].tool_results_text === 'string'){
+              toolText = m.snapshots.parts[idx].tool_results_text;
+            }
+            return { role: 'assistant', content: toolText ? (partText + '\n\n' + toolText) : partText };
+          }
+          return { role: 'assistant', content: '' };
+        }
+        return { role: m.role, content: m.text || '' };
+      });
+      // Find the last user request from the prior messages
+      const lastUserText = (() => {
+        for(let i = priorMessages.length - 1; i >= 0; i--){
+          const m = priorMessages[i];
+          if(m && m.role === 'user' && typeof m.text === 'string' && m.text.trim()){
+            return m.text.trim();
+          }
+        }
+        return '';
+      })();
+      // Add a system directive to steer a two-stage regen with tool-on-first when needed
+      historyForApi.push({
+        role: 'system',
+        content: 'Regeneration: Provide a concise alternative answer to the last user request using the same context. If the request involves album or image actions, call the appropriate tool (e.g., open_album) in your first response. A subsequent response will be required without calling tools.'
+      });
 
       const cfgRaw = window.localStorage.getItem('maid-chan:llm-config');
       let cfg = {};
@@ -293,24 +532,19 @@
         max_tokens: typeof cfg.max_tokens === 'number' ? cfg.max_tokens : 512
       };
 
-      // If using Gemini, attach tools so backend can expose function-calling intent
-      try{
-        if((payload.provider||'').toLowerCase() === 'gemini'){
-          const tools = (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore && typeof window.Yuuka.ai.MaidCore.buildToolsFromCapabilities === 'function')
-            ? window.Yuuka.ai.MaidCore.buildToolsFromCapabilities()
-            : [];
-          if(Array.isArray(tools) && tools.length){
-            payload.tools = tools;
-            payload.tool_mode = 'auto';
-          }
-        }
-      }catch(_e){}
+      // Prefer two-stage orchestration via MaidCore.askMaid for regen
+      const MaidCoreDynamic = (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore) || MaidCore;
+      const callPromise = (MaidCoreDynamic && typeof MaidCoreDynamic.askMaid === 'function')
+        ? MaidCoreDynamic.askMaid(lastUserText || 'Please continue.', { history: historyForApi, maxStages: 2, forceDisableAfterFirst: true })
+        : apiPost('/api/plugin/maid/chat', payload);
 
-      return apiPost('/api/plugin/maid/chat', payload).then(res => {
+      return Promise.resolve(callPromise).then(res => {
         snap.pending = false;
         if(!res) return;
         let assistantText = '';
         let usedTools = [];
+        // Default tool results text placeholder for alignment
+        let regenToolResultsText = '';
         if(typeof res === 'string') assistantText = res;
         else if(res && typeof res === 'object'){
           assistantText = res.text || res.message || res.content || '';
@@ -321,6 +555,9 @@
             const p0 = res.candidates[0].content.parts[0];
             if(typeof p0.text === 'string') assistantText = p0.text;
           }
+          if(Array.isArray(res.used_tools)) usedTools = res.used_tools;
+          // Capture tool_results_text from LLM response (multi-stage Gemini orchestration)
+          regenToolResultsText = (typeof res.tool_results_text === 'string' && res.tool_results_text.trim()) ? res.tool_results_text.trim() : '';
           // Derive used_tools when Gemini returns a tool_call
           try{
             const isGem = (payload.provider||'').toLowerCase() === 'gemini';
@@ -346,25 +583,59 @@
             }
           }catch(_e){}
         }
-        if(!assistantText) return;
+        const assistantTrim = (assistantText || '').trim();
+        if(!assistantTrim) return;
 
         // Append new snapshot entry and keep message id
-        snap.entries.push(assistantText);
+        snap.entries.push(assistantTrim);
+        if(Array.isArray(snap.timestamps)) snap.timestamps.push(Date.now());
+        if(!Array.isArray(snap.usedTools)) snap.usedTools = [];
+        snap.usedTools.push(usedTools && usedTools.length ? usedTools : undefined);
         snap.latestIndex = snap.entries.length - 1;
         snap.activeIndex = snap.latestIndex;
         snap.followLatest = true;
-        snap.lastSyncedText = assistantText;
+        snap.lastSyncedText = assistantTrim;
 
-        // Persist snapshots + active index
-        const snapshotPayload = {
+        // Align tool results text & tool info with the newly added snapshot entry index
+        if(!Array.isArray(snap.toolResultsTexts)) snap.toolResultsTexts = [];
+        // Ensure array has placeholders up to previous last index
+        while(snap.toolResultsTexts.length < (snap.entries.length - 1)) snap.toolResultsTexts.push(undefined);
+        const newIdx = snap.entries.length - 1;
+        snap.toolResultsTexts[newIdx] = regenToolResultsText && regenToolResultsText.trim() ? regenToolResultsText.trim() : undefined;
+        // Capture tool info list (prefer res.tool_contents; fallback to usedTools list)
+        if(!Array.isArray(snap.toolInfos)) snap.toolInfos = [];
+        while(snap.toolInfos.length < (snap.entries.length - 1)) snap.toolInfos.push(undefined);
+        const toolInfoRaw = Array.isArray(res?.tool_contents) ? res.tool_contents : (Array.isArray(usedTools) ? usedTools : []);
+        const simplified = toolInfoRaw.filter(Boolean).map(t=>({
+          name: t.name || t.id,
+          type: (t.type||'').toLowerCase(),
+          pluginId: t.pluginId || '',
+          stage: t.stage,
+          arguments_list: Array.isArray(t?.arguments_list) ? t.arguments_list.slice() : (function(v){
+            const src = (v!==undefined ? v : (t.arguments!==undefined ? t.arguments : t.args));
+            if(src==null) return [];
+            if(Array.isArray(src)) return src.slice();
+            if(typeof src==='object') return Object.values(src);
+            return [src];
+          })(t.arguments_list),
+          result_list: Array.isArray(t?.result_list) ? t.result_list.slice() : (function(v){
+            const src = (v!==undefined ? v : t.result);
+            if(src==null) return [];
+            if(Array.isArray(src)) return src.slice();
+            if(typeof src==='object') return Object.values(src);
+            return [src];
+          })(t.result_list)
+        })).filter(t=> t.name);
+        snap.toolInfos[newIdx] = simplified.length ? simplified : undefined;
+
+        // Persist snapshots + active index (new structure)
+        const parts = buildPartsPreservingMeta(msg, snap);
+        const payload = {
           id: msg.id,
-          snapshots: snap.entries,
-          active_index: snap.activeIndex
+          snapshots: { parts, current_index: snap.activeIndex }
         };
-        if(usedTools && usedTools.length){
-          snapshotPayload.used_tools = usedTools;
-        }
-        return apiPatch('/api/plugin/maid/chat/snapshot', snapshotPayload).catch(()=>{});
+        msg.snapshots = payload.snapshots;
+        return apiPatch('/api/plugin/maid/chat/snapshot', payload).catch(()=>{});
       }).catch(()=>{
         snap.pending = false;
       });
@@ -465,7 +736,20 @@
       const roleLabel = msg.role === 'system'
         ? '[System]'
         : (msg.role === 'assistant' ? maidTitle : 'You');
-      const ts = msg.timestamp ? new Date(msg.timestamp) : new Date();
+      // timestamp: for assistant, prefer active snapshot part timestamp; else msg.timestamp
+      let tsMs = msg.timestamp || Date.now();
+      if(msg.role === 'assistant'){
+        const s = getSnapshotState(msg) || ensureSnapshotForMessage(msg);
+        if(s && Array.isArray(s.timestamps) && typeof s.activeIndex === 'number'){
+          const partTs = s.timestamps[s.activeIndex];
+          if(Number.isFinite(partTs)) tsMs = partTs;
+        }else if(msg.snapshots && msg.snapshots.parts && msg.snapshots.parts.length){
+          const idx = Math.max(0, Math.min(Number(msg.snapshots.current_index||0), msg.snapshots.parts.length-1));
+          const partTs = Number(msg.snapshots.parts[idx]?.timestamp);
+          if(Number.isFinite(partTs)) tsMs = partTs;
+        }
+      }
+      const ts = new Date(tsMs);
       const tsStr = ts.toLocaleTimeString();
 
       // Snapshot indicator (current/total) inline với meta
@@ -482,13 +766,49 @@
 
       const toolbar = renderToolbar(msg);
 
-      // Tool-hint buttons (query/action) based on metadata.used_tools
+      // Tool-hint buttons: derive from message-level tool_contents OR active snapshot tool_info OR tool_results_text
       const toolButtonsWrap = document.createElement('div');
       toolButtonsWrap.className = 'maid-chan-chat-tools';
-      try{
-        const used = (msg.metadata && Array.isArray(msg.metadata.used_tools)) ? msg.metadata.used_tools : [];
-        const queries = used.filter(t => (t.type||'').toLowerCase() === 'query');
-        const actions = used.filter(t => (t.type||'').toLowerCase() !== 'query');
+
+      const buildToolButtons = ()=>{
+        while(toolButtonsWrap.firstChild) toolButtonsWrap.removeChild(toolButtonsWrap.firstChild);
+        let queries = [];
+        let actions = [];
+        // Prefer structured msg.tool_contents if present
+        const used = Array.isArray(msg.tool_contents) ? msg.tool_contents : [];
+        if(used.length){
+          queries = used.filter(t => (t.type||'').toLowerCase() === 'query');
+          actions = used.filter(t => (t.type||'').toLowerCase() !== 'query');
+        } else if(msg.role === 'assistant'){ // Fallback: parse active snapshot part tool_results_text
+          const snapState = getSnapshotState(msg) || ensureSnapshotForMessage(msg);
+          if(snapState && Array.isArray(snapState.entries) && typeof snapState.activeIndex === 'number'){
+            const idx = snapState.activeIndex;
+            // Attempt to read tool_results_text from original message snapshots structure
+            const partMeta = msg.snapshots && msg.snapshots.parts && msg.snapshots.parts[idx];
+            // Prefer structured tool_info first
+            const toolInfoArr = Array.isArray(partMeta?.tool_info) ? partMeta.tool_info : [];
+            if(toolInfoArr.length){
+              queries = toolInfoArr.filter(t=> (t.type||'').toLowerCase() === 'query');
+              actions = toolInfoArr.filter(t=> (t.type||'').toLowerCase() !== 'query');
+            }
+            const toolText = (!queries.length && !actions.length && partMeta && typeof partMeta.tool_results_text === 'string') ? partMeta.tool_results_text : '';
+            if(toolText && toolText.includes('[TOOL RESULTS')){
+              // Parse lines starting with '- ' capturing name and type marker [action]/[query]
+              const lines = toolText.split(/\r?\n/);
+              for(const line of lines){
+                if(!/^\s*-\s+/.test(line)) continue;
+                // Extract name and type from pattern like: - open_album · album [action]
+                const m = /^\s*-\s+([^\[]+?)\s*(?:\[[^\]]+\])?\s*(?:\[(action|query)\])?/i.exec(line);
+                // Fallback: search explicit [action]/[query]
+                const typeMatch = /(\[(action|query)\])/i.exec(line);
+                const type = (typeMatch && typeMatch[2]) ? typeMatch[2].toLowerCase() : (m && m[2] ? m[2].toLowerCase() : '');
+                const nameRaw = (m && m[1]) ? m[1].trim() : 'unknown';
+                const name = nameRaw.split('·')[0].trim();
+                if(type === 'query') queries.push({ name }); else actions.push({ name });
+              }
+            }
+          }
+        }
 
         const makeBtn = (label, items)=>{
           if(!items.length) return null;
@@ -498,7 +818,6 @@
           btn.textContent = `${label} (${items.length})`;
           btn.title = `Tools used: ${items.map(i=> i.name || i.id).join(', ')}`;
 
-          // Popover hint
           const hint = document.createElement('div');
           hint.className = 'maid-chan-chat-tools-hint';
           const list = document.createElement('ul');
@@ -506,23 +825,49 @@
           items.forEach(i =>{
             const li = document.createElement('li');
             const n = i.name || i.id || 'unknown';
-            const p = i.pluginId ? ` · ${i.pluginId}` : '';
-            li.textContent = `${n}${p}`;
+            const type = (i.type||'').toLowerCase();
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'material-symbols-outlined maid-chan-tool-icon';
+            iconSpan.textContent = type === 'query' ? 'search' : (type === 'action' ? 'bolt' : 'extension');
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'maid-chan-tool-name';
+            nameSpan.textContent = n;
+            const headWrap = document.createElement('div');
+            headWrap.className = 'maid-chan-tool-line-head';
+            headWrap.appendChild(iconSpan);
+            headWrap.appendChild(nameSpan);
+            li.appendChild(headWrap);
+            const argsList = Array.isArray(i?.arguments_list) ? i.arguments_list : (i.arguments!=null ? (Array.isArray(i.arguments)? i.arguments : (typeof i.arguments==='object'? Object.values(i.arguments): [i.arguments])) : []);
+            const resList = Array.isArray(i?.result_list) ? i.result_list : (i.result!=null ? (Array.isArray(i.result)? i.result : (typeof i.result==='object'? Object.values(i.result): [i.result])) : []);
+            const argsStr = argsList.length ? (()=>{ try{ return JSON.stringify(argsList, null, 2);}catch(_e){ return String(argsList); } })() : '';
+            const resStr = resList.length ? (()=>{ try{ return JSON.stringify(resList, null, 2);}catch(_e){ return String(resList); } })() : '';
+            if(argsStr || resStr){
+              const toggle = document.createElement('button');
+              toggle.type = 'button';
+              toggle.className = 'maid-chan-tool-toggle';
+              toggle.innerHTML = '<span class="material-symbols-outlined">data_object</span>';
+              toggle.title = 'Show tool details';
+              headWrap.appendChild(toggle);
+              const details = document.createElement('div');
+              details.className = 'maid-chan-tool-details';
+              if(argsStr){ const preA = document.createElement('pre'); preA.className='maid-chan-tool-args'; preA.textContent=argsStr; details.appendChild(preA); }
+              if(resStr){ const preR = document.createElement('pre'); preR.className='maid-chan-tool-result'; preR.textContent=resStr; details.appendChild(preR); }
+              details.setAttribute('hidden','');
+              toggle.addEventListener('click', ev=>{ ev.preventDefault(); ev.stopPropagation(); const show = details.hasAttribute('hidden'); if(show) details.removeAttribute('hidden'); else details.setAttribute('hidden',''); });
+              li.appendChild(details);
+            }
             list.appendChild(li);
           });
           hint.appendChild(list);
           hint.setAttribute('hidden', '');
-
           const toggleHint = (ev)=>{
             ev.preventDefault(); ev.stopPropagation();
             const show = hint.hasAttribute('hidden');
-            // close others in this header
             toolButtonsWrap.querySelectorAll('.maid-chan-chat-tools-hint').forEach(h=> h.setAttribute('hidden',''));
             if(show) hint.removeAttribute('hidden'); else hint.setAttribute('hidden','');
           };
           btn.addEventListener('click', toggleHint);
           document.addEventListener('click', ()=> hint.setAttribute('hidden',''), { once: true });
-
           const wrapper = document.createElement('span');
           wrapper.className = 'maid-chan-chat-tools-item';
           wrapper.appendChild(btn);
@@ -534,7 +879,9 @@
         const aBtn = makeBtn('action', actions);
         if(qBtn) toolButtonsWrap.appendChild(qBtn);
         if(aBtn) toolButtonsWrap.appendChild(aBtn);
-      }catch(_e){}
+      };
+
+      try{ buildToolButtons(); }catch(_e){}
 
       header.appendChild(meta);
       if(toolButtonsWrap.childElementCount) header.appendChild(toolButtonsWrap);
@@ -546,7 +893,7 @@
       const snap = getSnapshotState(msg);
       const displayText = (snap && Array.isArray(snap.entries) && typeof snap.activeIndex === 'number'
         ? snap.entries[snap.activeIndex]
-        : msg.text) || '';
+        : (msg.text || '')) || '';
 
       body.textContent = displayText;
       body.contentEditable = (msg.role === 'assistant' || msg.role === 'user') ? 'true' : 'false';
@@ -565,14 +912,10 @@
           const oldText = (snapState.entries[snapState.activeIndex] || '').trim();
           if(newText === oldText) return;
           snapState.entries[snapState.activeIndex] = newText;
-          // Đồng bộ lại msg.text để history/phần khác dùng giá trị mới nhất
-          target.text = newText;
-          // Lưu snapshot + selected index lên server (best-effort)
-          apiPatch('/api/plugin/maid/chat/snapshot', {
-            id: target.id,
-            snapshots: snapState.entries,
-            active_index: snapState.activeIndex
-          }).catch(()=>{});
+          // Persist snapshots in new structure
+          const parts = buildPartsPreservingMeta(target, snapState);
+          const payload = { id: target.id, snapshots: { parts, current_index: snapState.activeIndex } };
+          apiPatch('/api/plugin/maid/chat/snapshot', payload).catch(()=>{});
         }else{
           // User message hoặc assistant không dùng snapshot: chỉ update text tại chỗ.
           const oldText = (target.text || '').trim();
@@ -623,6 +966,8 @@
                 // nextBtn.disabled = false;
                 nextBtn.classList.toggle('is-disabled', snapState.pending === true);
               }
+              // Rebuild tool buttons for new active snapshot if no structured tool_contents present
+              try{ if(!Array.isArray(msg.tool_contents) || !msg.tool_contents.length){ buildToolButtons(); } }catch(_e){}
             }
           };
 
@@ -686,6 +1031,15 @@
       });
     };
 
+    const removeLoadingPlaceholder = ()=>{
+      const la = state.loadingAssistant;
+      if(!la) return;
+      if(la.timerId) clearInterval(la.timerId);
+      if(la.timeoutId) clearTimeout(la.timeoutId);
+      if(la.el && la.el.parentElement){ la.el.parentElement.removeChild(la.el); }
+      state.loadingAssistant = null;
+    };
+
     const appendMessage = (msg)=>{
       if(!msg.id){
         msg.id = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
@@ -706,15 +1060,16 @@
       try{
         if(MaidStorage && typeof MaidStorage.loadHistory === 'function'){
           const list = await MaidStorage.loadHistory();
-          state.messages = (Array.isArray(list) ? list : []).map(it => ({
+          state.messages = Array.isArray(list) ? list.map(it => ({
             id: it.id || null,
             role: it.role || 'user',
-            text: it.text || '',
+            // For assistant, timestamp is taken from active part; keep top-level only for user/system
+            text: it.role === 'assistant' ? undefined : (it.text || ''),
             kind: it.kind || 'chat',
-            timestamp: it.timestamp || Date.now(),
-            snapshots: Array.isArray(it.snapshots) ? it.snapshots : undefined,
-            metadata: it.metadata || undefined
-          }));
+            timestamp: it.role === 'assistant' ? undefined : (it.timestamp || Date.now()),
+            snapshots: (it.role === 'assistant' && it.snapshots && it.snapshots.parts) ? it.snapshots : undefined,
+            tool_contents: Array.isArray(it.tool_contents) ? it.tool_contents : undefined
+          })) : [];
         }else{
           // Đi qua tuyến plugin chuẩn để đảm bảo kèm Authorization
           const data = await apiGet('/api/plugin/maid/chat/history');
@@ -722,11 +1077,11 @@
           state.messages = list.map(it => ({
             id: it.id || null,
             role: it.role || 'user',
-            text: it.text || '',
+            text: it.role === 'assistant' ? undefined : (it.text || ''),
             kind: it.kind || 'chat',
-            timestamp: it.timestamp || Date.now(),
-            snapshots: Array.isArray(it.snapshots) ? it.snapshots : undefined,
-            metadata: it.metadata || undefined
+            timestamp: it.role === 'assistant' ? undefined : (it.timestamp || Date.now()),
+            snapshots: (it.role === 'assistant' && it.snapshots && it.snapshots.parts) ? it.snapshots : undefined,
+            tool_contents: Array.isArray(it.tool_contents) ? it.tool_contents : undefined
           }));
         }
         renderAll();
@@ -769,12 +1124,96 @@
         const MaidCoreDynamic = (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore) || MaidCore;
         if(MaidCoreDynamic && typeof MaidCoreDynamic.askMaid === 'function'){
           try{
-            const history = state.messages.map(m => ({ role: m.role, content: m.text }));
+            // Build history strictly using snapshots for assistant
+            const history = state.messages.map(m => {
+              if(m.role === 'assistant'){
+                const s = getSnapshotState(m) || ensureSnapshotForMessage(m);
+                if(s && Array.isArray(s.entries) && typeof s.activeIndex === 'number'){
+                  const idx = s.activeIndex;
+                  const partText = s.entries[idx] || '';
+                  // Append tool_results_text if available in msg.snapshots.parts
+                  let toolText = '';
+                  if(m.snapshots && m.snapshots.parts && m.snapshots.parts[idx] && typeof m.snapshots.parts[idx].tool_results_text === 'string'){
+                    toolText = m.snapshots.parts[idx].tool_results_text;
+                  }
+                  return { role: 'assistant', content: toolText ? (partText + '\n\n' + toolText) : partText };
+                }
+                return { role: 'assistant', content: '' };
+              }
+              return { role: m.role, content: m.text || '' };
+            });
+            // create loading placeholder
+            removeLoadingPlaceholder();
+            let placeholderEl = null;
+            let timerEl = null;
+            if(scrollBox){
+              placeholderEl = document.createElement('div');
+              placeholderEl.className = 'maid-chan-chat-placeholder';
+              timerEl = document.createElement('span');
+              timerEl.className = 'maid-chan-chat-placeholder-timer';
+              timerEl.textContent = '0s';
+              placeholderEl.appendChild(timerEl);
+              scrollBox.appendChild(placeholderEl);
+              requestAnimationFrame(()=>{
+                scrollBox.scrollTop = scrollBox.scrollHeight;
+              });
+            }
+
+            const startedAt = Date.now();
+            let secs = 0;
+            const timerId = window.setInterval(()=>{
+              secs = Math.floor((Date.now() - startedAt) / 1000);
+              if(timerEl) timerEl.textContent = secs + 's';
+            }, 1000);
+
+            const timeoutId = window.setTimeout(()=>{
+              removeLoadingPlaceholder();
+              const maidTitle = (function(){
+                let t = 'Maid-chan';
+                try{
+                  const storedTitle = window.localStorage.getItem('maid-chan:title');
+                  if(storedTitle && storedTitle.trim()){
+                    let s = storedTitle.trim();
+                    if((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))){
+                      s = s.slice(1, -1).trim();
+                    }
+                    if(s) t = s;
+                  }
+                }catch(_e){}
+                return t;
+              })();
+              const timeoutMsg = {
+                role: 'assistant',
+                kind: 'chat',
+                snapshots: { parts: [{ text: maidTitle + ' hiện đang bận, hãy chat lại sau.', timestamp: Date.now() }], current_index: 0 }
+              };
+              appendMessage(timeoutMsg);
+            }, 30000);
+
+            state.loadingAssistant = {
+              el: placeholderEl,
+              timerEl,
+              startedAt,
+              timerId,
+              timeoutId
+            };
+
             const result = await MaidCoreDynamic.askMaid(raw, { history });
+
+            // if we got result before timeout, clear placeholder & timers
+            const la = state.loadingAssistant;
+            if(la){
+              if(la.timerId) clearInterval(la.timerId);
+              if(la.timeoutId) clearTimeout(la.timeoutId);
+              if(la.el && la.el.parentElement){ la.el.parentElement.removeChild(la.el); }
+              state.loadingAssistant = null;
+            }
 
             // Backend may return OpenAI-style or Gemini-style payloads.
             let assistantText = '';
             let usedTools = Array.isArray(result?.used_tools) ? result.used_tools : [];
+            const toolResultsText = (result && typeof result === 'object' && typeof result.tool_results_text === 'string') ? result.tool_results_text.trim() : '';
+            const toolContents = (result && typeof result === 'object' && Array.isArray(result.tool_contents)) ? result.tool_contents : [];
             if(result && typeof result === 'string'){
               assistantText = result;
             }else if(result && typeof result === 'object'){
@@ -800,8 +1239,32 @@
             }
 
             if(assistantText){
-              const maidMsg = { role: 'assistant', text: assistantText, kind: 'chat', timestamp: Date.now(), metadata: {} };
-              if(usedTools && usedTools.length){ maidMsg.metadata.used_tools = usedTools; }
+              const part = { text: assistantText, timestamp: Date.now() };
+              if(toolResultsText) part.tool_results_text = toolResultsText;
+              if(Array.isArray(toolContents) && toolContents.length){
+                part.tool_info = toolContents.map(c=>({
+                  name: c.name || c.id,
+                  type: (c.type||'').toLowerCase(),
+                  pluginId: c.pluginId || '',
+                  stage: c.stage,
+                  arguments_list: Array.isArray(c?.arguments_list) ? c.arguments_list.slice() : (function(v){
+                    const src = (v!==undefined ? v : (c.arguments!==undefined ? c.arguments : c.args));
+                    if(src==null) return [];
+                    if(Array.isArray(src)) return src.slice();
+                    if(typeof src==='object') return Object.values(src);
+                    return [src];
+                  })(c.arguments_list),
+                  result_list: Array.isArray(c?.result_list) ? c.result_list.slice() : (function(v){
+                    const src = (v!==undefined ? v : c.result);
+                    if(src==null) return [];
+                    if(Array.isArray(src)) return src.slice();
+                    if(typeof src==='object') return Object.values(src);
+                    return [src];
+                  })(c.result_list)
+                })).filter(t=> t.name);
+              }
+              const maidMsg = { role: 'assistant', kind: 'chat', snapshots: { parts: [part], current_index: 0 } };
+              if(toolContents && toolContents.length){ maidMsg.tool_contents = toolContents; }
               appendMessage(maidMsg);
               await persistMessage(maidMsg);
             }

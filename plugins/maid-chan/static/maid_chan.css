@@ -13,7 +13,7 @@
   cursor: pointer;
   user-select: none;
   overflow: hidden;
-  z-index: 5000;
+  z-index: 4000;
   transition: box-shadow .25s, transform .25s, opacity .25s, filter .25s;
 }
 .maid-chan-bubble:hover { box-shadow: 0 6px 18px rgba(0,0,0,.5); transform: translateY(-3px); }
@@ -28,7 +28,7 @@
 /* Quick menu under Maid-chan bubble */
 .maid-quick-menu {
   position: fixed;
-  z-index: 6005;
+  z-index: 5000;
   display: none;
   align-items: center;
   justify-content: center;
@@ -100,6 +100,31 @@
 .maid-chat-bubble.enter { animation: mcChatEnter .28s ease-out; }
 .maid-chat-container.left .maid-chat-bubble.enter { animation-name: mcChatEnterLeft; }
 .maid-chat-bubble.leaving { animation: mcChatLeave .35s ease-in forwards; }
+/* Maid chat loading placeholder inside chat panel */
+.maid-chan-chat-placeholder {
+  position: relative;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(90deg, #2a2b33, #3a3b44, #2a2b33);
+  background-size: 200% 100%;
+  animation: maidChanChatPlaceholderShimmer 1.2s ease-in-out infinite;
+  min-height: 48px;
+  overflow: hidden;
+}
+
+.maid-chan-chat-placeholder-timer {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  font-size: 11px;
+  opacity: .75;
+}
+
+@keyframes maidChanChatPlaceholderShimmer {
+  0% { background-position: 0% 0; }
+  50% { background-position: 100% 0; }
+  100% { background-position: 0% 0; }
+}
 @keyframes mcChatEnter { from { opacity: 0; transform: translateX(8px) translateY(-4px); } to { opacity: 1; transform: translateX(0) translateY(0); } }
 @keyframes mcChatLeave { from { opacity: 1; transform: translateX(0) translateY(0); } to { opacity: 0; transform: translateX(8px) translateY(-4px); } }
 @keyframes mcChatEnterLeft { from { opacity: 0; transform: translateX(-8px) translateY(-4px); } to { opacity: 1; transform: translateX(0) translateY(0); } }
@@ -120,7 +145,10 @@
 .maid-chan-modal {
   width: min(720px, 92vw);
   min-height: 260px;
-  max-height: 80vh;
+  /* Expand height closer to full viewport on wide screens */
+  /* Previously capped at 80vh; now we push near max while keeping a small breathing margin */
+  height: calc(100vh - 40px);
+  max-height: calc(100vh - 40px);
   background: #1e1f26;
   border-radius: 20px;
   box-shadow: 0 8px 28px rgba(0,0,0,.55);
@@ -132,6 +160,17 @@
   gap: 18px;
   overflow: hidden; /* keep content clipped; inner panels scroll */
 }
+
+@media (min-width: 1100px) {
+  /* On very wide screens allow even tighter fit */
+  .maid-chan-modal {
+    height: calc(100vh - 32px);
+    max-height: calc(100vh - 32px);
+  }
+}
+
+/* Ensure active tab panels fill vertical space and scroll internally */
+.maid-chan-tab-panel.active { flex: 1 1 auto; min-height: 0; }
 .maid-chan-modal h2 { margin: 0; font-size: 1.25rem; font-weight: 600; letter-spacing: .5px; }
 .maid-chan-modal h2 { display: flex; align-items: center; gap: 6px; }
 .maid-chan-title-input { 
@@ -228,10 +267,7 @@
 
 /* Panel card + placeholders */
 .maid-chan-panel-card {
-  background: linear-gradient(135deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
-  border: 1px solid rgba(255,255,255,.08);
   border-radius: 16px;
-  padding: 20px 22px;
   min-height: 140px;
   max-height: 100%;
   display: flex;
@@ -275,23 +311,75 @@
   gap: 8px;
   padding-right: 4px;
 }
+.maid-chan-chat-scroll[aria-hidden="true"] { display: none !important; }
 
 .maid-chan-chat-prompt-view {
   flex: 1 1 auto;
   overflow-y: auto;
-  background: rgba(0,0,0,.22);
   border-radius: 10px;
-  padding: 8px 10px;
 }
 
-.maid-chan-chat-prompt-text {
-  margin: 0;
+.maid-chan-chat-prompt-text { display: none; }
+
+/* Prompt view items */
+.maid-chan-prompt-item {
+  background: rgba(0,0,0,.18);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  font-family: Consolas, Menlo, Monaco, "Fira Code", monospace;
+  position: relative;
+}
+.maid-chan-prompt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  opacity: .75;
+  user-select: none;
+}
+.maid-chan-prompt-actions { display: inline-flex; align-items: center; gap: 4px; }
+.maid-chan-prompt-title { font-weight: 600; letter-spacing: .3px; }
+.maid-chan-prompt-toggle {
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 999px;
+  color: #bdbdc7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.maid-chan-prompt-toggle .material-symbols-outlined { font-size: 16px; }
+.maid-chan-prompt-toggle:hover { color: #ffffff; background: rgba(255,105,180,.18); }
+.maid-chan-prompt-copy {
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 999px;
+  color: #bdbdc7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.maid-chan-prompt-copy .material-symbols-outlined { font-size: 16px; }
+.maid-chan-prompt-copy:hover { color: #ffffff; background: rgba(255,105,180,.18); }
+.maid-chan-prompt-copy.is-copied { color: #34c759; }
+.maid-chan-prompt-body {
+  margin: 4px 0 0;
   white-space: pre-wrap;
   word-break: break-word;
   font-size: 12px;
   line-height: 1.4;
-  font-family: Consolas, Menlo, Monaco, "Fira Code", monospace;
+  font-family: inherit;
 }
+.maid-chan-prompt-item.is-collapsed .maid-chan-prompt-body { display: none; }
 
 
 .maid-chan-chat-item {
@@ -397,7 +485,7 @@
   right: 0;
   min-width: 200px;
   max-width: 360px;
-  background: linear-gradient(135deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+  background: linear-gradient(135deg, rgba(80, 80, 80, 0.9), rgba(39, 39, 39, 0.8));
   border: 1px solid rgba(255,255,255,.12);
   border-radius: 10px;
   box-shadow: 0 6px 18px rgba(0,0,0,.5);
@@ -406,6 +494,35 @@
 }
 .maid-chan-chat-tools-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .maid-chan-chat-tools-list li { font-size: 12px; color: #cbcad4; }
+
+/* Tool hint icons + toggle button inside chat tools popover */
+.material-symbols-outlined.maid-chan-tool-icon {
+  font-size: 16px;
+  line-height: 1;
+  color: #ffb0d3; /* align with pink accent used elsewhere */
+  margin-right: 4px;
+  font-variation-settings: 'OPSZ' 18, 'FILL' 0, 'GRAD' 0, 'wght' 500;
+}
+
+.maid-chan-tool-toggle {
+  border: none;
+  background: transparent;
+  padding: 2px 6px;
+  margin-left: 4px;
+  border-radius: 8px;
+  color: #bdbdc7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .2s ease, background .2s ease;
+  font-size: 12px;
+}
+.maid-chan-tool-toggle .material-symbols-outlined { font-size: 16px; line-height: 1; }
+.maid-chan-tool-toggle:hover { color: #ffffff; background: rgba(255,105,180,.18); }
+.maid-chan-tool-toggle:active { transform: translateY(1px); }
+.maid-chan-tool-toggle:focus { outline: 2px solid #ff6fa9; outline-offset: 2px; }
+.maid-chan-tool-toggle:disabled { opacity: .45; cursor: default; background: transparent; }
 
 /* Disabled state for snapshot/navigation buttons */
 .maid-chan-chat-btn.is-disabled,

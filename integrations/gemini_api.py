@@ -174,133 +174,138 @@ async def generate_text(
         return f"Error generating text: {e}"
 
 async def chat(
-    conversation: list[dict], 
-    model: str = "gemini-2.5-flash", 
-    temperature: float = None, 
-    max_tokens: int = None,
+    conversation: list[dict],
+    model: str = "gemini-2.5-flash-lite",
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
     user_api_key: Optional[str] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
     tool_mode: Optional[str] = None,
-) -> Any:
-    """Chat với Gemini API, sử dụng lịch sử hội thoại.
+    tool_executor: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    max_turns: int = 3,
+) -> Dict[str, Any]:
+    """
+    Multi-turn chat with optional tool-calling execution.
 
-    Hỗ trợ bổ sung function calling thông qua tham số ``tools`` và ``tool_mode``.
-    Khi có tools, hàm sẽ cấu hình tool_config theo spec của Gemini và trả về
-    một dict JSON thay vì chỉ plain text, ví dụ:
-
-    - {"type": "message", "text": "..."}
-    - {"type": "tool_call", "name": "...", "arguments": {...}}
+    - Accepts OpenAI-style messages ({role, content}) or Gemini-style ({role, parts}).
+    - On first round, passes tool declarations to the model. If the model responds
+      with a function_call, optionally executes it (when tool_executor is provided)
+      and sends a follow-up turn with function_response parts.
+    - Returns a dict containing at least {role, parts, text} on success, or an
+      error payload on failure.
     """
     client = _get_client(user_api_key)
 
-    # Build history contents except the last message (current user input).
-    # Fallback to `content` when `text` is absent, so upstream callers that use
-    # OpenAI-style {role, content} messages still work.
-    history_contents = []
-    for msg in conversation[:-1]:
-        try:
-            if not isinstance(msg, dict):
-                continue
-            role = "model" if msg.get("role") in ["assistant", "model"] else "user"
+    def _role_map(r: str) -> str:
+        return "model" if r in ("assistant", "model") else "user"
+
+    def _build_parts_from_msg(msg: Dict[str, Any]) -> List[Part]:
+        parts: List[Part] = []
+        raw_parts = msg.get("parts")
+        if isinstance(raw_parts, list) and raw_parts:
+            for p in raw_parts:
+                if isinstance(p, dict):
+                    if "text" in p:
+                        parts.append(Part(text=str(p.get("text", ""))))
+                    elif "function_call" in p and isinstance(p["function_call"], dict):
+                        fc = p["function_call"]
+                        name = str(fc.get("name", "")) if isinstance(fc.get("name"), (str, bytes)) else str(fc.get("name", ""))
+                        args = fc.get("args")
+                        # Leave args as plain dict; SDK will serialize
+                        parts.append(Part(function_call=types.FunctionCall(name=name, args=args or {})))
+                    elif "function_response" in p and isinstance(p["function_response"], dict):
+                        fr = p["function_response"]
+                        fname = str(fr.get("name", ""))
+                        resp = fr.get("response")
+                        parts.append(Part(function_response=types.FunctionResponse(name=fname, response=resp)))
+        else:
+            # Fallback to text/content fields
             txt = msg.get("text")
             if txt is None:
                 txt = msg.get("content", "")
-            history_contents.append(
-                Content(
-                    role=role,
-                    parts=[Part(text=str(txt or ""))],
-                )
-            )
-        except Exception as _e:  # noqa: BLE001
-            # Skip malformed history entry but continue gracefully.
-            continue
+            parts.append(Part(text=str(txt or "")))
+        return parts
 
-    try:
-        last_msg = conversation[-1] if conversation else {"role": "user", "text": ""}
+    # Work on a local copy of conversation, as we append model/tool messages.
+    history: List[Dict[str, Any]] = [dict(m) for m in (conversation or []) if isinstance(m, dict)]
 
-        # Base config with safety + sampling
+    for turn in range(max_turns):
+        # 1) Build request config
         config_kwargs: Dict[str, Any] = {"safety_settings": DEFAULT_SAFETY}
         if temperature is not None:
             config_kwargs["temperature"] = temperature
         if max_tokens is not None:
             config_kwargs["max_output_tokens"] = max_tokens
 
-        # Optional: map our tools (simple JSON schema-like) into Gemini tool declarations.
-        # Note: In the google-genai SDK, tools and tool_config are request-level args,
-        # not part of GenerateContentConfig. We therefore pass them to generate_content.
-        request_tools = None
-        request_tool_config = None
-        
-        def _schema_from_json(candidate: Any) -> types.Schema:
-            """Best-effort JSON Schema → Gemini Schema converter.
-            Handles OBJECT with nested properties and ARRAY with items.
-            Drops constraints like anyOf/oneOf/required for safety.
-            """
-            def _type_of(val: Any) -> str:
-                vt = str(val or "string").lower()
-                if vt == "string":
-                    return "STRING"
-                if vt == "number":
-                    return "NUMBER"
-                if vt == "integer":
-                    return "INTEGER"
-                if vt == "boolean":
-                    return "BOOLEAN"
-                if vt == "array":
-                    return "ARRAY"
-                if vt == "object":
+        # Only pass tools on the first call of this multi-turn exchange (via config, not top-level args)
+        if tools and turn == 0:
+            # Convert JSON Schema -> Gemini Schema (drop anyOf/required/oneOf etc.)
+            def _schema_from_json(candidate: Any) -> types.Schema:
+                def _type_of(val: Any) -> str:
+                    vt = str(val or "object").lower()
+                    if vt == "string":
+                        return "STRING"
+                    if vt == "number":
+                        return "NUMBER"
+                    if vt == "integer":
+                        return "INTEGER"
+                    if vt == "boolean":
+                        return "BOOLEAN"
+                    if vt == "array":
+                        return "ARRAY"
+                    if vt == "object":
+                        return "OBJECT"
                     return "OBJECT"
-                return "STRING"
 
-            try:
-                if not isinstance(candidate, dict):
+                try:
+                    if not isinstance(candidate, dict):
+                        return types.Schema(type="OBJECT")
+
+                    t = _type_of(candidate.get("type", "object")).upper()
+
+                    if t == "ARRAY":
+                        items_def = candidate.get("items")
+                        if isinstance(items_def, dict):
+                            return types.Schema(type="ARRAY", items=_schema_from_json(items_def))
+                        return types.Schema(type="ARRAY", items=types.Schema(type="STRING"))
+
+                    if t != "OBJECT":
+                        return types.Schema(type=t)
+
+                    props = candidate.get("properties") or {}
+                    prop_schemas: Dict[str, types.Schema] = {}
+                    if isinstance(props, dict):
+                        for key, val in props.items():
+                            if isinstance(val, dict):
+                                vtype = _type_of(val.get("type", "string"))
+                                if vtype == "ARRAY":
+                                    items_def = val.get("items")
+                                    if isinstance(items_def, dict):
+                                        prop_schemas[key] = types.Schema(type="ARRAY", items=_schema_from_json(items_def))
+                                    else:
+                                        prop_schemas[key] = types.Schema(type="ARRAY", items=types.Schema(type="STRING"))
+                                elif vtype == "OBJECT":
+                                    prop_schemas[key] = _schema_from_json(val)
+                                else:
+                                    prop_schemas[key] = types.Schema(type=vtype)
+                            else:
+                                prop_schemas[key] = types.Schema(type="STRING")
+
+                    # Intentionally ignore required/anyOf/oneOf to satisfy Gemini's schema constraints
+                    return types.Schema(type="OBJECT", properties=prop_schemas)
+                except Exception:
                     return types.Schema(type="OBJECT")
 
-                t = _type_of(candidate.get("type", "object")).upper()
-
-                if t == "ARRAY":
-                    items_def = candidate.get("items")
-                    if isinstance(items_def, dict):
-                        return types.Schema(type="ARRAY", items=_schema_from_json(items_def))
-                    # Default items to STRING to satisfy SDK requirement
-                    return types.Schema(type="ARRAY", items=types.Schema(type="STRING"))
-
-                if t != "OBJECT":
-                    return types.Schema(type=t)
-
-                props = candidate.get("properties") or {}
-                prop_schemas: Dict[str, types.Schema] = {}
-                if isinstance(props, dict):
-                    for key, val in props.items():
-                        if isinstance(val, dict):
-                            val_type = _type_of(val.get("type", "string"))
-                            if val_type == "ARRAY":
-                                items_def = val.get("items")
-                                if isinstance(items_def, dict):
-                                    prop_schemas[key] = types.Schema(type="ARRAY", items=_schema_from_json(items_def))
-                                else:
-                                    prop_schemas[key] = types.Schema(type="ARRAY", items=types.Schema(type="STRING"))
-                            elif val_type == "OBJECT":
-                                # Recurse into nested object
-                                prop_schemas[key] = _schema_from_json(val)
-                            else:
-                                prop_schemas[key] = types.Schema(type=val_type)
-                        else:
-                            prop_schemas[key] = types.Schema(type="STRING")
-
-                return types.Schema(type="OBJECT", properties=prop_schemas)
-            except Exception as _e:  # noqa: BLE001
-                return types.Schema(type="OBJECT")
-
-        if tools:
-            fn_decls: List[types.FunctionDeclaration] = []
-            for t in tools:
-                try:
-                    name = str(t.get("name") or "").strip()
+            try:
+                fn_decls: List[types.FunctionDeclaration] = []
+                for tdef in tools:
+                    if not isinstance(tdef, dict):
+                        continue
+                    name = str(tdef.get("name") or "").strip()
                     if not name:
                         continue
-                    description = t.get("description") or ""
-                    params = t.get("parameters") or {"type": "object"}
+                    description = tdef.get("description") or ""
+                    params = tdef.get("parameters") or {"type": "object"}
                     schema = _schema_from_json(params)
                     fn_decls.append(
                         types.FunctionDeclaration(
@@ -309,194 +314,130 @@ async def chat(
                             parameters=schema,
                         )
                     )
-                except Exception as e:  # noqa: BLE001
-                    print(f"[GeminiAPI] Skipping invalid tool definition {t}: {e}")
-
-            if fn_decls:
-                try:
-                    request_tools = [types.Tool(function_declarations=fn_decls)]
-                except Exception as e:  # noqa: BLE001
-                    print(f"[GeminiAPI] Failed to construct Tool list: {e}")
-
-                try:
-                    mode_val = (tool_mode or "AUTO").upper()
-                    if mode_val not in {"AUTO", "ANY", "NONE"}:
-                        mode_val = "AUTO"
-                    request_tool_config = types.ToolConfig(
-                        function_calling_config=types.FunctionCallingConfig(mode=mode_val)
-                    )
-                except Exception as e:  # noqa: BLE001
-                    print(f"[GeminiAPI] Failed to construct ToolConfig: {e}")
+                if fn_decls:
+                    config_kwargs["tools"] = [types.Tool(function_declarations=fn_decls)]
+            except Exception as e:  # noqa: BLE001
+                print(f"[GeminiAPI chat] Ignoring tools due to construction error: {e}")
 
         config = types.GenerateContentConfig(**config_kwargs)
 
-        # When tools are present, we always use the models.generate_content endpoint
-        # instead of the older chat_session API so we can access full candidates.
-        contents: List[Content] = list(history_contents)
-        # Current user message (or assistant if role provided). Support both text/content.
-        current_text = last_msg.get("text")
-        if current_text is None:
-            current_text = last_msg.get("content", "")
-        contents.append(
-            Content(
-                role="user" if last_msg.get("role") not in ["assistant", "model"] else "model",
-                parts=[Part(text=str(current_text or ""))],
-            )
-        )
+        # 2) Convert history to Content objects
+        contents: List[Content] = []
+        for msg in history:
+            try:
+                role = _role_map(str(msg.get("role", "user")))
+                parts = _build_parts_from_msg(msg)
+                contents.append(Content(role=role, parts=parts))
+            except Exception:
+                continue
 
+        # 3) Make API call
         try:
             response = await client.aio.models.generate_content(
                 model=model,
                 contents=contents,
                 config=config,
-                tools=request_tools,
-                tool_config=request_tool_config,
             )
-        except TypeError as te:
-            # Older SDKs may not accept top-level tools/tool_config; try embedding in config.
-            if "unexpected keyword argument 'tools'" in str(te) or "unexpected keyword argument 'tool_config'" in str(te):
-                try:
-                    config_with_tools_kwargs = dict(config_kwargs)
-                    if request_tools is not None:
-                        config_with_tools_kwargs["tools"] = request_tools
-                    if request_tool_config is not None:
-                        config_with_tools_kwargs["tool_config"] = request_tool_config
-                    config_with_tools = types.GenerateContentConfig(**config_with_tools_kwargs)
-                    response = await client.aio.models.generate_content(
-                        model=model,
-                        contents=contents,
-                        config=config_with_tools,
-                    )
-                except Exception as e_cfg:  # noqa: BLE001
-                    print(f"[GeminiAPI] Failed embedding tools into config: {e_cfg}. Falling back without tools.")
-                    response = await client.aio.models.generate_content(
-                        model=model,
-                        contents=contents,
-                        config=config,
-                    )
-            else:
-                raise
+        except Exception as e:  # noqa: BLE001
+            print(f"[GeminiAPI Error chat] Model: {model}, Error: {e}")
+            return {"role": "model", "text": f"An error occurred: {e}"}
 
-        # If no tools were requested, behave like old implementation: return plain text.
-        if not tools:
-            return getattr(response, "text", "")
-
-        # With tools enabled, inspect the first candidate for function calls.
+        # 4) Parse response content into a plain dict shape
         try:
-            candidates = getattr(response, "candidates", None) or []
-            if not candidates:
-                return {"type": "message", "text": getattr(response, "text", "")}
-            cand = candidates[0]
-            content = getattr(cand, "content", None)
-            parts = getattr(content, "parts", None) or []
-            # Collect any text parts for reply text (Gemini may include both function_call and natural language guidance).
-            reply_texts = []
-            for p in parts:
-                try:
-                    ptext = getattr(p, "text", None) or (p.get("text") if isinstance(p, dict) else None)
-                    if ptext:
-                        reply_texts.append(str(ptext))
-                except Exception:
-                    continue
-            for part in parts:
-                # New SDKs may expose function calls via attributes like function_call
-                fn_call = getattr(part, "function_call", None) or getattr(part, "functionCall", None)
-                if fn_call:
-                    # Fallback extraction of name/args supporting multiple SDK shapes
-                    name = None
-                    args = None
-                    # Attribute access
+            cand = response.candidates[0]
+            content = cand.content
+            parts_list: List[Dict[str, Any]] = []
+            for part in content.parts:
+                part_dict: Dict[str, Any] = {}
+                if hasattr(part, "text") and part.text:
+                    part_dict["text"] = part.text
+                if hasattr(part, "function_call") and part.function_call:
+                    fc = part.function_call
+                    # Normalize args to a plain dict
+                    args = {}
                     try:
-                        name = getattr(fn_call, "name", None)
+                        args = {k: v for k, v in getattr(fc, "args", {}).items()}
                     except Exception:
-                        name = None
+                        try:
+                            raw = getattr(fc, "args", None)
+                            if isinstance(raw, dict):
+                                args = dict(raw)
+                            elif isinstance(raw, str):
+                                args = json.loads(raw)
+                        except Exception:
+                            args = {}
+                    part_dict["function_call"] = {"name": getattr(fc, "name", None), "args": args}
+                if part_dict:
+                    parts_list.append(part_dict)
+
+            response_dict: Dict[str, Any] = {"role": content.role, "parts": parts_list}
+
+            # 5) Decide next step: tool call(s) or final text
+            parts_for_decision = response_dict.get("parts", [])
+            has_fc = any(isinstance(p, dict) and p.get("function_call") for p in parts_for_decision)
+            if has_fc:
+                # If no executor is provided, return tool_call(s) for the caller to handle
+                if not tool_executor:
+                    requested_calls = [
+                        p["function_call"]
+                        for p in parts_for_decision
+                        if isinstance(p, dict) and p.get("function_call")
+                    ]
+                    # Backward compatible single-call shape
+                    if len(requested_calls) == 1:
+                        fc = requested_calls[0] or {}
+                        name = fc.get("name")
+                        args = fc.get("args") or {}
+                        return {"type": "tool_call", "name": name, "arguments": args, "text": ""}
+                    # New multi-call shape: return all calls at once
+                    calls = []
+                    for fc in requested_calls:
+                        try:
+                            calls.append({
+                                "name": fc.get("name"),
+                                "arguments": (fc.get("args") or {}),
+                            })
+                        except Exception:
+                            pass
+                    return {"type": "tool_calls", "calls": calls, "text": ""}
+
+                # Append model tool request and respond with tool results (server-side execution)
+                history.append(response_dict)
+
+                requested_calls = [p["function_call"] for p in response_dict["parts"] if isinstance(p, dict) and p.get("function_call")]
+                tool_responses = []
+                for call in requested_calls:
                     try:
-                        args = getattr(fn_call, "args", None)
-                    except Exception:
-                        args = None
-                    # Alternate attribute names
-                    if not name:
-                        try:
-                            name = getattr(fn_call, "function_name", None)
-                        except Exception:
-                            pass
-                    if args is None:
-                        try:
-                            args = getattr(fn_call, "arguments", None)
-                        except Exception:
-                            pass
-                    # Dict style
-                    if isinstance(fn_call, dict):
-                        if not name:
-                            name = fn_call.get("name") or fn_call.get("function_name")
-                        if args is None:
-                            args = fn_call.get("args") or fn_call.get("arguments")
-                    # __dict__ fallback
-                    if (not name or args is None) and hasattr(fn_call, "__dict__"):
-                        try:
-                            rawd = fn_call.__dict__
-                            if not name:
-                                name = rawd.get("name") or rawd.get("function_name")
-                            if args is None:
-                                args = rawd.get("args") or rawd.get("arguments")
-                        except Exception:
-                            pass
-                    # Final guard: ensure name is a usable string
-                    if name is None:
-                        try:
-                            name = str(name) if name else None
-                        except Exception:
-                            name = None
-                    # Some SDKs encode args as JSON string; try to decode
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except Exception:  # noqa: BLE001
-                            pass
-                    # Ensure arguments are plain JSON-serializable primitives
-                    def _simplify(val):
-                        if isinstance(val, dict):
-                            return {k: _simplify(v) for k, v in val.items()}
-                        if isinstance(val, list):
-                            return [_simplify(v) for v in val]
-                        if isinstance(val, (str, int, float, bool)) or val is None:
-                            return val
-                        if hasattr(val, "__dict__"):
-                            try:
-                                return _simplify(vars(val))
-                            except Exception:  # noqa: BLE001
-                                return str(val)
-                        return str(val)
-                    safe_args = _simplify(args or {})
-                    raw_fc = getattr(part, "function_call", None) or getattr(part, "functionCall", None)
-                    # Convert raw function call object to a minimal dict to avoid Flask serialization errors
-                    if raw_fc and not isinstance(raw_fc, (dict, list, str, int, float, bool, type(None))):
-                        raw_fc = {
-                            "name": getattr(raw_fc, "name", None),
-                            "args": _simplify(getattr(raw_fc, "args", {})),
+                        result = tool_executor(call)
+                    except Exception as ex:
+                        result = {"error": str(ex)}
+                    tool_responses.append({
+                        "function_response": {
+                            "name": call.get("name"),
+                            "response": result,
                         }
-                    return {
-                        "type": "tool_call",
-                        "name": name,
-                        "arguments": safe_args,
-                        "raw": raw_fc,
-                        "text": "\n".join(reply_texts).strip() if reply_texts else "",
-                        "_debug_extraction": {
-                            "name_is_none": name is None,
-                            "raw_type": type(fn_call).__name__,
-                            "args_keys": list(safe_args.keys()) if isinstance(safe_args, dict) else None,
-                        },
-                    }
+                    })
 
-            # If no explicit function_call found, fallback to text message.
-            return {"type": "message", "text": getattr(response, "text", "")}
+                history.append({"role": "user", "parts": tool_responses})
+                # Continue next loop turn to let the model finish
+            else:
+                # Finalize with text aggregation
+                history.append(response_dict)
+                final_text = "".join(p.get("text", "") for p in response_dict.get("parts", []))
+                ret = dict(response_dict)
+                ret["text"] = final_text
+                return ret
+
         except Exception as parse_err:  # noqa: BLE001
-            print(f"[GeminiAPI] Failed to parse tool call response: {parse_err}")
-            return {"type": "message", "text": getattr(response, "text", "")}
+            # Fallback to response.text when parsing parts fails
+            try:
+                txt = getattr(response, "text", "")
+            except Exception:
+                txt = ""
+            return {"role": "model", "text": txt or f"Parse error: {parse_err}"}
 
-    except Exception as e:  # noqa: BLE001
-        print(f"[GeminiAPI Error chat] Model: {model}, Error: {e}")
-        return {"type": "error", "error": str(e)}
+    # Safety valve if we didn't return earlier
+    return {"role": "model", "text": "Reached max turns without a final answer."}
 
 async def stream_chat(
     conversation: list[dict],
