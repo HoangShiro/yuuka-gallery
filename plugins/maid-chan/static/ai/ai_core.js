@@ -163,7 +163,7 @@
     return tools;
   }
 
-  async function callLLMChat({ messages, signal, disableTools } = {}){
+  async function callLLMChat({ messages, signal, disableTools, allowedTools, customTools, settings } = {}){
     const cfg = loadLLMConfig();
     const provider = cfg.provider || 'openai';
     const model = cfg.model || '';
@@ -182,14 +182,39 @@
       max_tokens: typeof cfg.max_tokens === 'number' ? cfg.max_tokens : 512
     };
 
+    // Apply per-node settings overrides (from LLM settings nodes)
+    if(settings && typeof settings === 'object'){
+      if(settings.model) payload.model = settings.model;
+      if(settings.provider) payload.provider = settings.provider;
+      if(Number.isFinite(settings.temperature)) payload.temperature = settings.temperature;
+      if(Number.isFinite(settings.top_p)) payload.top_p = settings.top_p;
+      if(Number.isFinite(settings.max_tokens)) payload.max_tokens = settings.max_tokens;
+    }
+
     // When using Gemini, attach tools built from capabilities so the model
     // can perform function calling. Other providers simply ignore this field.
     // Support explicit disabling of tools in final stage
     if(provider === 'gemini' && !disableTools){
-      const tools = buildToolsFromCapabilities();
+      let tools = buildToolsFromCapabilities();
+      if(Array.isArray(allowedTools)){
+        const allowSet = new Set(allowedTools.filter(Boolean).map(String));
+        if(allowSet.size === 0){
+          // Explicitly connected Tools Control but empty selection -> disable all tools
+          payload.tool_mode = 'none';
+        }else{
+          tools = tools.filter(t => allowSet.has(t.name));
+        }
+      }
+      // Merge custom tools from upstream nodes (e.g., Choice)
+      if(Array.isArray(customTools) && customTools.length){
+        tools = tools.concat(customTools);
+      }
       if(tools.length){
         payload.tools = tools;
         payload.tool_mode = 'auto';
+      } else if(payload.tool_mode !== 'none'){
+        // No tools available after filtering
+        payload.tool_mode = 'none';
       }
     }else if(provider === 'gemini' && disableTools){
       // Explicitly disable tools for this round
@@ -222,6 +247,16 @@
   }
 
   async function askMaid(text, opts = {}){
+    // Optional routing through AILogic when enabled
+    try{
+      const AILogic = (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.AILogic) || null;
+      if(AILogic && typeof AILogic.isEnabled === 'function' && typeof AILogic.execute === 'function' && AILogic.isEnabled()){
+        const r = await AILogic.execute({ text, context: opts.context || {}, history: opts.history || [], signal: opts.signal });
+        if(r && r.__maidLogicHandled){
+          return r.response || r;
+        }
+      }
+    }catch(_e){ /* ignore and fallback to legacy flow */ }
     const base = buildBasePrompt(opts.context || {});
     const systemMsg = { role: 'system', content: typeof base === 'string' ? base : (base.prompt || '') };
 

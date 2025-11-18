@@ -11,12 +11,18 @@
   },
   "assets": {
     "js": [
+      "node/input.js",
+      "node/process.js",
+      "node/output.js",
+      "plugin.js",
       "ai/maid_storage.js",
       "ai/ai_core.js",
+      "ai/ai_logic.js",
       "main/chat_panel.js",
       "settings/avatar.js",
       "settings/llm_api.js",
       "main/prompt_suggest.js",
+      "main/logic_ui.js",
       "main/index.js",
       "modal.js",
       "maid_chan.js",

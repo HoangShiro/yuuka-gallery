@@ -9,6 +9,13 @@
   // Optional helpers from AI namespace (if loaded)
   const MaidStorage = (window.Yuuka.ai && window.Yuuka.ai.MaidStorage) || null;
   const MaidCore = (window.Yuuka.ai && window.Yuuka.ai.MaidCore) || null;
+  const AILogic = (window.Yuuka.ai && window.Yuuka.ai.AILogic) || null;
+
+  function isLogicEnabled(){
+    try{
+      return !!(AILogic && typeof AILogic.isEnabled === 'function' && AILogic.isEnabled());
+    }catch(_e){ return false; }
+  }
 
   // Backend helper: always ưu tiên API client có kèm auth token
   function getPluginApi(){
@@ -532,11 +539,14 @@
         max_tokens: typeof cfg.max_tokens === 'number' ? cfg.max_tokens : 512
       };
 
-      // Prefer two-stage orchestration via MaidCore.askMaid for regen
+      // Prefer AILogic when enabled; suppress persistence because regen should append snapshot to existing message id
       const MaidCoreDynamic = (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore) || MaidCore;
-      const callPromise = (MaidCoreDynamic && typeof MaidCoreDynamic.askMaid === 'function')
-        ? MaidCoreDynamic.askMaid(lastUserText || 'Please continue.', { history: historyForApi, maxStages: 2, forceDisableAfterFirst: true })
-        : apiPost('/api/plugin/maid/chat', payload);
+      const logicOn = isLogicEnabled();
+      const callPromise = (logicOn && AILogic && typeof AILogic.execute === 'function')
+        ? AILogic.execute({ text: lastUserText || 'Please continue.', history: historyForApi, suppressPersistence: true })
+        : ((MaidCoreDynamic && typeof MaidCoreDynamic.askMaid === 'function')
+            ? MaidCoreDynamic.askMaid(lastUserText || 'Please continue.', { history: historyForApi, maxStages: 2, forceDisableAfterFirst: true })
+            : apiPost('/api/plugin/maid/chat', payload));
 
       return Promise.resolve(callPromise).then(res => {
         snap.pending = false;
@@ -545,24 +555,25 @@
         let usedTools = [];
         // Default tool results text placeholder for alignment
         let regenToolResultsText = '';
-        if(typeof res === 'string') assistantText = res;
-        else if(res && typeof res === 'object'){
-          assistantText = res.text || res.message || res.content || '';
-          if(!assistantText && Array.isArray(res.choices) && res.choices[0]?.message?.content){
-            assistantText = res.choices[0].message.content;
+        const out = (res && res.response) ? res.response : res;
+        if(typeof out === 'string') assistantText = out;
+        else if(out && typeof out === 'object'){
+          assistantText = out.text || out.message || out.content || '';
+          if(!assistantText && Array.isArray(out.choices) && out.choices[0]?.message?.content){
+            assistantText = out.choices[0].message.content;
           }
-          if(!assistantText && Array.isArray(res.candidates) && res.candidates[0]?.content?.parts?.length){
-            const p0 = res.candidates[0].content.parts[0];
+          if(!assistantText && Array.isArray(out.candidates) && out.candidates[0]?.content?.parts?.length){
+            const p0 = out.candidates[0].content.parts[0];
             if(typeof p0.text === 'string') assistantText = p0.text;
           }
-          if(Array.isArray(res.used_tools)) usedTools = res.used_tools;
+          if(Array.isArray(out.used_tools)) usedTools = out.used_tools;
           // Capture tool_results_text from LLM response (multi-stage Gemini orchestration)
-          regenToolResultsText = (typeof res.tool_results_text === 'string' && res.tool_results_text.trim()) ? res.tool_results_text.trim() : '';
+          regenToolResultsText = (typeof out.tool_results_text === 'string' && out.tool_results_text.trim()) ? out.tool_results_text.trim() : '';
           // Derive used_tools when Gemini returns a tool_call
           try{
             const isGem = (payload.provider||'').toLowerCase() === 'gemini';
-            if(isGem && res.type === 'tool_call' && res.name){
-              const fnName = String(res.name).trim();
+            if(isGem && out.type === 'tool_call' && out.name){
+              const fnName = String(out.name).trim();
               // Resolve capability by llmName/id from capabilities service
               const capsSvc = window.Yuuka?.services?.capabilities;
               let cap = null;
@@ -1224,6 +1235,10 @@
 
     const persistMessage = async (msg)=>{
       try{
+        // When AI Logic is enabled, let the logic pipeline (graph) handle persistence via "Save history" node.
+        if(isLogicEnabled()){
+          return; // skip legacy persistence to avoid duplicates
+        }
         if(MaidStorage && typeof MaidStorage.appendMessage === 'function'){
           await MaidStorage.appendMessage(msg);
         }else{
@@ -1245,15 +1260,19 @@
         const msg = { role: 'user', text: raw, kind: 'chat', timestamp: now };
         input.value = '';
         appendMessage(msg);
+        // In logic mode, persistence is managed by graph (Save history). Skip legacy save.
         await persistMessage(msg);
 
         // Optionally ask Maid-chan via LLM core and append assistant reply
         // Lấy MaidCore dynamic tại thời điểm send để tránh vấn đề thứ tự load script
         const MaidCoreDynamic = (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore) || MaidCore;
-        if(MaidCoreDynamic && typeof MaidCoreDynamic.askMaid === 'function'){
+        const logicOn = isLogicEnabled();
+        if(logicOn || (MaidCoreDynamic && typeof MaidCoreDynamic.askMaid === 'function')){
           try{
             // Build history strictly using snapshots for assistant
-            const history = state.messages.map(m => {
+            // If logic is enabled, exclude the just-appended user message from history, since we pass `text` separately.
+            const sourceMessages = logicOn ? state.messages.slice(0, Math.max(0, state.messages.length - 1)) : state.messages;
+            const history = sourceMessages.map(m => {
               if(m.role === 'assistant'){
                 const s = getSnapshotState(m) || ensureSnapshotForMessage(m);
                 if(s && Array.isArray(s.entries) && typeof s.activeIndex === 'number'){
@@ -1325,8 +1344,20 @@
               timerId,
               timeoutId
             };
-
-            const result = await MaidCoreDynamic.askMaid(raw, { history });
+            let result = null;
+            if(logicOn && AILogic && typeof AILogic.execute === 'function'){
+              // Pre-generate assistant message id so AILogic can persist using the same id
+              const assistantId = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+              const r = await AILogic.execute({ text: raw, history, userMessageId: msg.id, assistantMessageId: assistantId });
+              // AILogic returns { __maidLogicHandled, response }
+              result = (r && (r.response || r)) || null;
+              // Attach the predetermined id to be used by UI append
+              if(result && typeof result === 'object'){
+                result._maid_assistant_id = assistantId;
+              }
+            } else {
+              result = await MaidCoreDynamic.askMaid(raw, { history });
+            }
 
             // if we got result before timeout, clear placeholder & timers
             const la = state.loadingAssistant;
@@ -1391,9 +1422,11 @@
                   })(c.result_list)
                 })).filter(t=> t.name);
               }
-              const maidMsg = { role: 'assistant', kind: 'chat', snapshots: { parts: [part], current_index: 0 } };
+              const predefinedId = (result && typeof result === 'object' && result._maid_assistant_id) ? result._maid_assistant_id : undefined;
+              const maidMsg = { id: predefinedId, role: 'assistant', kind: 'chat', snapshots: { parts: [part], current_index: 0 } };
               if(toolContents && toolContents.length){ maidMsg.tool_contents = toolContents; }
               appendMessage(maidMsg);
+              // In logic mode, persistence is handled by graph. Skip legacy save.
               await persistMessage(maidMsg);
             }
           }catch(err){
@@ -1454,8 +1487,12 @@
           kind: message.kind || 'event',
           timestamp: message.timestamp || Date.now()
         };
+        // Support pushing assistant with snapshots/tool info from AI Logic UI
+        if(message.snapshots && message.snapshots.parts){ msg.snapshots = message.snapshots; }
+        if(Array.isArray(message.tool_contents)){ msg.tool_contents = message.tool_contents; }
         appendMessage(msg);
-        persistMessage(msg);
+        // When logic mode is enabled, do not persist pushes; assume logic handled it.
+        if(!isLogicEnabled()) persistMessage(msg);
       },
       scrollToBottom(){
         if(!scrollBox) return;

@@ -470,6 +470,60 @@
           });
         });
       }
+
+      // Ensure Logic UI feature is present even if its module hasn't loaded yet
+      try{
+        const hasLogic = registry.some(d=> d && d.id === 'logic_ui');
+        if(!hasLogic){
+          const computeStaticBase = ()=>{
+            try{
+              const scripts = Array.from(document.querySelectorAll('script[src]'));
+              for(const s of scripts){
+                const src = s.getAttribute('src');
+                if(!src) continue;
+                const i = src.indexOf('/static/');
+                if(i > 0 && src.includes('maid-chan')){
+                  return src.slice(0, i + '/static'.length);
+                }
+              }
+            }catch(_e){}
+            // Fallback guess
+            return '/plugins/maid-chan/static';
+          };
+
+          registerPersistent({
+            id: 'logic_ui',
+            title: 'AI Logic Editor',
+            description: 'Configure a node-based workflow that routes LLM requests. Toggle ON to enable routing via this logic instead of legacy.',
+            defaultEnabled: false,
+            mount(el){
+              const wrap = document.createElement('div');
+              const p = document.createElement('div'); p.style.marginBottom='8px'; p.textContent = 'Edit how Maid-chan builds prompts, uses tools, and routes outputs.';
+              const btn = document.createElement('button'); btn.className = 'maid-chan-chat-btn'; btn.textContent = 'Open Logic Editor';
+              btn.addEventListener('click', ()=>{
+                const openFn = ()=> window.Yuuka?.components?.MaidChanLogicUI?.open?.();
+                if(openFn){ openFn(); return; }
+                // Lazy-load the module
+                const base = computeStaticBase();
+                const url = base + '/main/logic_ui.js';
+                const s = document.createElement('script'); s.src = url; s.async = true;
+                s.onload = ()=>{
+                  try{ window.Yuuka?.components?.MaidChanLogicUI?.open?.(); }catch(_e){}
+                };
+                s.onerror = ()=>{
+                  try{
+                    const status = document.createElement('div'); status.style.marginTop='6px'; status.style.opacity='.8'; status.textContent = 'Failed to load logic UI script: ' + url;
+                    wrap.appendChild(status);
+                  }catch(_e){}
+                };
+                document.head.appendChild(s);
+              });
+              wrap.appendChild(p); wrap.appendChild(btn); el.appendChild(wrap);
+            },
+            unmount(el){ while(el.firstChild) el.removeChild(el.firstChild); }
+          });
+        }
+      }catch(_e){ /* ignore fallback feature errors */ }
     }
 
     // Initialize Ability tab: grouped capability list with toggles (styled like Main tab)
