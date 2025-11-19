@@ -1,0 +1,177 @@
+{
+    "nodes": [
+      {
+        "id": "n1",
+        "type": "Maid Persona",
+        "x": 80.59926484409725,
+        "y": -38.23219802602337,
+        "data": {},
+        "w": 271.4195049349416,
+        "h": 196.28463614289106
+      },
+      {
+        "id": "n2",
+        "type": "User Persona",
+        "x": 360.59926484409726,
+        "y": -38.23219802602337,
+        "data": {}
+      },
+      {
+        "id": "n3",
+        "type": "Chat Samples",
+        "x": -77.11609901301168,
+        "y": 201.44195049349415,
+        "data": {},
+        "w": 313.99632422048626,
+        "h": 150
+      },
+      {
+        "id": "n4",
+        "type": "Custom Prompt",
+        "x": 600.0150939995251,
+        "y": -39.60681184385979,
+        "data": {
+          "text": "Respond to user's last request briefly, keeping in character."
+        }
+      },
+      {
+        "id": "n5",
+        "type": "LLM",
+        "x": 438.09535000804533,
+        "y": 323.58290277852274,
+        "data": {}
+      },
+      {
+        "id": "n7",
+        "type": "Save history",
+        "x": 881.0986734642531,
+        "y": 320.33354925784056,
+        "data": {}
+      },
+      {
+        "id": "n4v4tzag",
+        "type": "Preview",
+        "x": 842.1853771180805,
+        "y": 560.5803948618537,
+        "data": {}
+      },
+      {
+        "id": "nrv03y7g",
+        "type": "LLM loader",
+        "x": -39.104980856254144,
+        "y": 562.6548048184947,
+        "data": {
+          "model": "",
+          "temperature": 0.7,
+          "top_p": 1,
+          "max_tokens": 512
+        }
+      },
+      {
+        "id": "nt8xn28i",
+        "type": "Read history",
+        "x": -74.25831936408969,
+        "y": 364.2285222465096,
+        "data": {
+          "maxItems": 20
+        }
+      },
+      {
+        "id": "n50y50f7",
+        "type": "User Input",
+        "x": 844,
+        "y": 117.5871880839961,
+        "data": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "fromNodeId": "n1",
+        "fromPort": 0,
+        "toNodeId": "n5",
+        "toPort": 0,
+        "index": 1
+      },
+      {
+        "id": "e2",
+        "fromNodeId": "n2",
+        "fromPort": 0,
+        "toNodeId": "n5",
+        "toPort": 0,
+        "index": 2
+      },
+      {
+        "id": "e3",
+        "fromNodeId": "n4",
+        "fromPort": 0,
+        "toNodeId": "n5",
+        "toPort": 0,
+        "index": 3
+      },
+      {
+        "id": "e4",
+        "fromNodeId": "n3",
+        "fromPort": 0,
+        "toNodeId": "n5",
+        "toPort": 1,
+        "index": 1
+      },
+      {
+        "id": "e6",
+        "fromNodeId": "n5",
+        "fromPort": 0,
+        "toNodeId": "n7",
+        "toPort": 0,
+        "index": 2
+      },
+      {
+        "id": "erj3ly7a",
+        "fromNodeId": "nrv03y7g",
+        "fromPort": 0,
+        "toNodeId": "n5",
+        "toPort": 3,
+        "index": 1
+      },
+      {
+        "id": "esn53ekk",
+        "fromNodeId": "n5",
+        "fromPort": 0,
+        "toNodeId": "n4v4tzag",
+        "toPort": 1,
+        "index": 1
+      },
+      {
+        "id": "e3prwyt7",
+        "fromNodeId": "n5",
+        "fromPort": 0,
+        "toNodeId": "n4v4tzag",
+        "toPort": 0,
+        "index": 1
+      },
+      {
+        "id": "epecx6u4",
+        "fromNodeId": "nt8xn28i",
+        "fromPort": 0,
+        "toNodeId": "n5",
+        "toPort": 1,
+        "index": 2
+      },
+      {
+        "id": "e5303fua",
+        "fromNodeId": "n50y50f7",
+        "fromPort": 0,
+        "toNodeId": "n5",
+        "toPort": 1,
+        "index": 3
+      },
+      {
+        "id": "empi1eit",
+        "fromNodeId": "n50y50f7",
+        "fromPort": 0,
+        "toNodeId": "n7",
+        "toPort": 0,
+        "index": 1
+      }
+    ]
+  }

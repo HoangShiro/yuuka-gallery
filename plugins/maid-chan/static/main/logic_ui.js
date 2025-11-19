@@ -489,7 +489,7 @@
     return stage;
   }
 
-  function openEditor(){
+  async function openEditor(){
     const overlay = document.createElement('div'); overlay.className='mc-logic-overlay';
     const toolbar = document.createElement('div'); toolbar.className='mc-logic-toolbar';
     // Preset management UI (autosave mode)
@@ -648,7 +648,7 @@
     function newId(){ return 'p' + Math.random().toString(36).slice(2,9); }
 
     // Build a fresh default graph (do not depend on existing storage)
-    function buildDefaultGraph(){
+    function getLocalDefaultGraph(){
       return {
         nodes: [
           { id:'n1', type:'Maid Persona', x:80, y:120, data:getDefaultNodeData('Maid Persona') },
@@ -672,11 +672,30 @@
       };
     }
 
+    async function fetchDefaultGraph(){
+      try{
+        const res = await fetch('/plugins/maid-chan/static/presets/default.json');
+        if(!res.ok) throw new Error('Status ' + res.status);
+        const json = await res.json();
+        if(json && Array.isArray(json.nodes)){
+          for(const n of json.nodes){
+            if(!n.data || Object.keys(n.data).length === 0){
+              n.data = getDefaultNodeData(n.type);
+            }
+          }
+        }
+        return json;
+      }catch(e){
+        console.warn('Failed to fetch default preset, using local fallback', e);
+        return getLocalDefaultGraph();
+      }
+    }
+
     // Initialize presets (migrate from single GRAPH_KEY if needed)
     let presetList = listPresets();
     let activePresetId = currentPresetId();
     if(!presetList.length){
-      const initialGraph = loadGraph() || buildDefaultGraph();
+      const initialGraph = loadGraph() || await fetchDefaultGraph();
       const id = newId();
       presetList = [{ id, name: 'Default' }];
       savePresetList(presetList);
@@ -698,7 +717,7 @@
     refreshPresetSelect();
 
     // Load active graph
-    let graph = loadPresetGraph(activePresetId) || buildDefaultGraph();
+    let graph = loadPresetGraph(activePresetId) || await fetchDefaultGraph();
 
     // Unified autosave: save active graph to preset and global key
     function persistGraph(){
@@ -820,10 +839,24 @@
       // Position grid so content roughly centered within it.
       const gx = (b.x - pad);
       const gy = (b.y - pad);
+      
+      // Update Grid
       grid.style.width = w + 'px';
       grid.style.height = h + 'px';
       grid.style.left = gx + 'px';
       grid.style.top = gy + 'px';
+      grid.style.backgroundPosition = `${-gx}px ${-gy}px`;
+
+      // Update SVG to match Grid (dynamic canvas size)
+      if(svg){
+        svg.style.left = gx + 'px';
+        svg.style.top = gy + 'px';
+        svg.style.width = w + 'px';
+        svg.style.height = h + 'px';
+        svg.style.right = 'auto';
+        svg.style.bottom = 'auto';
+        svg.setAttribute('viewBox', `${gx} ${gy} ${w} ${h}`);
+      }
     }
 
     const onDataChange = ()=>{ persistGraph(); redraw(); };
@@ -974,11 +1007,11 @@
     setTimeout(redraw, 0);
 
     // Preset events
-    presetsSelect.addEventListener('change', ()=>{
+    presetsSelect.addEventListener('change', async ()=>{
       const sel = presetsSelect.value;
       if(!sel || sel === activePresetId) return;
       activePresetId = sel; setCurrentPreset(activePresetId);
-      graph = loadPresetGraph(activePresetId) || buildDefaultGraph();
+      graph = loadPresetGraph(activePresetId) || await fetchDefaultGraph();
       // Rebuild UI
       for(const [,nodeEl] of nodeEls){ nodeEl.remove(); }
       nodeEls.clear();
@@ -991,11 +1024,11 @@
       redraw();
     });
 
-    btnNew.addEventListener('click', ()=>{
+    btnNew.addEventListener('click', async ()=>{
       const name = (prompt('New preset name:', 'Preset ' + (presetList.length+1)) || '').trim();
       if(!name) return;
       const id = newId();
-      const newGraph = buildDefaultGraph();
+      const newGraph = await fetchDefaultGraph();
       presetList.push({ id, name }); savePresetList(presetList);
       savePresetGraph(id, newGraph);
       activePresetId = id; setCurrentPreset(id);
@@ -1013,7 +1046,7 @@
       redraw();
     });
 
-    btnDelete.addEventListener('click', ()=>{
+    btnDelete.addEventListener('click', async ()=>{
       if(!activePresetId) return;
       const p = presetList.find(p=>p.id===activePresetId);
       if(!confirm(`Delete preset "${p ? (p.name||p.id) : activePresetId}"?`)) return;
@@ -1022,11 +1055,11 @@
       try{ window.localStorage.removeItem(presetKey(activePresetId)); }catch(_e){}
       // Pick next active or create default
       if(!presetList.length){
-        const id = newId(); const def = buildDefaultGraph();
+        const id = newId(); const def = await fetchDefaultGraph();
         presetList = [{ id, name: 'Default' }]; savePresetList(presetList);
         savePresetGraph(id, def); activePresetId = id; setCurrentPreset(id); graph = def;
       }else{
-        activePresetId = presetList[0].id; setCurrentPreset(activePresetId); graph = loadPresetGraph(activePresetId) || buildDefaultGraph();
+        activePresetId = presetList[0].id; setCurrentPreset(activePresetId); graph = loadPresetGraph(activePresetId) || await fetchDefaultGraph();
       }
       refreshPresetSelect();
       // Rebuild UI
