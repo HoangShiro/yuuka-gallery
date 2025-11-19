@@ -21,36 +21,95 @@
     type: 'Maid Persona',
     category: 'input',
     personaKey: 'maid-chan:persona:aboutMaid',
-    ports: { inputs: [], outputs: [ { id:'prompt', label:'Prompt' } ] },
+    ports: { inputs: [], outputs: [ { id:'system_prompt', label:'System Prompt' } ] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl){ buildPersonaReadonly(bodyEl, 'maid-chan:persona:aboutMaid', 'Maid Persona (read-only)'); },
-    execute(ctx){ /* stub: returns prompt text */ return { prompt: window.localStorage.getItem('maid-chan:persona:aboutMaid')||'' }; }
+    execute(ctx){ /* stub: returns prompt text */ return { system_prompt: window.localStorage.getItem('maid-chan:persona:aboutMaid')||'' }; }
   });
 
   add({
     type: 'User Persona',
     category: 'input',
     personaKey: 'maid-chan:persona:aboutUser',
-    ports: { inputs: [], outputs: [ { id:'prompt', label:'Prompt' } ] },
+    ports: { inputs: [], outputs: [ { id:'system_prompt', label:'System Prompt' } ] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl){ buildPersonaReadonly(bodyEl, 'maid-chan:persona:aboutUser', 'User Persona (read-only)'); },
-    execute(ctx){ return { prompt: window.localStorage.getItem('maid-chan:persona:aboutUser')||'' }; }
+    execute(ctx){ return { system_prompt: window.localStorage.getItem('maid-chan:persona:aboutUser')||'' }; }
   });
 
   add({
     type: 'Chat Samples',
     category: 'input',
     personaKey: 'maid-chan:persona:chatSamples',
-    ports: { inputs: [], outputs: [ { id:'history', label:'History' } ] },
+    ports: { inputs: [], outputs: [ { id:'messages', label:'Messages' } ] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl){ buildPersonaReadonly(bodyEl, 'maid-chan:persona:chatSamples', 'Chat Samples (read-only)'); },
-    execute(ctx){ return { history: window.localStorage.getItem('maid-chan:persona:chatSamples')||'' }; }
+    execute(ctx){
+      // Parse chat samples into message objects
+      let raw = window.localStorage.getItem('maid-chan:persona:chatSamples')||'';
+      // Try parsing as JSON
+      try {
+        const parsed = JSON.parse(raw);
+        if(Array.isArray(parsed)) return { messages: parsed };
+        if(typeof parsed === 'object' && parsed !== null) return { messages: [parsed] };
+        // If it's a string, it means the content was stringified. Use the parsed string as the raw text.
+        if(typeof parsed === 'string') raw = parsed;
+      } catch(e){}
+      
+      // Fallback: try parsing text format (User: ... Char: ...)
+      // Simple regex-based parser for common formats
+      const lines = raw.split(/\r?\n/);
+      const messages = [];
+      let currentRole = null;
+      let currentContent = [];
+      
+      const flush = () => {
+        if(currentRole && currentContent.length){
+          messages.push({ role: currentRole, content: currentContent.join('\n').trim() });
+        }
+        currentContent = [];
+      };
+
+      for(const line of lines){
+        // Check for role markers like "User:", "Char:", "You:", "Maid:", "{{user}}:", "{{char}}:"
+        // We map them to 'user' or 'assistant'
+        // Allow optional leading whitespace
+        const match = line.match(/^\s*(\{\{)?(User|You|Char|Character|Maid|Model|Assistant|System)(\}\})?:\s*(.*)$/i);
+        if(match){
+          flush();
+          const r = match[2].toLowerCase();
+          if(r === 'user' || r === 'you') currentRole = 'user';
+          else if(r === 'system') currentRole = 'system';
+          else currentRole = 'assistant';
+          
+          // match[4] is the content part
+          if(match[4]) currentContent.push(match[4]);
+        } else {
+          if(currentRole) currentContent.push(line);
+          else {
+            // If no role started yet, treat as system or user? 
+            // If it's the very beginning, maybe treat as user if it doesn't look like a header?
+            // For safety, let's just append to a default user block if we haven't started.
+            if(line.trim()){
+                if(messages.length === 0 && !currentRole) currentRole = 'user';
+                currentContent.push(line);
+            }
+          }
+        }
+      }
+      flush();
+
+      if(messages.length > 0) return { messages };
+
+      // If parsing failed to produce structured messages, return raw string
+      return { messages: raw };
+    }
   });
 
   add({
     type: 'Custom Prompt',
     category: 'input',
-    ports: { inputs: [], outputs: [ { id:'prompt', label:'Prompt' } ] },
+    ports: { inputs: [], outputs: [ { id:'system_prompt', label:'System Prompt' } ] },
     defaultData(){ return { text: '' }; },
     buildConfigUI(bodyEl, node, {onDataChange}){
       const ta = document.createElement('textarea');
@@ -60,7 +119,7 @@
       ta.addEventListener('change', ()=>{ node.data = node.data||{}; node.data.text = ta.value; if(onDataChange) onDataChange(); });
       bodyEl.appendChild(ta);
     },
-    execute(ctx){ return { prompt: (ctx.node.data && ctx.node.data.text) || '' }; }
+    execute(ctx){ return { system_prompt: (ctx.node.data && ctx.node.data.text) || '' }; }
   });
 
   // Represents the current user's input text (the prompt being sent).
@@ -68,12 +127,13 @@
   add({
     type: 'User Input',
     category: 'input',
-    ports: { inputs: [], outputs: [ { id:'history', label:'History' } ] },
+    ports: { inputs: [], outputs: [ { id:'messages', label:'Messages' } ] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl){ /* intentionally blank */ },
     execute(ctx){
-      // Execution at design time is a stub; runtime substitution happens in ai_logic.js.
-      return { history: '' };
+      // Return the text provided in the execution context (from user input)
+      const text = (ctx && ctx.text) || '';
+      return { messages: text ? [{ role: 'user', content: text }] : [] };
     }
   });
 
@@ -83,7 +143,7 @@
   add({
     type: 'User Input SM',
     category: 'input',
-    ports: { inputs: [], outputs: [ { id:'history', label:'History' } ] },
+    ports: { inputs: [], outputs: [ { id:'messages', label:'Messages' } ] },
     defaultData(){ return { text: '' }; },
     buildConfigUI(bodyEl, node, { onDataChange }){
       const lab = document.createElement('div');
@@ -102,7 +162,8 @@
       bodyEl.appendChild(ta);
     },
     execute(ctx){
-      return { history: (ctx.node.data && ctx.node.data.text) || '' };
+      const text = (ctx.node.data && ctx.node.data.text) || '';
+      return { messages: text ? [{ role: 'user', content: text }] : [] };
     }
   });
 
@@ -110,9 +171,10 @@
   add({
     type: 'Read history',
     category: 'input',
-    ports: { inputs: [], outputs: [ { id:'history', label:'History' } ] },
+    ports: { inputs: [], outputs: [ { id:'messages', label:'Messages' } ] },
     defaultData(){ return { maxItems: 20 }; },
     buildConfigUI(bodyEl, node, {onDataChange}){
+      // ...existing code...
       // Helper: backend API client (if available)
       function getPluginApi(){
         const root = window.Yuuka || {};
@@ -223,26 +285,80 @@
         if(!items.length){ const empty = document.createElement('div'); empty.className='mc-history-item'; empty.textContent='(no history)'; container.appendChild(empty); }
       }
     },
-    execute(ctx){
-      try {
-        const raw = window.localStorage.getItem('maid-chan:history-log');
-        const arr = raw? JSON.parse(raw): [];
-        const max = (ctx.node.data && ctx.node.data.maxItems) || 20;
-        const recent = arr.slice(-max);
-        // Provide concatenated text; ai_logic will split or treat as block.
-        const combined = recent.map(i=> i.msg || '').join('\n');
-        return { history: combined };
-      }catch(e){ return { history: '' }; }
+    async execute(ctx){
+      // Try to fetch from backend first (async)
+      const max = (ctx.node.data && ctx.node.data.maxItems) || 20;
+      
+      // Helper to fetch from backend
+      const fetchHistory = async () => {
+        try{
+            const root = window.Yuuka || {};
+            const ns = root.plugins && root.plugins['maid-chan'];
+            const coreApi = ns && ns.coreApi;
+            if(coreApi && typeof coreApi.createPluginApiClient === 'function'){
+                coreApi.createPluginApiClient('maid');
+                const client = coreApi.maid;
+                if(client && typeof client.get === 'function'){
+                    const res = await client.get('/chat/history');
+                    return Array.isArray(res?.items) ? res.items : [];
+                }
+            }
+        }catch(_e){}
+        try{
+            const res = await fetch('/api/plugin/maid/chat/history', { credentials: 'include' });
+            if(!res.ok) return [];
+            const data = await res.json();
+            return Array.isArray(data?.items) ? data.items : [];
+        }catch(_e){ return []; }
+      };
+
+      let items = await fetchHistory();
+      
+      // Fallback to local storage if backend empty or failed
+      if(!items || items.length === 0){
+          try {
+            const raw = window.localStorage.getItem('maid-chan:history-log');
+            const arr = raw? JSON.parse(raw): [];
+            // Local storage format is { ts, msg, tools }
+            // Convert to backend-like format for uniform processing
+            items = arr.map(i => ({ role: 'assistant', text: i.msg })); 
+          }catch(e){ items = []; }
+      }
+
+      const recent = items.slice(-max);
+      
+      // Convert to standard message objects
+      const messages = recent.map(entry => {
+          if(!entry) return null;
+          if(entry.role === 'assistant'){
+              // Handle backend snapshot format
+              let text = '';
+              if(entry.snapshots && Array.isArray(entry.snapshots.parts)){
+                  const parts = entry.snapshots.parts;
+                  const idx = entry.snapshots.current_index || 0;
+                  text = (parts[idx] && parts[idx].text) || '';
+              } else {
+                  text = entry.text || entry.content || '';
+              }
+              return { role: 'assistant', content: String(text) };
+          } else {
+              return { role: 'user', content: String(entry.text || entry.content || '') };
+          }
+      }).filter(Boolean);
+
+      return { messages };
     }
   });
 
-  // Tools Control (moved from process.js)
+  // Tools loader (renamed from "Tools Control")
   add({
-    type: 'Tools Control',
+    type: 'Tools loader',
     category: 'input',
-    ports: { inputs: [], outputs: [ { id:'tools', label:'Tools' } ] },
-    defaultData(){ return { selected: [] }; },
+    // Expose both outputs; UI toggles visibility when Execute is enabled
+    ports: { inputs: [], outputs: [ { id:'tool_definitions', label:'Tool Definitions' }, { id:'system_prompt', label:'System Prompt' }, { id:'tool_results', label:'Raw Results' } ] },
+    defaultData(){ return { selected: [], execute: false, payloads: {} }; },
     buildConfigUI(bodyEl, node, {onDataChange}){
+      // ...existing code...
       const wrap = document.createElement('div');
       wrap.style.display = 'flex';
       wrap.style.flexDirection = 'column';
@@ -253,10 +369,19 @@
       hint.textContent = 'Select tools to allow (adds rows automatically)';
       wrap.appendChild(hint);
 
+      // Execute toggle
+      const execRow = document.createElement('div');
+      execRow.style.display = 'flex'; execRow.style.alignItems = 'center'; execRow.style.gap = '8px';
+      const execLab = document.createElement('span'); execLab.textContent = 'Execute'; execLab.style.fontSize = '12px'; execLab.style.opacity = '.8';
+      const execSwitch = document.createElement('label'); execSwitch.className = 'mc-switch'; execSwitch.innerHTML = '<input type="checkbox" role="switch" aria-checked="false" /><span class="mc-slider"></span>';
+      const execInput = execSwitch.querySelector('input'); execInput.checked = !!(node.data && node.data.execute); execInput.setAttribute('aria-checked', execInput.checked ? 'true' : 'false');
+      // Will be assigned inside render() to access its local DOM
+      let _renderPayloadEditors = ()=>{};
+      execInput.addEventListener('change', ()=>{ node.data=node.data||{}; node.data.execute=!!execInput.checked; execInput.setAttribute('aria-checked', execInput.checked?'true':'false'); onDataChange && onDataChange(node.data); reRenderPortVisibility(); _renderPayloadEditors(); });
+      execRow.appendChild(execLab); execRow.appendChild(execSwitch); wrap.appendChild(execRow);
+
       const rows = document.createElement('div');
-      rows.style.display = 'flex';
-      rows.style.flexDirection = 'column';
-      rows.style.gap = '6px';
+      rows.style.display = 'flex'; rows.style.flexDirection = 'column'; rows.style.gap = '6px';
       wrap.appendChild(rows);
 
       function getCaps(){
@@ -271,9 +396,9 @@
             if(!fn) continue;
             const pluginId = (c.pluginId || 'core');
             const title = c.title || c.description || c.id || fn;
-            out.push({ name: fn, label: `${pluginId}: ${title}`, pluginId, id: String(c.id || '').trim() });
+            out.push({ id: String(c.id||'').trim() || fn, name: fn, label: `${pluginId}: ${title}` });
           }
-          out.sort((a,b)=> a.pluginId===b.pluginId ? a.label.localeCompare(b.label) : String(a.pluginId).localeCompare(String(b.pluginId)));
+          out.sort((a,b)=> a.label.localeCompare(b.label));
           return out;
         }catch(_e){ return []; }
       }
@@ -283,46 +408,52 @@
       function render(){
         rows.innerHTML = '';
         node.data = node.data || {};
-        const sel = Array.isArray(node.data.selected) ? node.data.selected.slice() : [];
+        if(!Array.isArray(node.data.selected)) node.data.selected = [];
+        node.data.payloads = node.data.payloads || {};
+        const sel = node.data.selected.slice();
         const used = new Set(sel);
 
-        function makeRow(value, isTrailing){
+        function makeRow(value, isTrailing, idxInSel){
           const row = document.createElement('div');
           row.style.display = 'flex'; row.style.gap = '6px'; row.style.alignItems = 'center';
-          const select = document.createElement('select');
-          select.style.flex = '1 1 auto';
-          const emptyOpt = document.createElement('option'); emptyOpt.value = ''; emptyOpt.textContent = isTrailing ? 'Add a tool…' : '(none)';
-          select.appendChild(emptyOpt);
-          for(const opt of options){
-            const o = document.createElement('option'); o.value = opt.name; o.textContent = opt.label; select.appendChild(o);
-          }
+          const select = document.createElement('select'); select.style.flex = '1 1 auto';
+          const emptyOpt = document.createElement('option'); emptyOpt.value = ''; emptyOpt.textContent = isTrailing ? 'Add a tool…' : '(none)'; select.appendChild(emptyOpt);
+          for(const opt of options){ const o = document.createElement('option'); o.value = opt.name; o.textContent = opt.label; select.appendChild(o); }
           select.value = value || '';
 
-          const removeBtn = document.createElement('button');
-          removeBtn.type = 'button';
-          removeBtn.className = 'mc-icon-btn';
-          removeBtn.title = 'Remove';
-          removeBtn.innerHTML = '<span class="material-symbols-outlined">close</span>';
+          const removeBtn = document.createElement('button'); removeBtn.type='button'; removeBtn.className='mc-icon-btn'; removeBtn.title='Remove'; removeBtn.innerHTML='<span class="material-symbols-outlined">close</span>';
           removeBtn.addEventListener('click', ()=>{
-            if(!value) return;
-            const idx = sel.indexOf(value);
-            if(idx >= 0){ sel.splice(idx,1); node.data.selected = sel; if(onDataChange) onDataChange(); render(); }
+            if(isTrailing) return;
+            if(idxInSel>=0){ sel.splice(idxInSel,1); node.data.selected = sel; onDataChange && onDataChange(); render(); }
           });
 
           select.addEventListener('change', ()=>{
             const v = select.value;
             if(!v){
               if(!isTrailing && value){
-                const idx = sel.indexOf(value);
-                if(idx >= 0){ sel.splice(idx,1); node.data.selected = sel; if(onDataChange) onDataChange(); render(); }
+                if(idxInSel>=0){ sel.splice(idxInSel,1); node.data.selected = sel; onDataChange && onDataChange(); render(); }
               }
               return;
             }
-            if(!used.has(v)){
-              sel.push(v); used.add(v); node.data.selected = sel; if(onDataChange) onDataChange();
-              render();
+            if(isTrailing){
+              // Add new entry only if not already selected
+              if(!sel.includes(v)){
+                sel.push(v);
+                node.data.selected = sel; onDataChange && onDataChange(); render();
+              } else {
+                select.value = '';
+              }
             } else {
-              select.value = value || '';
+              // Replace the current selection instead of pushing a new one
+              const current = value || '';
+              if(v === current) return;
+              const dupIdx = sel.indexOf(v);
+              if(dupIdx !== -1 && dupIdx !== idxInSel){
+                // Prevent duplicates: revert to previous value
+                select.value = current;
+                return;
+              }
+              if(idxInSel>=0){ sel[idxInSel] = v; node.data.selected = sel; onDataChange && onDataChange(); render(); }
             }
           });
 
@@ -331,26 +462,162 @@
           rows.appendChild(row);
         }
 
-        for(const v of sel){ makeRow(v, false); }
-        makeRow('', true);
+        sel.forEach((v, i)=> makeRow(v, false, i));
+        makeRow('', true, -1);
+
+        // Payload editors (only visible in Execute mode)
+        const payloadWrap = document.createElement('div'); payloadWrap.style.display = (node.data.execute ? 'flex' : 'none'); payloadWrap.style.flexDirection = 'column'; payloadWrap.style.gap = '8px'; rows.appendChild(payloadWrap);
+
+        function mkPayloadBlock(toolId, label){
+          const block = document.createElement('div'); block.style.border='1px solid #2b2d36'; block.style.borderRadius='8px'; block.style.padding='8px'; block.style.background='#13151c';
+          const head = document.createElement('div'); head.style.display='flex'; head.style.alignItems='center'; head.style.justifyContent='space-between'; head.style.marginBottom='6px';
+          const title = document.createElement('div'); title.style.fontSize='12px'; title.style.opacity='.85'; title.textContent = label || toolId; head.appendChild(title);
+          const actions = document.createElement('div'); actions.style.display='inline-flex'; actions.style.alignItems='center'; actions.style.gap='6px';
+          const status = document.createElement('span'); status.style.fontSize='11px'; status.style.opacity='.75'; status.textContent='';
+          const playBtn = document.createElement('button'); playBtn.type='button'; playBtn.className='mc-icon-btn'; playBtn.title='Run this tool'; playBtn.innerHTML='<span class="material-symbols-outlined">play_arrow</span>';
+          actions.appendChild(status); actions.appendChild(playBtn); head.appendChild(actions);
+          block.appendChild(head);
+          const ta = document.createElement('textarea'); ta.className='mc-node-textarea-small'; ta.rows=5; ta.placeholder='{ }';
+          const current = (node.data.payloads && node.data.payloads[toolId]) || '';
+          ta.value = typeof current === 'string' ? current : JSON.stringify(current||{}, null, 2);
+          ta.addEventListener('change', ()=>{ node.data.payloads = node.data.payloads || {}; node.data.payloads[toolId] = ta.value; onDataChange && onDataChange(node.data); });
+          block.appendChild(ta);
+
+          // Per-payload execution
+          playBtn.addEventListener('click', async ()=>{
+            const setStatus = (t, color)=>{ status.textContent = t||''; status.style.color = color||''; };
+            let args = {};
+            try{ const raw = ta.value || '{}'; args = raw.trim()? JSON.parse(raw) : {}; }
+            catch(e){ setStatus('Invalid JSON', '#ff6b6b'); return; }
+            try{
+              setStatus('Running...', '#bdbdc7');
+              const root = window.Yuuka || {}; const services = root.services || {}; const capsSvc = services.capabilities;
+              const all = (capsSvc && typeof capsSvc.listLLMCallable === 'function') ? (capsSvc.listLLMCallable()||[]) : [];
+              const target = String(toolId||'').trim().toLowerCase();
+              let cap = null;
+              for(const c of all){ if(!c || !c.llmCallable) continue; const n = ((c.llmName && String(c.llmName)) || String(c.id||'')).trim().toLowerCase(); if(n && n === target){ cap = c; break; } }
+              if(cap && capsSvc && typeof capsSvc.invoke === 'function'){
+                const res = await capsSvc.invoke(cap.id, args, { source:'maid' });
+                setStatus('OK', '#34c759');
+                try{ window.dispatchEvent(new CustomEvent('maid-chan:tools:executed', { detail: { results: [ { name: toolId, ok:true, result: res } ] } })); }catch(_e){}
+              }else{
+                // Fallback: fire event for external handlers
+                window.dispatchEvent(new CustomEvent('maid-chan:tools:execute', { detail: { name: toolId, args } }));
+                setStatus('Sent', '#34c759');
+              }
+            }catch(err){ setStatus('Error', '#ff6b6b'); }
+          });
+
+          return block;
+        }
+
+        function renderPayloadEditors(){
+          payloadWrap.style.display = (node.data && node.data.execute) ? 'flex' : 'none';
+          payloadWrap.innerHTML = '';
+          if(!(node.data && node.data.execute)) return;
+          for(const id of (node.data.selected||[])){
+            const meta = options.find(o=> o.name === id) || { name: id, label: id };
+            payloadWrap.appendChild(mkPayloadBlock(id, meta.label));
+          }
+        }
+
+        // expose to outer scope so Execute toggle can call it
+        _renderPayloadEditors = renderPayloadEditors;
+        renderPayloadEditors();
+        reRenderPortVisibility();
+      }
+
+      function reRenderPortVisibility(){
+        try{
+          const el = bodyEl.closest('.mc-node'); if(!el) return;
+          const portsWrap = el.querySelector('.mc-node-ports'); if(!portsWrap) return;
+          const outs = portsWrap.querySelectorAll('[data-port="out"]');
+          const exec = !!(node.data && node.data.execute);
+          outs.forEach((p, idx)=>{
+            if(idx === 0){ p.style.visibility = exec ? 'hidden' : 'visible'; p.style.pointerEvents = exec ? 'none' : ''; }
+            else if(idx === 1){ p.style.visibility = exec ? 'visible' : 'hidden'; p.style.pointerEvents = exec ? '' : 'none'; }
+          });
+        }catch(_e){}
       }
 
       render();
       bodyEl.appendChild(wrap);
     },
-    execute(ctx){
-      const selected = (ctx.node && ctx.node.data && Array.isArray(ctx.node.data.selected)) ? ctx.node.data.selected.slice() : [];
-      return { tools: { allow: selected } };
+    async execute(ctx){
+      const d = (ctx && ctx.node && ctx.node.data) || {};
+      const selected = Array.isArray(d.selected) ? d.selected.slice() : [];
+      
+      const defs = { selected };
+
+      if(!d.execute){
+        return { tool_definitions: defs };
+      }
+      // Build calls
+      const calls = selected.map(id=>{
+        let args = {};
+        try{
+          const raw = d.payloads && d.payloads[id];
+          if(typeof raw === 'string' && raw.trim()) args = JSON.parse(raw);
+          else if(raw && typeof raw === 'object') args = raw;
+        }catch(_e){ args = {}; }
+        return { name: id, args, arguments: args };
+      });
+
+      // Execute synchronously so stage runner can route results to Preview
+      const root = window.Yuuka || {}; const services = root.services || {}; const capsSvc = services.capabilities;
+      const all = (capsSvc && typeof capsSvc.listLLMCallable === 'function') ? (capsSvc.listLLMCallable()||[]) : [];
+      const resolveCap = (fnName)=>{
+        const target = String(fnName||'').trim().toLowerCase();
+        for(const c of all){
+          if(!c || !c.llmCallable) continue;
+          const n = ((c.llmName && String(c.llmName)) || String(c.id||'')).trim().toLowerCase();
+          if(n && n === target) return c;
+        }
+        return null;
+      };
+      const results = [];
+      for(const c of calls){
+        const cap = resolveCap(c.name);
+        if(!cap){ results.push({ name:c.name, ok:false, error:'Not available' }); continue; }
+        try{
+          const res = (capsSvc && typeof capsSvc.invoke==='function') ? await capsSvc.invoke(cap.id, c.args, { source:'maid' }) : await (cap.invoke ? cap.invoke(c.args) : Promise.resolve(null));
+          results.push({ name:c.name, ok:true, result: res });
+        }catch(err){ results.push({ name:c.name, ok:false, error:String(err&&err.message||err) }); }
+      }
+      try{ window.dispatchEvent(new CustomEvent('maid-chan:tools:executed', { detail: { results } })); }catch(_e){}
+
+      // Format for System Prompt (summary)
+      const formatResult = (r) => {
+            if (!r || !r.result) return '';
+            const res = r.result;
+            if (typeof res === 'string') return res;
+            if (typeof res === 'object') {
+                const parts = [];
+                for (const [k, v] of Object.entries(res)) {
+                    parts.push(`${k}: ${v}`);
+                }
+                return `[${parts.join(', ')}]`;
+            }
+            return String(res);
+      };
+      const summary = results.map(formatResult).join('\n');
+
+      return { 
+          tool_definitions: defs,
+          tool_results: results,
+          system_prompt: { role: 'system', content: summary }
+      };
     }
   });
 
-  // LLM settings (moved from process.js)
+  // LLM loader (renamed from "LLM settings")
   add({
-    type: 'LLM settings',
+    type: 'LLM loader',
     category: 'input',
-    ports: { inputs: [], outputs: [ { id:'settings', label:'Settings' } ] },
+    ports: { inputs: [], outputs: [ { id:'llm_settings', label:'LLM Settings' } ] },
     defaultData(){ return { model: '', temperature: 0.7, top_p: 1, max_tokens: 512 }; },
     buildConfigUI(bodyEl, node, {onDataChange}){
+      // ...existing code...
       // Model list (from settings/llm_api.js cached storage) - per-node override
       const modelsKey = 'maid-chan:llm-models';
       const loadModels = ()=>{ try{ const raw = window.localStorage.getItem(modelsKey); return raw? JSON.parse(raw):[]; }catch(_e){ return []; } };
@@ -394,6 +661,193 @@
       mkNumber('top_p','Top P',0.05,1);
       mkNumber('max_tokens','Max tokens',1,512);
     },
-    execute(ctx){ return { settings: { ...(ctx.node.data||{}) } }; }
+    execute(ctx){ return { llm_settings: { ...(ctx.node.data||{}) } }; }
+  });
+
+  add({
+    type: 'Events',
+    category: 'input',
+    ports: { inputs: [], outputs: [ { id:'system_prompt', label:'System Prompt' }, { id:'messages', label:'Messages' } ] },
+    defaultData(){ return { selected: [], prompts: {} }; },
+    buildConfigUI(bodyEl, node, {onDataChange}){
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.gap = '6px';
+
+      const hint = document.createElement('div');
+      hint.className = 'mc-chip';
+      hint.textContent = 'Select events to include context for';
+      wrap.appendChild(hint);
+
+      const rows = document.createElement('div');
+      rows.style.display = 'flex'; rows.style.flexDirection = 'column'; rows.style.gap = '6px';
+      wrap.appendChild(rows);
+
+      function getEvents(){
+        try{
+          const root = window.Yuuka || {};
+          // Prefer registry if bootstrap has attached one
+          const reg = root.maidEventRegistry;
+          if(reg && typeof reg.list === 'function'){
+            const names = reg.list() || [];
+            const out = names
+              .filter(n => typeof n === 'string' && n.trim())
+              .map(n => ({ name: n, label: n }));
+            out.sort((a,b)=> a.label.localeCompare(b.label));
+            return out;
+          }
+          return [];
+        }catch(_e){ return []; }
+      }
+
+      const options = getEvents();
+
+      function render(){
+        rows.innerHTML = '';
+        node.data = node.data || {};
+        if(!Array.isArray(node.data.selected)) node.data.selected = [];
+        node.data.prompts = node.data.prompts || {};
+        const sel = node.data.selected.slice();
+
+        function makeRow(value, isTrailing, idxInSel){
+          const container = document.createElement('div');
+          container.style.display = 'flex'; container.style.flexDirection = 'column'; container.style.gap = '4px';
+          container.style.marginBottom = '4px';
+          if(!isTrailing) {
+              container.style.border = '1px solid #2b2d36';
+              container.style.borderRadius = '6px';
+              container.style.padding = '6px';
+              container.style.background = '#13151c';
+          }
+
+          const row = document.createElement('div');
+          row.style.display = 'flex'; row.style.gap = '6px'; row.style.alignItems = 'center';
+          
+          const select = document.createElement('select'); select.style.flex = '1 1 auto';
+          const emptyOpt = document.createElement('option'); emptyOpt.value = ''; emptyOpt.textContent = isTrailing ? 'Add event...' : '(select event)'; select.appendChild(emptyOpt);
+          for(const opt of options){ const o = document.createElement('option'); o.value = opt.name; o.textContent = opt.label; select.appendChild(o); }
+          select.value = value || '';
+
+          const removeBtn = document.createElement('button'); removeBtn.type='button'; removeBtn.className='mc-icon-btn'; removeBtn.title='Remove'; removeBtn.innerHTML='<span class="material-symbols-outlined">close</span>';
+          removeBtn.addEventListener('click', ()=>{
+            if(isTrailing) return;
+            if(idxInSel>=0){ sel.splice(idxInSel,1); node.data.selected = sel; onDataChange && onDataChange(); render(); }
+          });
+
+          select.addEventListener('change', ()=>{
+            const v = select.value;
+            if(!v){
+              if(!isTrailing && value){
+                if(idxInSel>=0){ sel.splice(idxInSel,1); node.data.selected = sel; onDataChange && onDataChange(); render(); }
+              }
+              return;
+            }
+            if(isTrailing){
+              if(!sel.includes(v)){
+                sel.push(v);
+                node.data.selected = sel; onDataChange && onDataChange(); render();
+              } else {
+                select.value = '';
+              }
+            } else {
+              const current = value || '';
+              if(v === current) return;
+              const dupIdx = sel.indexOf(v);
+              if(dupIdx !== -1 && dupIdx !== idxInSel){
+                select.value = current;
+                return;
+              }
+              if(idxInSel>=0){ sel[idxInSel] = v; node.data.selected = sel; onDataChange && onDataChange(); render(); }
+            }
+          });
+
+          row.appendChild(select);
+          if(!isTrailing){ row.appendChild(removeBtn); }
+          container.appendChild(row);
+
+          if(!isTrailing){
+              const ta = document.createElement('textarea');
+              ta.className = 'mc-node-textarea-small';
+              ta.rows = 3;
+              ta.placeholder = 'Custom output prompt...';
+              ta.value = (node.data.prompts && node.data.prompts[value]) || '';
+              ta.addEventListener('change', ()=>{
+                  node.data.prompts = node.data.prompts || {};
+                  node.data.prompts[value] = ta.value;
+                  onDataChange && onDataChange(node.data);
+              });
+              container.appendChild(ta);
+          }
+
+          rows.appendChild(container);
+        }
+
+        sel.forEach((v, i)=> makeRow(v, false, i));
+        makeRow('', true, -1);
+      }
+
+      render();
+      bodyEl.appendChild(wrap);
+    },
+    execute(ctx){
+      const d = (ctx && ctx.node && ctx.node.data) || {};
+      const selected = Array.isArray(d.selected) ? d.selected : [];
+      const promptsMap = d.prompts || {};
+
+      // If executed without an event context, emit nothing (acts as a filter).
+      const context = (ctx && ctx.context) || {};
+      const evName = context.eventName;
+      const evPayload = context.eventPayload;
+
+      if(!evName || !selected.includes(evName)){
+        return { system_prompt: [], messages: [] };
+      }
+
+      const basePrompt = (promptsMap[evName] || '').trim();
+      if(!basePrompt){
+        return { system_prompt: [], messages: [] };
+      }
+
+      // Template substitution: {{key}} -> find value recursively in evPayload
+      let processedPrompt = basePrompt;
+      if(evPayload && typeof evPayload === 'object'){
+        const findVal = (obj, target) => {
+            if(!obj || typeof obj !== 'object') return undefined;
+            if(Object.prototype.hasOwnProperty.call(obj, target)) return obj[target];
+            for(const k in obj){
+                if(Object.prototype.hasOwnProperty.call(obj, k) && typeof obj[k] === 'object'){
+                    const res = findVal(obj[k], target);
+                    if(res !== undefined) return res;
+                }
+            }
+            return undefined;
+        };
+
+        processedPrompt = processedPrompt.replace(/\{\{([^}]+)\}\}/g, (m, k)=>{
+           const key = k.trim();
+           const val = findVal(evPayload, key);
+           if(val !== undefined){
+             return (typeof val === 'object') ? JSON.stringify(val) : String(val);
+           }
+           return m;
+        });
+      }
+
+      // Attach payload as JSON block to help LLM reason about the event
+      let payloadText = '';
+      if(evPayload !== undefined){
+        try{ payloadText = '\n\n[Event payload]\n' + JSON.stringify(evPayload, null, 2); }
+        catch(_e){ payloadText = '\n\n[Event payload]\n' + String(evPayload); }
+      }
+
+      const finalText = processedPrompt + payloadText;
+      const msg = { role: 'system', content: finalText };
+
+      return {
+        system_prompt: [processedPrompt],
+        messages: [msg]
+      };
+    }
   });
 })();

@@ -5,58 +5,125 @@
   add({
     type: 'Save history',
     category: 'output',
-    ports: { inputs: [ { id:'message', label:'Message' }, { id:'tools_result', label:'Tools result' } ], outputs: [] },
+    ports: { inputs: [ { id:'response_message', label:'Response Message' }, { id:'tool_results', label:'Tool Results' } ], outputs: [] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl){ const hint = document.createElement('div'); hint.className='mc-chip'; hint.textContent='No settings'; bodyEl.appendChild(hint); },
     execute(ctx){
       const now = Date.now();
-      const text = String((ctx && ctx.inputs && ctx.inputs.message) || '');
-      const tools = ctx && ctx.inputs ? ctx.inputs.tools_result : null;
+      // Handle generic array inputs
+      const msgInputs = (ctx && ctx.inputs && ctx.inputs.response_message) ? ctx.inputs.response_message : [];
+      const toolInputs = (ctx && ctx.inputs && ctx.inputs.tool_results) ? ctx.inputs.tool_results : [];
+      
+      const msgs = msgInputs.flat();
+      const tools = toolInputs.flat();
+
+      // If no messages, nothing to save
+      if (msgs.length === 0) return {};
+
+      // Determine tool metadata according to source semantics.
+      // Cho phép đồng thời:
+      // - Nhiều dòng System Prompt summary -> gộp vào tool_results_text.
+      // - Nhiều Raw Results (mảng object) -> gộp vào tool_info.
+      let toolResultsText = null;
+      const toolInfo = [];
+
+      if (tools.length > 0) {
+        const rawResultChunks = [];
+        const systemPromptChunks = [];
+
+        for (const item of tools) {
+          if (!item) continue;
+
+          // Raw Results: mảng object { name/result/error/... }
+          if (Array.isArray(item) && item.every(t => t && typeof t === 'object' && ('name' in t || 'result' in t || 'error' in t))) {
+            rawResultChunks.push(...item);
+            continue;
+          }
+
+          // Một object đơn lẻ kiểu result cũng tính là raw
+          if (!Array.isArray(item) && typeof item === 'object' && ('name' in item || 'result' in item || 'error' in item)) {
+            rawResultChunks.push(item);
+            continue;
+          }
+
+          // Còn lại xem như summary text từ System Prompt
+          systemPromptChunks.push(item);
+        }
+
+        if (rawResultChunks.length > 0) {
+          toolInfo.push(...rawResultChunks);
+        }
+
+        if (systemPromptChunks.length > 0) {
+          try { toolResultsText = JSON.stringify(systemPromptChunks); }
+          catch(_e){ toolResultsText = String(systemPromptChunks); }
+        }
+      }
 
       // Fire-and-forget: post to backend API in background
       (async function(){
         try{
-          // Build assistant message using snapshots schema expected by backend
-          const part = { text, timestamp: now };
-          if(tools != null && tools !== ''){
-            try{ part.tool_results_text = (typeof tools === 'string') ? tools : JSON.stringify(tools); }catch(_e){}
-          }
-          const message = {
-            role: 'assistant',
-            kind: 'chat',
-            snapshots: { parts: [part], current_index: 0 }
-          };
-
           // Prefer plugin API client (includes auth)
           const root = window.Yuuka || {};
           const ns = root.plugins && root.plugins['maid-chan'];
           const coreApi = ns && ns.coreApi;
+          let client = null;
           if(coreApi && typeof coreApi.createPluginApiClient === 'function'){
             coreApi.createPluginApiClient('maid');
-            const client = coreApi.maid;
-            if(client && typeof client.post === 'function'){
-              await client.post('/chat/append', { message });
-              return;
-            }
+            client = coreApi.maid;
           }
-          // Fallback direct fetch
-          await fetch('/api/plugin/maid/chat/append', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ message })
-          });
+
+          for (const msgItem of msgs) {
+              const text = (msgItem && (msgItem.content || msgItem.text)) ? String(msgItem.content || msgItem.text) : '';
+              const role = (msgItem && msgItem.role) ? String(msgItem.role).toLowerCase() : 'assistant';
+              const msgId = msgItem.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : ('msg_'+Date.now()+'_'+Math.random().toString(36).slice(2)));
+
+              let message;
+              if(role === 'assistant'){
+                  // Build assistant message using snapshots schema expected by backend
+                  const part = { text, timestamp: now };
+
+                  // Persist tool metadata according to resolved semantics
+                  if(toolResultsText != null){
+                    part.tool_results_text = toolResultsText;
+                  }
+                  if(toolInfo && toolInfo.length){
+                    part.tool_info = toolInfo;
+                  } else if(msgItem.tool_calls && Array.isArray(msgItem.tool_calls)){
+                    // Fallback: legacy LLM tool_calls still attached on response_message
+                    part.tool_info = msgItem.tool_calls;
+                  }
+                  message = {
+                    id: msgId,
+                    role: 'assistant',
+                    kind: 'chat',
+                    snapshots: { parts: [part], current_index: 0 }
+                  };
+              } else {
+                 // User, system, or other roles use simple structure
+                 message = {
+                    id: msgId,
+                    role: role,
+                    text: text,
+                    kind: 'chat',
+                    timestamp: now
+                 };
+              }
+
+              if(client && typeof client.post === 'function'){
+                await client.post('/chat/append', { message });
+              } else {
+                // Fallback direct fetch
+                await fetch('/api/plugin/maid/chat/append', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ message })
+                });
+              }
+          }
         }catch(_e){ /* swallow network errors */ }
       })();
-
-      // Legacy localStorage fallback for offline/debugging
-      try{
-        const key='maid-chan:history-log';
-        const raw=localStorage.getItem(key);
-        const arr=raw? JSON.parse(raw):[];
-        arr.push({ ts: now, msg: text, tools });
-        localStorage.setItem(key, JSON.stringify(arr.slice(-500)));
-      }catch(_e){}
 
       return {};
     }
@@ -65,19 +132,65 @@
   add({
     type: 'Send to chat UI',
     category: 'output',
-    ports: { inputs: [ { id:'message', label:'Message' }, { id:'tools_result', label:'Tools result' } ], outputs: [] },
+    ports: { inputs: [ { id:'response_message', label:'Response Message' }, { id:'tool_results', label:'Tool Results' } ], outputs: [] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl){ const hint = document.createElement('div'); hint.className='mc-chip'; hint.textContent='No settings'; bodyEl.appendChild(hint); },
-    execute(ctx){ /* stub: dispatch event */ try{ window.dispatchEvent(new CustomEvent('maid-chan:new-chat-message',{ detail:{ message: ctx.inputs?.message||'', tools: ctx.inputs?.tools_result||null }})); }catch(e){} return {}; }
+    execute(ctx){ 
+        try{ 
+            const msgInputs = (ctx.inputs && ctx.inputs.response_message) ? ctx.inputs.response_message : [];
+            const toolInputs = (ctx.inputs && ctx.inputs.tool_results) ? ctx.inputs.tool_results : [];
+            
+            const msgs = msgInputs.flat();
+            const tools = toolInputs.flat();
+
+            for (const msgItem of msgs) {
+                window.dispatchEvent(new CustomEvent('maid-chan:new-chat-message',{ detail:{ message: msgItem||'', tools: tools.length ? tools : null }})); 
+            }
+        }catch(e){} 
+        return {}; 
+    }
   });
 
   add({
     type: 'Send to chat bubble',
     category: 'output',
-    ports: { inputs: [ { id:'message', label:'Message' } ], outputs: [] },
+    ports: { inputs: [ { id:'response_message', label:'Response Message' } ], outputs: [] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl){ const hint = document.createElement('div'); hint.className='mc-chip'; hint.textContent='No settings'; bodyEl.appendChild(hint); },
-    execute(ctx){ try{ window.dispatchEvent(new CustomEvent('maid-chan:new-bubble-message',{ detail:{ message: ctx.inputs?.message||'' }})); }catch(e){} return {}; }
+    execute(ctx){ 
+        try{ 
+            const msgInputs = (ctx.inputs && ctx.inputs.response_message) ? ctx.inputs.response_message : [];
+            const msgs = msgInputs.flat();
+
+            for (const msgItem of msgs) {
+                let text = '';
+                if(typeof msgItem === 'string') text = msgItem;
+                else if(msgItem && (msgItem.content || msgItem.text)) text = String(msgItem.content || msgItem.text);
+
+                // Prefer calling Maid bubble helper directly if available
+                try{
+                  const MaidComp = window.Yuuka && window.Yuuka.components && window.Yuuka.components.MaidChanComponent;
+                  const inst = window.Yuuka && window.Yuuka.plugins && window.Yuuka.plugins.maidChanInstance;
+                  if(inst && typeof inst._showChatBubble === 'function'){
+                    inst._showChatBubble({ text });
+                  }else if(typeof MaidComp === 'function'){
+                    // Lazy-create a temporary component instance if none exists yet
+                    const tmp = new MaidComp(document.body, window.Yuuka && window.Yuuka.ai);
+                    if(tmp && typeof tmp._createBubble === 'function'){
+                      tmp._createBubble();
+                    }
+                    if(tmp && typeof tmp._showChatBubble === 'function'){
+                      tmp._showChatBubble({ text });
+                    }
+                  }else{
+                    // Fallback: legacy event so older listeners still work
+                    window.dispatchEvent(new CustomEvent('maid-chan:new-bubble-message',{ detail:{ message: text }}));
+                  }
+                }catch(_inner){}
+            }
+        }catch(e){} 
+        return {}; 
+    }
   });
 
   // Preview node: displays the latest LLM result directly inside this node's body.
@@ -101,22 +214,34 @@
   add({
     type: 'Preview',
     category: 'output',
-    ports: { inputs: [ { id:'message', label:'Message' }, { id:'tools_result', label:'Tools result' } ], outputs: [] },
+    ports: { inputs: [ { id:'response_message', label:'Response Message' }, { id:'tool_results', label:'Raw Results' } ], outputs: [] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl, node){
       const wrap = document.createElement('div'); wrap.className = 'mc-preview';
       const msg = document.createElement('div'); msg.className = 'mc-preview-message'; msg.textContent = '(no message)';
       const tools = document.createElement('div'); tools.className = 'mc-preview-tools'; tools.textContent = '';
       wrap.appendChild(msg); wrap.appendChild(tools); bodyEl.appendChild(wrap);
-      const set = ({ message, text, toolsResult })=>{
-        const content = (message && (message.content||message.text)) || text || '';
+      const set = ({ message, response_message, text, toolsResult, tool_results })=>{
+        // Handle message object or text string
+        const msgObj = message || response_message;
+        const content = (msgObj && (msgObj.content||msgObj.text)) || text || '';
         msg.textContent = content || '(empty)';
-        if(toolsResult == null || toolsResult === ''){ tools.style.display='none'; }
-        else { tools.style.display='block'; tools.textContent = typeof toolsResult === 'string' ? toolsResult : JSON.stringify(toolsResult, null, 2); }
+        
+        const tRes = toolsResult || tool_results;
+        if(tRes == null || tRes === ''){ tools.style.display='none'; }
+        else { 
+          tools.style.display='block'; 
+          let val = tRes;
+          if(typeof val !== 'string'){
+            try{ val = JSON.stringify(val, null, 2); }catch(e){ val = String(val); }
+          }
+          tools.textContent = val;
+        }
+        
         // Auto-save preview payload per node (persist last seen content + tools)
         try{
           const key = 'maid-chan:preview:'+ node.id;
-            const payload = { ts: Date.now(), content: content, tools: toolsResult };
+            const payload = { ts: Date.now(), content: content, tools: tRes };
             window.localStorage.setItem(key, JSON.stringify(payload));
         }catch(_e){}
       };
@@ -129,70 +254,43 @@
           if(saved && typeof saved === 'object'){
             msg.textContent = saved.content ? String(saved.content) : '(empty)';
             if(saved.tools == null || saved.tools === ''){ tools.style.display='none'; }
-            else { tools.style.display='block'; tools.textContent = typeof saved.tools === 'string' ? saved.tools : JSON.stringify(saved.tools, null, 2); }
+            else { 
+              tools.style.display='block'; 
+              let val = saved.tools;
+              if(typeof val !== 'string'){
+                try{ val = JSON.stringify(val, null, 2); }catch(e){ val = String(val); }
+              }
+              tools.textContent = val;
+            }
           }
         }
       }catch(_e){}
     },
-    execute(ctx){ /* UI-only; no side-effect */ return {}; }
-  });
-
-  // Tools execution node: executes tool calls emitted by an LLM
-  add({
-    type: 'Tools execution',
-    category: 'output',
-    ports: { inputs: [ { id:'tools_result', label:'Tools result' } ], outputs: [] },
-    defaultData(){ return {}; },
-    buildConfigUI(bodyEl){
-      const hint = document.createElement('div'); hint.className='mc-chip'; hint.textContent='Executes tool calls from LLM'; bodyEl.appendChild(hint);
-      const note = document.createElement('div'); note.style.fontSize='12px'; note.style.opacity='.8'; note.textContent='Runs capabilities for standard tools. Custom choice tools are ignored here.'; bodyEl.appendChild(note);
-    },
-    execute(ctx){
+    execute(ctx){ 
+      /* UI-only; no side-effect */ 
       try{
-        const input = ctx && ctx.inputs ? ctx.inputs.tools_result : null;
-        const calls = (function(r){
-          if(!r || typeof r !== 'object') return [];
-          if(r.type === 'tool_calls' && Array.isArray(r.calls)) return r.calls;
-          if(r.type === 'tool_call' && r.name){ return [{ name: r.name, arguments: r.arguments || r.args || {} }]; }
-          if(Array.isArray(r.function_calls)) return r.function_calls;
-          return [];
-        })(input);
-        if(!calls.length) return {};
-
-        const root = window.Yuuka || {}; const services = root.services || {}; const capsSvc = services.capabilities;
-        const resolveCap = (fnName)=>{
-          if(!capsSvc || typeof capsSvc.listLLMCallable !== 'function') return null;
-          const all = capsSvc.listLLMCallable() || [];
-          const target = String(fnName||'').trim().toLowerCase();
-          for(const c of all){
-            if(!c || !c.llmCallable) continue;
-            const n = ((c.llmName && String(c.llmName)) || String(c.id||'')).trim().toLowerCase();
-            if(n && n === target) return c;
-          }
-          return null;
-        };
-
-        (async function(){
-          for(const c of calls){
-            const fn = c && c.name ? String(c.name) : '';
-            if(!fn) continue;
-            // Skip custom choice tool; handled by Choice nodes
-            if(fn === 'mc_choice' || fn === 'choice' || fn.toLowerCase().includes('choice')) continue;
-            const args = (c && (c.arguments || c.args)) || {};
-            try{
-              const cap = resolveCap(fn);
-              if(cap && capsSvc && typeof capsSvc.invoke === 'function'){
-                await capsSvc.invoke(cap.id, args, { source: 'maid' });
-              }else{
-                // Broadcast event for external handlers
-                window.dispatchEvent(new CustomEvent('maid-chan:tools:execute', { detail: { name: fn, args } }));
-              }
-            }catch(_e){ /* ignore errors */ }
-          }
-        })();
-
-        return {};
-      }catch(_e){ return {}; }
+        const updater = PreviewRegistry.get(ctx.node.id);
+        if(updater){
+          const msgObj = (ctx.inputs && ctx.inputs.response_message) ? ctx.inputs.response_message : null;
+          const msgItem = Array.isArray(msgObj) ? msgObj[0] : msgObj;
+          const toolsInput = ctx.inputs ? ctx.inputs.tool_results : null;
+          const tools = (Array.isArray(toolsInput) && Array.isArray(toolsInput[0])) ? toolsInput.flat() : toolsInput;
+          
+          // Update UI immediately
+          updater({ message: msgItem, toolsResult: tools });
+          
+          // Return data so the preview event contains it (preventing overwrite with empty data)
+          // Include both keys to be safe for the updater
+          return { 
+            message: msgItem,
+            response_message: msgItem, 
+            toolsResult: tools,
+            tool_results: tools 
+          };
+        }
+      }catch(e){}
+      return {}; 
     }
   });
+
 })();

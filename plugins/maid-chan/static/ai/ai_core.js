@@ -201,6 +201,7 @@
         if(allowSet.size === 0){
           // Explicitly connected Tools Control but empty selection -> disable all tools
           payload.tool_mode = 'none';
+          tools = [];
         }else{
           tools = tools.filter(t => allowSet.has(t.name));
         }

@@ -5,6 +5,11 @@
   const GRAPH_KEY = 'maid-chan:logic:graph';
   const FEATURE_ID = 'logic_ui';
 
+  // Node sizing constraints
+  const NODE_MIN_W = 220;
+  const NODE_MAX_W = 520; // Prevent overly wide nodes when long content loads
+  const NODE_MIN_H = 120;
+
   // Node definitions are provided by files under static/node/*.js
 
   // Node definition access
@@ -51,6 +56,16 @@
           try{ window.localStorage.setItem(GRAPH_KEY, JSON.stringify(g)); }catch(_e){}
         }
       }
+        // Migrate node type renames
+        try{
+          if(g && Array.isArray(g.nodes)){
+            for(const n of g.nodes){
+              if(!n || !n.type) continue;
+              if(n.type === 'Tools Control') n.type = 'Tools loader';
+              if(n.type === 'LLM settings') n.type = 'LLM loader';
+            }
+          }
+        }catch(_e){}
       return g;
     }catch(_e){ return null; }
   }
@@ -70,7 +85,7 @@
         { id:'n3', type:'Chat Samples', x:80, y:400, data:getDefaultNodeData('Chat Samples') },
         { id:'n4', type:'Custom Prompt', x:80, y:40, data:getDefaultNodeData('Custom Prompt') },
         { id:'n5', type:'LLM', x:360, y:220, data:getDefaultNodeData('LLM') },
-        { id:'n6', type:'Tools Control', x:360, y:360, data:getDefaultNodeData('Tools Control') },
+        { id:'n6', type:'Tools loader', x:360, y:360, data:getDefaultNodeData('Tools loader') },
         { id:'n7', type:'Save history', x:660, y:200, data:getDefaultNodeData('Save history') },
         { id:'n8', type:'Send to chat UI', x:660, y:300, data:getDefaultNodeData('Send to chat UI') }
       ],
@@ -236,26 +251,43 @@
 
   function createNodeEl(node, canvas, onMove, onDataChange, onResetNode, onDeleteNode, onStartConnect, onRunStage){
     const el = document.createElement('div'); el.className = 'mc-node'; el.style.left = (node.x||0)+'px'; el.style.top = (node.y||0)+'px'; el.dataset.id = node.id;
-    if(Number.isFinite(node.w)) el.style.width = Math.max(160, node.w|0) + 'px';
-    if(Number.isFinite(node.h)) el.style.height = Math.max(80, node.h|0) + 'px';
+    // Apply visual clamps and defaults
+    el.style.boxSizing = 'border-box';
+    el.style.maxWidth = NODE_MAX_W + 'px';
+    el.style.minWidth = NODE_MIN_W + 'px';
+    el.style.minHeight = NODE_MIN_H + 'px';
+    if(Number.isFinite(node.w)) el.style.width = Math.min(NODE_MAX_W, Math.max(NODE_MIN_W, node.w|0)) + 'px';
+    if(Number.isFinite(node.h)) el.style.height = Math.max(NODE_MIN_H, node.h|0) + 'px';
     const header = document.createElement('div'); header.className = 'mc-node-header';
     const title = document.createElement('span'); title.textContent = node.type; header.appendChild(title);
     const stage = document.createElement('span'); stage.className = 'mc-node-stage'; stage.textContent = ''; header.appendChild(stage);
     const actions = document.createElement('div'); actions.className = 'mc-node-actions';
+
+    // Check if process node to add Play button
+    const def = getNodeDef(node.type);
+    const isProcess = (def && def.category === 'process') || (node.type === 'Tools loader' && node.data && node.data.execute === true);
+    if(isProcess){
+      const playBtn = document.createElement('button'); playBtn.type='button'; playBtn.className='mc-icon-btn'; playBtn.innerHTML='<span class="material-symbols-outlined">play_arrow</span>';
+      playBtn.title = 'Run from this stage';
+      playBtn.addEventListener('mousedown', (e)=> e.stopPropagation(), { capture: true });
+      playBtn.addEventListener('click', (e)=>{ e.stopPropagation(); if(typeof onRunStage === 'function') onRunStage(node); });
+      actions.appendChild(playBtn);
+    }
+
     const replayBtn = document.createElement('button'); replayBtn.type='button'; replayBtn.className='mc-icon-btn'; replayBtn.innerHTML='<span class="material-symbols-outlined">replay</span>';
     const closeBtn = document.createElement('button'); closeBtn.type='button'; closeBtn.className='mc-icon-btn'; closeBtn.innerHTML='<span class="material-symbols-outlined">close</span>';
+    // Avoid bring-to-front/drag swallowing first click on buttons
+    [replayBtn, closeBtn].forEach(btn=>{
+      btn.addEventListener('mousedown', (e)=> e.stopPropagation(), { capture: true });
+      btn.addEventListener('click', (e)=> e.stopPropagation());
+    });
     actions.appendChild(replayBtn); actions.appendChild(closeBtn); header.appendChild(actions);
     const body = document.createElement('div'); body.className = 'mc-node-body';
-    // Build config via node definition (special UI for LLM)
-    const def = getNodeDef(node.type);
-    if(node.type === 'LLM'){
-      const wrap = document.createElement('div'); wrap.className = 'mc-node-play-wrap';
-      wrap.style.display = 'flex'; wrap.style.alignItems = 'center'; wrap.style.justifyContent = 'center'; wrap.style.padding = '8px 0';
-      const btn = document.createElement('button'); btn.type='button'; btn.className='mc-play-btn';
-      btn.innerHTML = '<span class="material-symbols-outlined">play_arrow</span>';
-      btn.addEventListener('click', (e)=>{ e.stopPropagation(); if(typeof onRunStage === 'function') onRunStage(node); });
-      wrap.appendChild(btn); body.appendChild(wrap);
-    } else if(def && typeof def.buildConfigUI === 'function'){
+    // Ensure long content wraps and scrolls instead of expanding width
+    body.style.overflow = 'auto';
+    body.style.wordBreak = 'break-word';
+    // Build config via node definition
+    if(def && typeof def.buildConfigUI === 'function'){
       def.buildConfigUI(body, node, { onDataChange });
     } else {
       const hint = document.createElement('div'); hint.className='mc-chip'; hint.textContent = 'No settings'; body.appendChild(hint);
@@ -297,10 +329,18 @@
     }
     el.appendChild(portsWrap);
 
-    // Bring-to-front on interaction (click/touch)
-    const bringToFront = ()=>{ const p = el.parentElement; if(p && p.lastChild !== el){ p.appendChild(el); } };
+    // Bring-to-front on interaction (click/touch), but ignore interactive controls
+    const bringToFront = (ev)=>{
+      const t = ev && ev.target;
+      if(t && (t.closest && t.closest('button, input, textarea, select, a'))) return;
+      const p = el.parentElement; if(p && p.lastChild !== el){ p.appendChild(el); }
+    };
     el.addEventListener('mousedown', bringToFront);
     el.addEventListener('touchstart', bringToFront, { passive: true });
+    // Prevent starting drag when interacting with controls in header
+    header.addEventListener('mousedown', (e)=>{
+      const t = e && e.target; if(t && (t.closest && t.closest('button, input, textarea, select, a'))){ e.stopPropagation(); }
+    }, { capture: true });
 
     // Resize handles (bottom-right and bottom-left)
     const handleBR = document.createElement('div'); handleBR.className = 'mc-node-resize mc-node-resize-br'; handleBR.innerHTML = '<span class="material-symbols-outlined">arrow_drop_down</span>';
@@ -309,6 +349,21 @@
 
     let resizing = null; // 'br' | 'bl' | null
     let rsx=0, rsy=0, startW=0, startH=0, startL=0; // start left for BL
+    // Compute a dynamic minimum height based on inner content to prevent overflow
+    const computeMinNodeHeight = ()=>{
+      try{
+        const headerEl = header; // already defined above
+        const bodyEl = body;     // already defined above
+        const portsEl = portsWrap; // already defined above
+        const h = (headerEl && headerEl.offsetHeight) || 24;
+        const b = (bodyEl && bodyEl.scrollHeight) || 0;
+        const p = (portsEl && portsEl.scrollHeight) || 0;
+        // Add small buffer for borders/padding
+        const buffer = 6;
+        // Ensure a reasonable absolute floor as well
+        return Math.max(100, h + b + p + buffer);
+      }catch(_e){ return 100; }
+    };
     const onResizeMove = (ev)=>{
       if(!resizing) return;
       const scale = window.__MaidLogicScale || 1;
@@ -323,9 +378,11 @@
         newW = startW - dx; // dragging right reduces width
         newL = startL + dx; // move left edge with mouse
       }
-      // Clamp sizes
-      newW = Math.max(160, newW);
-      newH = Math.max(80, newH);
+      // Clamp sizes (respect min/max width)
+      newW = Math.max(NODE_MIN_W, Math.min(NODE_MAX_W, newW));
+      // Height must not be smaller than content to avoid overflow
+      const minH = computeMinNodeHeight();
+      newH = Math.max(Math.max(minH, NODE_MIN_H), newH);
       el.style.width = newW + 'px';
       el.style.height = newH + 'px';
       if(resizing === 'bl'){
@@ -378,7 +435,13 @@
     const nodes = graph.nodes||[];
     const edges = graph.edges||[];
     const defOf = (t)=> getNodeDef(t);
-    const isProcess = (n)=>{ const d = defOf(n.type); return d && d.category === 'process'; };
+    // Dynamic process detection: treat Tools loader with execute=true as process
+    const isProcess = (n)=>{
+      const d = defOf(n.type) || {};
+      if(d && d.category === 'process') return true;
+      if(n && n.type === 'Tools loader' && n.data && n.data.execute === true) return true;
+      return false;
+    };
     const procNodes = new Map();
     for(const n of nodes){ if(n && isProcess(n)) procNodes.set(n.id, n); }
     const outMap = new Map();
@@ -397,10 +460,9 @@
     // Compute stages via Kahn's algorithm
     const stage = new Map();
     const q = [];
-    for(const [id, n] of procNodes){
-      if(!inDeg.has(id)) continue; // isolated process node (no proc edges): no stage
-      if((inDeg.get(id)||0) === 0){ stage.set(id, 1); q.push(id); }
-    }
+    // Ensure isolated process nodes also receive a stage (1)
+    for(const [id, n] of procNodes){ if(!inDeg.has(id)) inDeg.set(id, 0); }
+    for(const [id, n] of procNodes){ if((inDeg.get(id)||0) === 0){ stage.set(id, 1); q.push(id); } }
     while(q.length){
       const v = q.shift();
       const nexts = outMap.get(v)||[];
@@ -418,7 +480,8 @@
       const def = getNodeDef(node.type) || {};
       const badge = el.querySelector('.mc-node-stage');
       if(!badge) continue;
-      if(def.category !== 'process'){ badge.textContent = ''; badge.style.display='none'; continue; }
+      // Use dynamic process check for stage badge
+      if(!isProcess(node)){ badge.textContent = ''; badge.style.display='none'; continue; }
       const s = stage.get(id);
       if(s){ badge.textContent = `stage ${s}`; badge.style.display='inline-flex'; }
       else { badge.textContent = ''; badge.style.display='none'; }
@@ -593,7 +656,7 @@
           { id:'n3', type:'Chat Samples', x:80, y:400, data:getDefaultNodeData('Chat Samples') },
           { id:'n4', type:'Custom Prompt', x:80, y:40, data:getDefaultNodeData('Custom Prompt') },
           { id:'n5', type:'LLM', x:360, y:220, data:getDefaultNodeData('LLM') },
-          { id:'n6', type:'Tools Control', x:360, y:360, data:getDefaultNodeData('Tools Control') },
+          { id:'n6', type:'Tools loader', x:360, y:360, data:getDefaultNodeData('Tools loader') },
           { id:'n7', type:'Save history', x:660, y:200, data:getDefaultNodeData('Save history') },
           { id:'n8', type:'Send to chat UI', x:660, y:300, data:getDefaultNodeData('Send to chat UI') }
         ],
@@ -641,10 +704,32 @@
     function persistGraph(){
       savePresetGraph(activePresetId, graph);
       saveGraph(graph);
+      // Also autosave to backend as <preset_name>.json
+      try{
+        const preset = (presetList||[]).find(p=>p && p.id===activePresetId) || null;
+        const presetName = (preset && (preset.name||preset.id)) || activePresetId || 'preset';
+        const payload = { preset_id: activePresetId, preset_name: presetName, graph, client_ts: Date.now() };
+        // Prefer plugin API client (handles auth), fallback to fetch
+        (async function(){
+          try{
+            const root = window.Yuuka || {}; const ns = root.plugins && root.plugins['maid-chan']; const coreApi = ns && ns.coreApi;
+            if(coreApi && typeof coreApi.createPluginApiClient === 'function'){
+              coreApi.createPluginApiClient('maid');
+              const client = coreApi.maid;
+              if(client && typeof client.post === 'function'){
+                await client.post('/logic/preset/save', payload);
+                return;
+              }
+            }
+          }catch(_e){}
+          try{
+            await fetch('/api/plugin/maid/logic/preset/save', { method:'POST', headers:{ 'Content-Type':'application/json' }, credentials:'include', body: JSON.stringify(payload) });
+          }catch(_e){}
+        })();
+      }catch(_e){}
     }
     const nodeEls = new Map();
     let currentStageMap = new Map();
-    let singleStageMode = false; // If true, animate all process nodes when running
     const nodesPortMap = new Map(); // key: `${nodeId}:in|out:${port}` -> HTMLElement
     let draggingEdge = null; // { src:{nodeId,port}, pathEl }
 
@@ -679,24 +764,6 @@
       normalizeEdgeIndices();
       // Update stage badges before drawing edges and store stage map
       currentStageMap = computeAndRenderStages(graph, nodeEls) || new Map();
-      // Determine single-stage case:
-      // - If no process edges but there is at least one process node, treat as single stage
-      // - Or if all process nodes are assigned stage 1 only
-      (function(){
-        const nodes = graph.nodes||[];
-        const defOf = (t)=> getNodeDef(t);
-        const procNodes = nodes.filter(n=> n && defOf(n.type) && defOf(n.type).category === 'process');
-        if(procNodes.length === 0){ singleStageMode = false; return; }
-        // Check if there is any process->process edge
-        const edges = graph.edges||[];
-        const idSet = new Set(procNodes.map(n=> n.id));
-        const hasProcEdge = edges.some(e=> e && idSet.has(e.fromNodeId) && idSet.has(e.toNodeId));
-        if(!hasProcEdge){ singleStageMode = true; return; }
-        // If we do have process edges, but all mapped stages are 1
-        let maxStage = 0; let hasStage = false;
-        for(const s of currentStageMap.values()){ hasStage = true; if(s>maxStage) maxStage = s; }
-        singleStageMode = hasStage && maxStage <= 1;
-      })();
       drawEdges(
         svg,
         nodesPortMap,
@@ -748,8 +815,8 @@
       const b = contentBounds();
       // Add generous padding around content bounds in logical space.
       const pad = 1200; // logical units
-      const w = Math.max(b.w + pad*2, 4000);
-      const h = Math.max(b.h + pad*2, 3000);
+      const w = Math.max(b.w + pad*2, 4400);
+      const h = Math.max(b.h + pad*2, 6200);
       // Position grid so content roughly centered within it.
       const gx = (b.x - pad);
       const gy = (b.y - pad);
@@ -759,7 +826,7 @@
       grid.style.top = gy + 'px';
     }
 
-    const onDataChange = ()=>{ persistGraph(); };
+    const onDataChange = ()=>{ persistGraph(); redraw(); };
     const onMove = ()=>{ redraw(); };
 
     function rebuildNode(node){
@@ -773,7 +840,12 @@
       const def = getNodeDef(node.type);
       const personaKey = defaultPersonaKey(node.type);
       if(personaKey){ try{ window.localStorage.removeItem(personaKey); }catch(_e){} }
-      if(def && def.type === 'LLM settings'){ try{ window.localStorage.removeItem('maid-chan:llm-config'); }catch(_e){} }
+      if(def && (def.type === 'LLM loader' || def.type === 'LLM settings')){ try{ window.localStorage.removeItem('maid-chan:llm-config'); }catch(_e){} }
+      // Special handling: Preview node stores its own last content; clear it on replay
+      if(node && node.type === 'Preview'){
+        try{ window.localStorage.removeItem('maid-chan:preview:'+node.id); }catch(_e){}
+        try{ window.dispatchEvent(new CustomEvent('maid-chan:preview:update', { detail: { nodeId: node.id, message: null, text: '', toolsResult: null } })); }catch(_e){}
+      }
       node.data = getDefaultNodeData(node.type);
       onDataChange();
       rebuildNode(node);
@@ -792,7 +864,7 @@
       const ns = 'http://www.w3.org/2000/svg';
       if(draggingEdge && draggingEdge.pathEl){ draggingEdge.pathEl.remove(); draggingEdge = null; }
       if(portInfo.direction === 'in'){
-        // Allow drag from in by flipping logic: we still start at in and end at out, but validation will require opposite
+        // Allow drag from in by flipping logic: handled at mouseup validation
       }
       // Disable text selection while dragging
       overlay.classList.add('mc-dragging');
@@ -844,13 +916,15 @@
                 const outMeta = outPorts[out.port];
                 if(outNode && outNode.type === 'LLM'){
                   // Allow LLM -> LLM chaining: Message/Tools result -> Prompt (no self-loop)
-                  const isPrompt = !!(inMeta && inMeta.id === 'prompt');
-                  const isAllowedOut = !!(outMeta && (outMeta.id === 'message' || outMeta.id === 'tools_result'));
+                  const isTargetInput = !!(inMeta && (inMeta.id === 'system_prompt' || inMeta.id === 'messages'));
+                  const isAllowedOut = !!(outMeta && (outMeta.id === 'response_message'));
                   const notSelf = out.nodeId !== inn.nodeId;
-                  allow = isPrompt && isAllowedOut && notSelf;
+                  allow = isTargetInput && isAllowedOut && notSelf;
                 } else {
                   // Default: require matching port ids (prompt/history/tools/settings)
-                  if(!(inMeta && outMeta && inMeta.id === outMeta.id)) allow = false;
+                  // Exception: Allow System Prompt -> Messages
+                  const isSysToMsg = (outMeta && outMeta.id === 'system_prompt' && inMeta && inMeta.id === 'messages');
+                  if(!(inMeta && outMeta && inMeta.id === outMeta.id) && !isSysToMsg) allow = false;
                 }
               }
               if(!allow){
@@ -968,54 +1042,54 @@
     });
     btnClose.addEventListener('click', ()=>{ overlay.remove(); window.removeEventListener('resize', onResize); document.body.classList.remove('mc-logic-lock-scroll'); });
 
-    // Stage run helpers: glow all process nodes in the same stage while running
-    function setStageRunning(stageNo, running){
-      for(const [id, el] of nodeEls){
-        const node = graph.nodes.find(n=>n.id===id);
-        if(!node) continue;
-        const def = getNodeDef(node.type) || {};
-        if(def.category !== 'process') continue;
-        const s = currentStageMap.get(id);
-        if(singleStageMode){
-          if(running) el.classList.add('mc-node-running'); else el.classList.remove('mc-node-running');
-        } else if(s && s === stageNo){
-          if(running) el.classList.add('mc-node-running'); else el.classList.remove('mc-node-running');
-        } else if(!running) {
-          el.classList.remove('mc-node-running');
-        }
+    // Node execution glow helpers
+    function setNodeRunning(nodeId, running){
+      const el = nodeEls.get(nodeId);
+      if(el){
+        if(running) el.classList.add('mc-node-running');
+        else el.classList.remove('mc-node-running');
       }
     }
 
     function runStageForNode(node){
       const s = currentStageMap.get(node.id) || 1;
-      setStageRunning(s, true);
       const runId = 'run_' + Math.random().toString(36).slice(2,9);
       try{
         const detail = { presetId: activePresetId, stage: s, runId, graph };
         window.dispatchEvent(new CustomEvent('maid-chan:logic:run-stage', { detail }));
       }catch(_e){}
-      let cleared = false;
-      const clear = ()=>{ if(cleared) return; cleared = true; setStageRunning(s, false); window.removeEventListener('maid-chan:logic:stage:done', onDone); window.removeEventListener('maid-chan:logic:stage:error', onDone); };
-      const onDone = (ev)=>{ try{ const d = ev && ev.detail || {}; if(d && (d.runId === runId || d.stage === s)) clear(); }catch(_e){ clear(); } };
-      window.addEventListener('maid-chan:logic:stage:done', onDone);
-      window.addEventListener('maid-chan:logic:stage:error', onDone);
-      setTimeout(clear, 5000);
     }
 
-    // Also glow when runtime announces a new stage begin (for subsequent stages)
-    const onStageBegin = (ev)=>{
-      const d = ev && ev.detail || {}; const stageNo = d && d.stage; if(!stageNo) return; setStageRunning(stageNo, true);
+    // Listen for precise node execution events
+    const onNodeStart = (ev)=>{
+      const d = ev && ev.detail || {};
+      if(d.nodeId) setNodeRunning(d.nodeId, true);
     };
-    const onStageDone = (ev)=>{
-      const d = ev && ev.detail || {}; const stageNo = d && d.stage; if(!stageNo) return; setStageRunning(stageNo, false);
+    const onNodeEnd = (ev)=>{
+      const d = ev && ev.detail || {};
+      if(d.nodeId) setNodeRunning(d.nodeId, false);
     };
-    window.addEventListener('maid-chan:logic:stage:begin', onStageBegin);
-    window.addEventListener('maid-chan:logic:stage:done', onStageDone);
+    window.addEventListener('maid-chan:logic:node:start', onNodeStart);
+    window.addEventListener('maid-chan:logic:node:end', onNodeEnd);
 
     // Background palette: right-click or double-click
     function openPalette(x, y){
       closePalette();
-      const menu = document.createElement('div'); menu.className = 'mc-palette'; menu.style.left = x+'px'; menu.style.top = y+'px';
+      const menu = document.createElement('div'); menu.className = 'mc-palette';
+      // Position relative to overlay by converting logical (viewport) coords back to pixels
+      try{
+        const canvasRect = canvas.getBoundingClientRect();
+        const overlayRect = overlay.getBoundingClientRect();
+        const sx = window.__MaidLogicScale || 1;
+        const px = (canvasRect.left - overlayRect.left) + tx + x * sx;
+        const py = (canvasRect.top - overlayRect.top) + ty + y * sx;
+        menu.style.left = px + 'px';
+        menu.style.top = py + 'px';
+      }catch(_e){
+        // Fallback to original logical placement
+        menu.style.left = x+'px';
+        menu.style.top = y+'px';
+      }
       // Build palette dynamically from registered node definitions
       const cats = (function(){
         const out = [];
@@ -1056,7 +1130,7 @@
         }catch(_e){
           // Final hardcoded fallback
           return [
-            { id:'inputs', title:'Inputs', nodes:['Maid Persona','User Persona','Chat Samples','Custom Prompt','User Input','User Input SM','Read history','Tools Control','LLM settings'] },
+            { id:'inputs', title:'Inputs', nodes:['Maid Persona','User Persona','Chat Samples','Custom Prompt','User Input','User Input SM','Read history','Tools loader','LLM loader'] },
             { id:'processing', title:'Processing', nodes:['LLM','Choice'] },
             { id:'outputs', title:'Outputs', nodes:['Save history','Send to chat UI','Send to chat bubble','Preview','Tools execution'] }
           ];

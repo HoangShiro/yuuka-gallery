@@ -763,6 +763,62 @@ class MaidChanPlugin:
                     'trace': trace[-1000:],  # shorter trace
                 }), 400
 
+        # --- Logic UI presets: save to data_cache/ai_logic_presets/<preset_name>.json ---
+        @self.blueprint.post('/api/plugin/maid/logic/preset/save')
+        def maid_logic_preset_save():
+            """Autosave a Logic UI preset to server cache.
+
+            Body JSON:
+            {"preset_id": "p123", "preset_name": "My Flow", "graph": { nodes:[], edges:[] }, "client_ts": 1234567890}
+            Writes to: data_cache/ai_logic_presets/<safe_preset_name>.json
+            """
+            # Require auth (same as other Maid endpoints)
+            _ = _require_user()
+
+            try:
+                payload = request.get_json(force=True, silent=False) or {}
+            except Exception:
+                abort(400, description='Invalid JSON payload')
+
+            preset_id = str(payload.get('preset_id') or '').strip()
+            preset_name = str(payload.get('preset_name') or '').strip()
+            graph = payload.get('graph')
+            client_ts = payload.get('client_ts')
+
+            if not isinstance(graph, dict):
+                abort(400, description='Missing or invalid graph object')
+
+            # Sanitize filename from name; fallback to id; final fallback to 'preset'
+            base = preset_name or preset_id or 'preset'
+            # Replace invalid filename characters with underscore
+            import re
+            base = re.sub(r'[\\/:*?"<>|]+', '_', base).strip()
+            if not base:
+                base = 'preset'
+
+            # Ensure target directory exists
+            rel_dir = os.path.join('ai_logic_presets')
+            abs_dir = self.core_api.data_manager.get_path(rel_dir)
+            os.makedirs(abs_dir, exist_ok=True)
+
+            rel_path = os.path.join(rel_dir, f"{base}.json")
+            # Include minimal metadata for convenience
+            to_save = {
+                'preset_id': preset_id or None,
+                'preset_name': preset_name or None,
+                'client_ts': int(client_ts) if isinstance(client_ts, (int, float, str)) and str(client_ts).isdigit() else int(time.time() * 1000),
+                'graph': graph,
+            }
+            ok = self.core_api.data_manager.save_json(to_save, rel_path, obfuscated=False)
+            if not ok:
+                abort(500, description='Failed to write preset file')
+
+            return jsonify({
+                'status': 'ok',
+                'file': f"{base}.json",
+                'path': f"/data_cache/ai_logic_presets/{base}.json",
+            })
+
     def get_blueprint(self):
         # Mount at root so avatar URLs /user_image/maid_avatar/... remain stable
         # and models endpoint stays at /api/plugin/maid/models via absolute route.
