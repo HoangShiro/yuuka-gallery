@@ -377,4 +377,239 @@
       }catch(_e){ return {}; }
     }
   });
+  // Custom messages node: allows formatting or replacing content from Raw Results
+  add({
+    type: 'Custom messages',
+    category: 'process',
+    ports: { 
+      inputs: [ { id:'tool_results', label:'Raw Results' } ], 
+      outputs: [ { id:'response_message', label:'Response Message' } ] 
+    },
+    defaultData(){ return { mode: 'prompt', template: '', replacements: [] }; },
+    buildConfigUI(bodyEl, node, { onDataChange }){
+      node.data = node.data || {};
+      if(!node.data.mode) node.data.mode = 'prompt';
+      if(!node.data.template) node.data.template = '';
+      if(!Array.isArray(node.data.replacements)) node.data.replacements = [];
+
+      const container = document.createElement('div');
+      container.className = 'mc-custom-msg-container';
+
+      // Toggle Switch
+      const toggleRow = document.createElement('div');
+      toggleRow.className = 'mc-custom-msg-toggle-row';
+      
+      const label = document.createElement('span');
+      label.className = 'mc-custom-msg-label';
+      label.textContent = node.data.mode === 'prompt' ? 'System Prompt Mode' : 'Replacer Mode';
+
+      const toggleSwitch = document.createElement('div');
+      toggleSwitch.className = 'mc-custom-msg-switch';
+      toggleSwitch.style.background = node.data.mode === 'prompt' ? '#3a3b44' : '#ff6fa9';
+
+      const toggleKnob = document.createElement('div');
+      toggleKnob.className = 'mc-custom-msg-knob';
+      toggleKnob.style.left = node.data.mode === 'prompt' ? '2px' : '18px';
+
+      toggleSwitch.appendChild(toggleKnob);
+      toggleSwitch.onclick = () => {
+        node.data.mode = node.data.mode === 'prompt' ? 'replacer' : 'prompt';
+        label.textContent = node.data.mode === 'prompt' ? 'System Prompt Mode' : 'Replacer Mode';
+        toggleSwitch.style.background = node.data.mode === 'prompt' ? '#3a3b44' : '#ff6fa9';
+        toggleKnob.style.left = node.data.mode === 'prompt' ? '2px' : '18px';
+        updateVisibility();
+        onDataChange();
+      };
+
+      toggleRow.appendChild(label);
+      toggleRow.appendChild(toggleSwitch);
+      container.appendChild(toggleRow);
+
+      // Prompt Mode UI
+      const promptContainer = document.createElement('div');
+      const promptDesc = document.createElement('div');
+      promptDesc.className = 'mc-chip';
+      promptDesc.textContent = 'Use {{key}} to insert values from Raw Results. {{raw}} for full content.';
+      promptContainer.appendChild(promptDesc);
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'mc-custom-msg-textarea';
+      textarea.value = node.data.template;
+      textarea.placeholder = 'Example: Her name is {{char_name}}...';
+      textarea.oninput = () => {
+        node.data.template = textarea.value;
+        onDataChange();
+      };
+      promptContainer.appendChild(textarea);
+
+      // Replacer Mode UI
+      const replacerContainer = document.createElement('div');
+      replacerContainer.className = 'mc-custom-msg-replacer-container';
+
+      const replacerHeader = document.createElement('div');
+      replacerHeader.className = 'mc-custom-msg-replacer-header';
+      
+      const replacerTitle = document.createElement('span');
+      replacerTitle.className = 'mc-custom-msg-replacer-title';
+      replacerTitle.textContent = 'Replacements';
+
+      const addBtn = document.createElement('button');
+      addBtn.className = 'mc-custom-msg-add-btn';
+      addBtn.textContent = '+';
+      addBtn.onclick = () => {
+        node.data.replacements.push({ from: '', to: '' });
+        renderReplacements();
+        onDataChange();
+      };
+
+      replacerHeader.appendChild(replacerTitle);
+      replacerHeader.appendChild(addBtn);
+      replacerContainer.appendChild(replacerHeader);
+
+      const listContainer = document.createElement('div');
+      listContainer.className = 'mc-custom-msg-list';
+      replacerContainer.appendChild(listContainer);
+
+      function renderReplacements() {
+        listContainer.innerHTML = '';
+        node.data.replacements.forEach((rep, idx) => {
+          const row = document.createElement('div');
+          row.className = 'mc-custom-msg-row';
+
+          const fromInp = document.createElement('input');
+          fromInp.type = 'text';
+          fromInp.className = 'mc-custom-msg-input';
+          fromInp.value = rep.from;
+          fromInp.placeholder = 'To replace';
+          fromInp.onchange = () => { rep.from = fromInp.value; onDataChange(); };
+
+          const arrow = document.createElement('span');
+          arrow.className = 'mc-custom-msg-arrow';
+          arrow.textContent = '→';
+
+          const toInp = document.createElement('input');
+          toInp.type = 'text';
+          toInp.className = 'mc-custom-msg-input';
+          toInp.value = rep.to;
+          toInp.placeholder = 'Replacement';
+          toInp.onchange = () => { rep.to = toInp.value; onDataChange(); };
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'mc-custom-msg-del-btn';
+          delBtn.textContent = '✕';
+          delBtn.onclick = () => {
+            node.data.replacements.splice(idx, 1);
+            renderReplacements();
+            onDataChange();
+          };
+
+          row.appendChild(fromInp);
+          row.appendChild(arrow);
+          row.appendChild(toInp);
+          row.appendChild(delBtn);
+          listContainer.appendChild(row);
+        });
+      }
+
+      function updateVisibility() {
+        if (node.data.mode === 'prompt') {
+          promptContainer.style.display = 'block';
+          replacerContainer.style.display = 'none';
+        } else {
+          promptContainer.style.display = 'none';
+          replacerContainer.style.display = 'flex';
+          renderReplacements();
+        }
+      }
+
+      container.appendChild(promptContainer);
+      container.appendChild(replacerContainer);
+      bodyEl.appendChild(container);
+      
+      updateVisibility();
+    },
+    execute(ctx) {
+      const inputs = ctx.inputs || {};
+      let rawResults = inputs.tool_results;
+      if (!rawResults) rawResults = [];
+      
+      const mode = ctx.node.data.mode || 'prompt';
+
+      if (mode === 'prompt') {
+        let template = ctx.node.data.template || '';
+        
+        const findValue = (obj, key) => {
+            if (!obj) return undefined;
+            if (typeof obj !== 'object') return undefined;
+            if (!Array.isArray(obj) && key in obj) return obj[key];
+            
+            if (Array.isArray(obj)) {
+                for (const item of obj) {
+                    const found = findValue(item, key);
+                    if (found !== undefined) return found;
+                }
+            } else {
+                for (const k in obj) {
+                    if (obj[k] && typeof obj[k] === 'object') {
+                        const found = findValue(obj[k], key);
+                        if (found !== undefined) return found;
+                    }
+                }
+            }
+            return undefined;
+        };
+
+        if (template.includes('{{raw}}')) {
+            let rawStr = '';
+            try { rawStr = JSON.stringify(rawResults, null, 2); }
+            catch(e) { rawStr = String(rawResults); }
+            template = template.replace(/\{\{raw\}\}/g, rawStr);
+        }
+
+        template = template.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+            key = key.trim();
+            if (key === 'raw') return match;
+            let val = findValue(rawResults, key);
+            return val !== undefined ? String(val) : match;
+        });
+
+        return { response_message: template };
+
+      } else {
+        const replacements = ctx.node.data.replacements || [];
+        if (!replacements.length) return { response_message: rawResults };
+
+        const applyReplacements = (str) => {
+            let res = str;
+            for (const rep of replacements) {
+                if (rep.from) {
+                    res = res.split(rep.from).join(rep.to || '');
+                }
+            }
+            return res;
+        };
+
+        const process = (item) => {
+            if (typeof item === 'string') {
+                return applyReplacements(item);
+            }
+            if (Array.isArray(item)) {
+                return item.map(process);
+            }
+            if (item && typeof item === 'object') {
+                const newObj = {};
+                for (const k in item) {
+                    newObj[k] = process(item[k]);
+                }
+                return newObj;
+            }
+            return item;
+        };
+
+        const result = process(rawResults);
+        return { response_message: result };
+      }
+    }
+  });
+
 })();

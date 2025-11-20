@@ -223,8 +223,29 @@
       wrap.appendChild(msg); wrap.appendChild(tools); bodyEl.appendChild(wrap);
       const set = ({ message, response_message, text, toolsResult, tool_results })=>{
         // Handle message object or text string
-        const msgObj = message || response_message;
-        const content = (msgObj && (msgObj.content||msgObj.text)) || text || '';
+        let msgObj = message || response_message || text;
+        
+        // Helper to extract text content from a single item
+        const getText = (v) => {
+            if (typeof v === 'string') return v;
+            if (v && typeof v === 'object') return v.content || v.text || '';
+            return '';
+        };
+
+        let content = '';
+        if (Array.isArray(msgObj)) {
+            // If the array contains arrays (e.g. multiple inputs), flatten it
+            if (msgObj.length > 0 && Array.isArray(msgObj[0])) {
+                msgObj = msgObj.flat();
+            }
+            // Take the last item (assuming it's the latest message in a history or the result)
+            if (msgObj.length > 0) {
+                content = getText(msgObj[msgObj.length - 1]);
+            }
+        } else {
+            content = getText(msgObj);
+        }
+
         msg.textContent = content || '(empty)';
         
         const tRes = toolsResult || tool_results;
@@ -272,18 +293,17 @@
         const updater = PreviewRegistry.get(ctx.node.id);
         if(updater){
           const msgObj = (ctx.inputs && ctx.inputs.response_message) ? ctx.inputs.response_message : null;
-          const msgItem = Array.isArray(msgObj) ? msgObj[0] : msgObj;
           const toolsInput = ctx.inputs ? ctx.inputs.tool_results : null;
           const tools = (Array.isArray(toolsInput) && Array.isArray(toolsInput[0])) ? toolsInput.flat() : toolsInput;
           
           // Update UI immediately
-          updater({ message: msgItem, toolsResult: tools });
+          updater({ message: msgObj, toolsResult: tools });
           
           // Return data so the preview event contains it (preventing overwrite with empty data)
           // Include both keys to be safe for the updater
           return { 
-            message: msgItem,
-            response_message: msgItem, 
+            message: msgObj,
+            response_message: msgObj, 
             toolsResult: tools,
             tool_results: tools 
           };

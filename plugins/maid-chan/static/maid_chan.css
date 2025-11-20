@@ -1241,7 +1241,7 @@ body.mc-logic-lock-scroll { overflow: hidden; }
   display: grid;
   grid-auto-flow: column;
   gap: 4px;
-  z-index: 10;
+  z-index: 8150;
 }
 .mc-edge-index-option {
   appearance: none;
@@ -1319,3 +1319,22 @@ body.mc-logic-lock-scroll { overflow: hidden; }
   animation: mc-spin .8s linear infinite;
 }
 @keyframes mc-spin { to { transform: rotate(360deg); } }
+
+/* Custom Messages Node */
+.mc-custom-msg-container { display: flex; flex-direction: column; gap: 8px; }
+.mc-custom-msg-toggle-row { display: flex; align-items: center; justify-content: space-between; }
+.mc-custom-msg-label { font-size: 12px; font-weight: bold; }
+.mc-custom-msg-switch { width: 36px; height: 20px; border-radius: 10px; position: relative; cursor: pointer; transition: background 0.2s; }
+.mc-custom-msg-knob { width: 16px; height: 16px; background: #fff; border-radius: 50%; position: absolute; top: 2px; transition: left 0.2s; }
+.mc-custom-msg-textarea { width: 100%; min-height: 80px; background: #1e1f25; border: 1px solid #3a3b44; color: #eaeaf1; border-radius: 4px; padding: 6px; font-size: 12px; margin-top: 6px; box-sizing: border-box; }
+.mc-custom-msg-replacer-container { display: flex; flex-direction: column; gap: 6px; }
+.mc-custom-msg-replacer-header { display: flex; justify-content: space-between; align-items: center; }
+.mc-custom-msg-replacer-title { font-size: 12px; opacity: 0.8; }
+.mc-custom-msg-add-btn { padding: 2px 8px; background: #3a3b44; border: none; color: #fff; border-radius: 4px; cursor: pointer; }
+.mc-custom-msg-add-btn:hover { background: #4a4b55; }
+.mc-custom-msg-list { display: flex; flex-direction: column; gap: 4px; }
+.mc-custom-msg-row { display: flex; gap: 4px; align-items: center; }
+.mc-custom-msg-input { flex: 1; background: #1e1f25; border: 1px solid #3a3b44; color: #eaeaf1; border-radius: 4px; padding: 4px; font-size: 12px; width: 0; }
+.mc-custom-msg-arrow { opacity: 0.5; }
+.mc-custom-msg-del-btn { background: transparent; border: none; color: #ff5252; cursor: pointer; padding: 0 4px; }
+.mc-custom-msg-del-btn:hover { color: #ff8282; }

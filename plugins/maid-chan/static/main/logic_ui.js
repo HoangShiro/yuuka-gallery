@@ -427,6 +427,19 @@
     replayBtn.addEventListener('click', (e)=>{ e.stopPropagation(); onResetNode(node); });
     closeBtn.addEventListener('click', (e)=>{ e.stopPropagation(); onDeleteNode(node); });
 
+    // Auto-update edges when node size changes (e.g. content update)
+    // Use ResizeObserver to detect size changes of the node element
+    const ro = new ResizeObserver((entries)=>{
+      // Use requestAnimationFrame to avoid "ResizeObserver loop limit exceeded"
+      // and ensure we redraw after the layout is settled.
+      window.requestAnimationFrame(()=>{
+        if(typeof onMove === 'function') onMove();
+      });
+    });
+    ro.observe(el);
+    // Store observer on element to disconnect later if needed (though removing element disconnects automatically)
+    el._mcResizeObserver = ro;
+
     return { el };
   }
 
@@ -1004,6 +1017,11 @@
     const onResize = ()=> redraw();
     new ResizeObserver(onResize).observe(canvas);
     window.addEventListener('resize', onResize);
+
+    // Also refresh edges when preview content updates (even if node size is fixed)
+    // This event is dispatched by ai_logic/output when a Preview node renders new data.
+    const onPreviewUpdate = ()=> redraw();
+    window.addEventListener('maid-chan:preview:update', onPreviewUpdate);
     setTimeout(redraw, 0);
 
     // Preset events
@@ -1073,7 +1091,13 @@
       persistGraph();
       redraw();
     });
-    btnClose.addEventListener('click', ()=>{ overlay.remove(); window.removeEventListener('resize', onResize); document.body.classList.remove('mc-logic-lock-scroll'); });
+
+    btnClose.addEventListener('click', ()=>{ 
+      overlay.remove(); 
+      window.removeEventListener('resize', onResize); 
+      window.removeEventListener('maid-chan:preview:update', onPreviewUpdate);
+      document.body.classList.remove('mc-logic-lock-scroll'); 
+    });
 
     // Node execution glow helpers
     function setNodeRunning(nodeId, running){
