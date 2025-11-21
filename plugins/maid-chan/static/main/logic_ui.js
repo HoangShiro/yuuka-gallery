@@ -36,9 +36,9 @@
       const raw = window.localStorage.getItem(GRAPH_KEY);
       if(!raw) return null;
       const g = JSON.parse(raw);
-      // Migrate simple edge schema {from:'n1', to:'n2'} to port-aware
+      
+      // Legacy migrations
       if(g && Array.isArray(g.edges)){
-        let changed = false;
         for(let i=0;i<g.edges.length;i++){
           const e = g.edges[i];
           if(e && typeof e.from === 'string' && typeof e.to === 'string' && (e.fromNodeId == null || e.toNodeId == null)){
@@ -49,23 +49,18 @@
               toNodeId: e.to,
               toPort: 0
             };
-            changed = true;
           }
-        }
-        if(changed){
-          try{ window.localStorage.setItem(GRAPH_KEY, JSON.stringify(g)); }catch(_e){}
         }
       }
-        // Migrate node type renames
-        try{
-          if(g && Array.isArray(g.nodes)){
-            for(const n of g.nodes){
-              if(!n || !n.type) continue;
-              if(n.type === 'Tools Control') n.type = 'Tools loader';
-              if(n.type === 'LLM settings') n.type = 'LLM loader';
-            }
-          }
-        }catch(_e){}
+      if(g && Array.isArray(g.nodes)){
+        for(const n of g.nodes){
+          if(!n || !n.type) continue;
+          if(n.type === 'Tools Control') n.type = 'Tools loader';
+          if(n.type === 'LLM settings') n.type = 'LLM loader';
+        }
+      }
+
+      migrateGraph(g);
       return g;
     }catch(_e){ return null; }
   }
@@ -80,24 +75,24 @@
     // Create a minimal default: Persona -> LLM -> Save + Send to chat UI
     g = {
       nodes: [
-        { id:'n1', type:'Maid Persona', x:80, y:120, data:getDefaultNodeData('Maid Persona') },
-        { id:'n2', type:'User Persona', x:80, y:260, data:getDefaultNodeData('User Persona') },
-        { id:'n3', type:'Chat Samples', x:80, y:400, data:getDefaultNodeData('Chat Samples') },
-        { id:'n4', type:'Custom Prompt', x:80, y:40, data:getDefaultNodeData('Custom Prompt') },
-        { id:'n5', type:'LLM', x:360, y:220, data:getDefaultNodeData('LLM') },
-        { id:'n6', type:'Tools loader', x:360, y:360, data:getDefaultNodeData('Tools loader') },
-        { id:'n7', type:'Save history', x:660, y:200, data:getDefaultNodeData('Save history') },
-        { id:'n8', type:'Send to chat UI', x:660, y:300, data:getDefaultNodeData('Send to chat UI') }
+        { id:1, flow_id:0, type:'Maid Persona', x:80, y:120, data:getDefaultNodeData('Maid Persona') },
+        { id:2, flow_id:0, type:'User Persona', x:80, y:260, data:getDefaultNodeData('User Persona') },
+        { id:3, flow_id:0, type:'Chat Samples', x:80, y:400, data:getDefaultNodeData('Chat Samples') },
+        { id:4, flow_id:0, type:'Custom Prompt', x:80, y:40, data:getDefaultNodeData('Custom Prompt') },
+        { id:5, flow_id:0, type:'LLM', x:360, y:220, data:getDefaultNodeData('LLM') },
+        { id:6, flow_id:0, type:'Tools loader', x:360, y:360, data:getDefaultNodeData('Tools loader') },
+        { id:7, flow_id:0, type:'Save history', x:660, y:200, data:getDefaultNodeData('Save history') },
+        { id:8, flow_id:0, type:'Send to chat UI', x:660, y:300, data:getDefaultNodeData('Send to chat UI') }
       ],
       edges: [
         // New mapping: Maid/User/Custom -> Prompt input (port 0), Chat Samples -> History (port 1), Tools Control -> Tools control (port 2)
-        { id:'e1', fromNodeId:'n1', fromPort:0, toNodeId:'n5', toPort:0 },
-        { id:'e2', fromNodeId:'n2', fromPort:0, toNodeId:'n5', toPort:0 },
-        { id:'e3', fromNodeId:'n4', fromPort:0, toNodeId:'n5', toPort:0 },
-        { id:'e4', fromNodeId:'n3', fromPort:0, toNodeId:'n5', toPort:1 },
-        { id:'e5', fromNodeId:'n6', fromPort:0, toNodeId:'n5', toPort:2 },
-        { id:'e6', fromNodeId:'n5', fromPort:0, toNodeId:'n7', toPort:0 },
-        { id:'e7', fromNodeId:'n5', fromPort:0, toNodeId:'n8', toPort:0 }
+        { id:1, fromNodeId:1, fromPort:0, toNodeId:5, toPort:0 },
+        { id:2, fromNodeId:2, fromPort:0, toNodeId:5, toPort:0 },
+        { id:3, fromNodeId:4, fromPort:0, toNodeId:5, toPort:0 },
+        { id:4, fromNodeId:3, fromPort:0, toNodeId:5, toPort:1 },
+        { id:5, fromNodeId:6, fromPort:0, toNodeId:5, toPort:2 },
+        { id:6, fromNodeId:5, fromPort:0, toNodeId:7, toPort:0 },
+        { id:7, fromNodeId:5, fromPort:0, toNodeId:8, toPort:0 }
       ]
     };
     saveGraph(g);
@@ -106,8 +101,144 @@
 
   // Styles are now in maid_chan.css (no inline injection)
 
-  function uid(){ return 'n' + Math.random().toString(36).slice(2,9); }
-  function eid(){ return 'e' + Math.random().toString(36).slice(2,9); }
+  function getNextId(list) {
+    let max = 0;
+    for (const item of list) {
+      if (item && typeof item.id === 'number') {
+        if (item.id > max) max = item.id;
+      }
+    }
+    return max + 1;
+  }
+
+  function migrateGraph(g) {
+    if (!g || typeof g !== 'object') return;
+    if (!Array.isArray(g.nodes)) g.nodes = [];
+    if (!Array.isArray(g.edges)) g.edges = [];
+
+    // Build a map of *normalized* node ids without changing them yet
+    // This lets us handle cases like fromNodeId: "1" while node.id is number 1.
+    const idMap = new Map(); // key: original id (string or number) -> canonical numeric id
+    let maxNodeId = 0;
+    for (const n of g.nodes) {
+      if (!n) continue;
+      const rawId = n.id;
+      let numId = null;
+      if (typeof rawId === 'number' && Number.isFinite(rawId)) {
+        numId = rawId;
+      } else if (typeof rawId === 'string' && rawId.trim() !== '') {
+        const parsed = Number(rawId);
+        if (Number.isFinite(parsed)) numId = parsed;
+      }
+      if (numId == null || !Number.isFinite(numId)) {
+        // Assign a fresh id later
+        continue;
+      }
+      if (numId > maxNodeId) maxNodeId = numId;
+      idMap.set(rawId, numId);
+    }
+
+    // Second pass: ensure every node has a numeric id and flow_id.
+    // flow_id is preserved if present; it can be assigned/overridden
+    // by the runtime logic (AILogic.normalizeFlows) on load so that
+    // each disconnected branch forms its own flow, but we never drop
+    // or reassign it here to avoid fighting the execution layer.
+    for (const n of g.nodes) {
+      if (!n) continue;
+      const rawId = n.id;
+      let numId = idMap.get(rawId);
+      if (numId == null) {
+        maxNodeId += 1;
+        numId = maxNodeId;
+        idMap.set(rawId, numId);
+      }
+      n.id = numId;
+      if (n.flow_id === undefined) {
+        n.flow_id = 0;
+      }
+    }
+
+    // Normalize edges but NEVER drop them when migrating old data
+    const validEdges = [];
+    let maxEdgeId = 0;
+    for (const e of g.edges) {
+      if (!e) continue;
+      // Preserve original refs but normalize if possible
+      const fromKey = e.fromNodeId;
+      const toKey = e.toNodeId;
+      const mappedFrom = idMap.has(fromKey) ? idMap.get(fromKey) : fromKey;
+      const mappedTo = idMap.has(toKey) ? idMap.get(toKey) : toKey;
+      e.fromNodeId = mappedFrom;
+      e.toNodeId = mappedTo;
+
+      // Edge id normalization (best‑effort, non‑destructive)
+      if (typeof e.id === 'number' && Number.isFinite(e.id)) {
+        if (e.id > maxEdgeId) maxEdgeId = e.id;
+      } else if (typeof e.id === 'string') {
+        const parsed = Number(e.id);
+        if (Number.isFinite(parsed)) {
+          e.id = parsed;
+          if (e.id > maxEdgeId) maxEdgeId = e.id;
+        } else {
+          maxEdgeId += 1;
+          e.id = maxEdgeId;
+        }
+      } else {
+        maxEdgeId += 1;
+        e.id = maxEdgeId;
+      }
+      validEdges.push(e);
+    }
+    g.edges = validEdges;
+  }
+
+  // Assign flow_id so that each weakly-connected component (branch)
+  // forms its own flow. This is applied on the editor side whenever
+  // the graph is created or mutated, so presets persist sensible
+  // per-branch flow ids instead of lumping everything into 0.
+  function assignFlowsPerBranch(g){
+    if(!g || !Array.isArray(g.nodes)) return;
+    const nodes = g.nodes;
+    const edges = Array.isArray(g.edges) ? g.edges : [];
+    const nodeIds = nodes.map(n=>n && n.id).filter(id=>id!==undefined && id!==null);
+    if(!nodeIds.length) return;
+
+    const adj = new Map();
+    for(const id of nodeIds){ adj.set(id, new Set()); }
+    for(const e of edges){
+      if(!e) continue;
+      const a = e.fromNodeId;
+      const b = e.toNodeId;
+      if(!adj.has(a) || !adj.has(b)) continue;
+      adj.get(a).add(b);
+      adj.get(b).add(a);
+    }
+
+    const visited = new Set();
+    let nextFlowId = 0;
+    for(const id of nodeIds){
+      if(visited.has(id)) continue;
+      const stack = [id];
+      const comp = [];
+      visited.add(id);
+      while(stack.length){
+        const v = stack.pop();
+        comp.push(v);
+        const nbrs = adj.get(v) || [];
+        for(const nid of nbrs){
+          if(!visited.has(nid)){
+            visited.add(nid);
+            stack.push(nid);
+          }
+        }
+      }
+      for(const nid of comp){
+        const n = nodes.find(x=>x && x.id === nid);
+        if(n){ n.flow_id = nextFlowId; }
+      }
+      nextFlowId += 1;
+    }
+  }
 
   function drawEdges(svg, nodesPortMap, graph, onRemove, onReindex){
     while(svg.firstChild) svg.removeChild(svg.firstChild);
@@ -120,16 +251,27 @@
     const overlay = svg.parentElement;
     const oldButtons = overlay.querySelectorAll('[data-edge-button]');
     oldButtons.forEach(b => b.remove());
+    
     // Build group map for incoming edges sharing the same input port
     const groups = new Map(); // key: `${toNodeId}:${toPort}` -> { list: Edge[] }
+    // Build group map for outgoing edges sharing the same output port (for branching)
+    const outgoingGroups = new Map(); // key: `${fromNodeId}:${fromPort}` -> { list: Edge[] }
+
     const edges = (graph && Array.isArray(graph.edges)) ? graph.edges : [];
     for(const e of edges){
       if(!e) continue;
+      // Incoming groups
       const key = `${e.toNodeId}:${e.toPort||0}`;
       let g = groups.get(key); if(!g){ g = { list: [] }; groups.set(key, g); }
       g.list.push(e);
+      
+      // Outgoing groups
+      const outKey = `${e.fromNodeId}:${e.fromPort||0}`;
+      let og = outgoingGroups.get(outKey); if(!og){ og = { list: [] }; outgoingGroups.set(outKey, og); }
+      og.list.push(e);
     }
-    // Ensure indices 1..N in each group (stable by existing index then id)
+    
+    // Ensure indices 1..N in each incoming group (stable by existing index then id)
     for(const [,g] of groups){
       g.list.sort((a,b)=>{
         const ia = Number.isFinite(a.index)? a.index : Infinity;
@@ -139,6 +281,13 @@
       });
       g.list.forEach((e, i)=>{ e.index = i+1; });
     }
+
+    // Ensure indices 0..N in each outgoing group (stable by ID)
+    for(const [,g] of outgoingGroups){
+      g.list.sort((a,b)=> String(a.id).localeCompare(String(b.id)));
+      g.list.forEach((e, i)=>{ e._branchIndex = i; });
+    }
+
     // Helpers to get node and category
     const nodeById = new Map();
     for(const n of (graph.nodes||[])){ if(n && n.id) nodeById.set(n.id, n); }
@@ -146,6 +295,14 @@
       const def = node && getNodeDef(node.type);
       return def && def.category || 'unknown';
     }
+    // Helper to check if output port is branching
+    function isBranchingPort(node, portIndex){
+        const def = node && getNodeDef(node.type);
+        if(!def || !def.ports || !def.ports.outputs) return false;
+        const p = def.ports.outputs[portIndex];
+        return p && (p.branching === true || p.type === 'branching');
+    }
+
     for(const e of edges){
       if(!e) continue;
       const fromKey = `${e.fromNodeId}:out:${e.fromPort||0}`;
@@ -164,6 +321,7 @@
       const mx = (x1 + x2)/2;
       const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
       path.setAttribute('d', d);
+      
       // Color based on connection types
       const fromNode = nodeById.get(e.fromNodeId);
       const toNode = nodeById.get(e.toNodeId);
@@ -171,16 +329,55 @@
       const toType = nodeCat(toNode);
       let stroke = '#6d7ab4';
       let opacity = '0.85';
-      if(fromType === 'process' && toType === 'process'){ stroke = '#ff6fa9'; opacity = '0.95'; }
+      
+      const isBranching = isBranchingPort(fromNode, e.fromPort||0);
+
+      if(isBranching){
+          stroke = '#ffd700'; // Fallback if class not applied or overridden
+          path.classList.add('mc-edge-branch');
+      } else if(fromType === 'process' && toType === 'process'){ stroke = '#ff6fa9'; opacity = '0.95'; }
       else if(fromType === 'input' && toType === 'process'){ stroke = '#34c759'; opacity = '0.5'; }
       else if(fromType === 'process' && toType === 'output'){ stroke = '#6d7ab4'; opacity = '0.6'; }
       else if(fromType === 'input' && toType === 'output'){ stroke = '#8b8e9c'; opacity = '0.5'; }
-      path.setAttribute('stroke', stroke);
-      path.setAttribute('stroke-opacity', opacity);
+      
+      if(!isBranching){
+          path.setAttribute('stroke', stroke);
+          path.setAttribute('stroke-opacity', opacity);
+      }
       path.setAttribute('stroke-width', '2');
       path.setAttribute('fill', 'none');
       path.setAttribute('data-edge-id', e.id);
       svg.appendChild(path);
+
+      // Draw branch index label if branching
+      if(isBranching && Number.isFinite(e._branchIndex)){
+          // Position near the end (target node), slightly offset along the curve
+          // Cubic Bezier: B(t) = (1-t)^3 P0 + 3(1-t)^2 t P1 + 3(1-t) t^2 P2 + t^3 P3
+          // P0=(x1,y1), P1=(mx,y1), P2=(mx,y2), P3=(x2,y2)
+          const t = 0.9; // 90% along the curve
+          const mt = 1-t;
+          const mt2 = mt*mt;
+          const mt3 = mt2*mt;
+          const t2 = t*t;
+          const t3 = t2*t;
+
+          const lx = mt3*x1 + 3*mt2*t*mx + 3*mt*t2*mx + t3*x2;
+          const ly = mt3*y1 + 3*mt2*t*y1 + 3*mt*t2*y2 + t3*y2;
+          
+          const bg = document.createElementNS(ns, 'circle');
+          bg.setAttribute('cx', lx);
+          bg.setAttribute('cy', ly);
+          bg.setAttribute('r', '7');
+          bg.setAttribute('class', 'mc-edge-branch-bg');
+          svg.appendChild(bg);
+
+          const txt = document.createElementNS(ns, 'text');
+          txt.setAttribute('x', lx);
+          txt.setAttribute('y', ly);
+          txt.setAttribute('class', 'mc-edge-branch-label');
+          txt.textContent = String(e._branchIndex + 1); // 1-based for display
+          svg.appendChild(txt);
+      }
 
       // Add center delete button overlay
       const cx = (x1 + x2)/2;
@@ -266,22 +463,46 @@
     // Check if process node to add Play button
     const def = getNodeDef(node.type);
     const isProcess = (def && def.category === 'process') || (node.type === 'Tools loader' && node.data && node.data.execute === true);
-    if(isProcess){
-      const playBtn = document.createElement('button'); playBtn.type='button'; playBtn.className='mc-icon-btn'; playBtn.innerHTML='<span class="material-symbols-outlined">play_arrow</span>';
-      playBtn.title = 'Run from this stage';
-      playBtn.addEventListener('mousedown', (e)=> e.stopPropagation(), { capture: true });
-      playBtn.addEventListener('click', (e)=>{ e.stopPropagation(); if(typeof onRunStage === 'function') onRunStage(node); });
-      actions.appendChild(playBtn);
+      if(isProcess){
+        const playBtn = document.createElement('button'); playBtn.type='button'; playBtn.className='mc-icon-btn'; playBtn.innerHTML='<span class="material-symbols-outlined">play_arrow</span>';
+        playBtn.title = 'Run from this stage';
+        playBtn.addEventListener('mousedown', (e)=> e.stopPropagation(), { capture: true });
+        playBtn.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          if(typeof onRunStage === 'function'){
+            onRunStage(node);
+          }
+        });
+        actions.appendChild(playBtn);
+      }
+    function runStageForNode(node){
+      try{
+        const nodeId = node && node.id;
+        const s = currentStageMap && nodeId ? (currentStageMap.get(nodeId) || 1) : 1;
+        window.dispatchEvent(new CustomEvent('maid-chan:logic:run-stage',{
+          detail:{
+            stage: s,
+            nodeId,
+            presetId: activePresetId,
+            graph
+          }
+        }));
+      }catch(_e){}
     }
 
+    // Duplicate button: clone this node (with current data) near original
+    const duplicateBtn = document.createElement('button'); duplicateBtn.type='button'; duplicateBtn.className='mc-icon-btn'; duplicateBtn.innerHTML='<span class="material-symbols-outlined">tab_duplicate</span>';
     const replayBtn = document.createElement('button'); replayBtn.type='button'; replayBtn.className='mc-icon-btn'; replayBtn.innerHTML='<span class="material-symbols-outlined">replay</span>';
     const closeBtn = document.createElement('button'); closeBtn.type='button'; closeBtn.className='mc-icon-btn'; closeBtn.innerHTML='<span class="material-symbols-outlined">close</span>';
     // Avoid bring-to-front/drag swallowing first click on buttons
-    [replayBtn, closeBtn].forEach(btn=>{
+    [duplicateBtn, replayBtn, closeBtn].forEach(btn=>{
       btn.addEventListener('mousedown', (e)=> e.stopPropagation(), { capture: true });
       btn.addEventListener('click', (e)=> e.stopPropagation());
     });
-    actions.appendChild(replayBtn); actions.appendChild(closeBtn); header.appendChild(actions);
+    actions.appendChild(duplicateBtn);
+    actions.appendChild(replayBtn);
+    actions.appendChild(closeBtn);
+    header.appendChild(actions);
     const body = document.createElement('div'); body.className = 'mc-node-body';
     // Ensure long content wraps and scrolls instead of expanding width
     body.style.overflow = 'auto';
@@ -424,6 +645,13 @@
     window.addEventListener('mouseup', ()=>{ if(dragging){ dragging=false; onDataChange(); } });
 
     // Header actions
+    duplicateBtn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      try{
+        if(!window.__MaidChanLogicDuplicateNode) return;
+        window.__MaidChanLogicDuplicateNode(node);
+      }catch(_e){}
+    });
     replayBtn.addEventListener('click', (e)=>{ e.stopPropagation(); onResetNode(node); });
     closeBtn.addEventListener('click', (e)=>{ e.stopPropagation(); onDeleteNode(node); });
 
@@ -654,8 +882,20 @@
     function listPresets(){ return readJSON(PRESET_LIST_KEY, []) || []; }
     function savePresetList(list){ writeJSON(PRESET_LIST_KEY, list||[]); }
     function presetKey(id){ return PRESET_ITEM_PREFIX + id; }
-    function loadPresetGraph(id){ return readJSON(presetKey(id), null); }
-    function savePresetGraph(id, g){ writeJSON(presetKey(id), g||{nodes:[],edges:[]}); }
+    function loadPresetGraph(id){
+      const g = readJSON(presetKey(id), null);
+      if(g && typeof g === 'object' && Array.isArray(g.nodes)){
+        // Normalize graph structure (ids, flow_id, edges)
+        migrateGraph(g);
+      }
+      return g;
+    }
+    function savePresetGraph(id, g){
+      const graph = g && typeof g === 'object' ? g : { nodes: [], edges: [] };
+      // Ensure we persist a normalized graph
+      migrateGraph(graph);
+      writeJSON(presetKey(id), graph);
+    }
     function currentPresetId(){ return readJSON(CURRENT_PRESET_KEY, null); }
     function setCurrentPreset(id){ writeJSON(CURRENT_PRESET_KEY, id); }
     function newId(){ return 'p' + Math.random().toString(36).slice(2,9); }
@@ -734,6 +974,10 @@
 
     // Unified autosave: save active graph to preset and global key
     function persistGraph(){
+      // Ensure flows are assigned per branch before saving so presets
+      // store a stable, meaningful flow_id for each disconnected
+      // subgraph.
+      assignFlowsPerBranch(graph);
       savePresetGraph(activePresetId, graph);
       saveGraph(graph);
       // Also autosave to backend as <preset_name>.json
@@ -764,6 +1008,31 @@
     let currentStageMap = new Map();
     const nodesPortMap = new Map(); // key: `${nodeId}:in|out:${port}` -> HTMLElement
     let draggingEdge = null; // { src:{nodeId,port}, pathEl }
+
+    // Expose a helper so header duplicate button can clone nodes with current graph context
+    window.__MaidChanLogicDuplicateNode = (srcNode)=>{
+      try{
+        if(!srcNode || !srcNode.id || !Array.isArray(graph.nodes)) return;
+        const baseX = Number.isFinite(srcNode.x) ? srcNode.x : 0;
+        const baseY = Number.isFinite(srcNode.y) ? srcNode.y : 0;
+        const copy = {
+          id: getNextId(graph.nodes),
+          flow_id: srcNode.flow_id !== undefined ? srcNode.flow_id : 0,
+          type: srcNode.type,
+          x: baseX + 40,
+          y: baseY + 40,
+          w: srcNode.w,
+          h: srcNode.h,
+          data: JSON.parse(JSON.stringify(srcNode.data||{}))
+        };
+        graph.nodes.push(copy);
+        const built = createNodeEl(copy, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode);
+        nodeEls.set(copy.id, built.el);
+        viewport.appendChild(built.el);
+        persistGraph();
+        redraw();
+      }catch(_e){}
+    };
 
     // Normalize indices across all input groups
     function normalizeEdgeIndices(){
@@ -977,14 +1246,16 @@
                 // silently ignore invalid connection
               } else {
               // prevent duplicate
-                const exists = (graph.edges||[]).some(ed => ed.fromNodeId===out.nodeId && ed.fromPort===out.port && ed.toNodeId===inn.nodeId && ed.toPort===inn.port);
+                const fromId = Number(out.nodeId);
+                const toId = Number(inn.nodeId);
+                const exists = (graph.edges||[]).some(ed => ed.fromNodeId===fromId && ed.fromPort===out.port && ed.toNodeId===toId && ed.toPort===inn.port);
                 if(!exists){
                   graph.edges = graph.edges || [];
                   // Assign default index at the end of this input group
-                  const groupLen = (graph.edges||[]).filter(ed => ed.toNodeId===inn.nodeId && (ed.toPort||0)===(inn.port||0)).length;
-                  graph.edges.push({ id: eid(), fromNodeId: out.nodeId, fromPort: out.port, toNodeId: inn.nodeId, toPort: inn.port, index: groupLen+1 });
+                  const groupLen = (graph.edges||[]).filter(ed => ed.toNodeId===toId && (ed.toPort||0)===(inn.port||0)).length;
+                  graph.edges.push({ id: getNextId(graph.edges), fromNodeId: fromId, fromPort: out.port, toNodeId: toId, toPort: inn.port, index: groupLen+1 });
                   // Normalize indices afterward for safety
-                  const list = (graph.edges||[]).filter(ed => ed.toNodeId===inn.nodeId && (ed.toPort||0)===(inn.port||0));
+                  const list = (graph.edges||[]).filter(ed => ed.toNodeId===toId && (ed.toPort||0)===(inn.port||0));
                   list.sort((a,b)=>{
                     const ia = Number.isFinite(a.index)? a.index : Infinity;
                     const ib = Number.isFinite(b.index)? b.index : Infinity;
@@ -1112,7 +1383,8 @@
       const s = currentStageMap.get(node.id) || 1;
       const runId = 'run_' + Math.random().toString(36).slice(2,9);
       try{
-        const detail = { presetId: activePresetId, stage: s, runId, graph };
+        // Include nodeId so the runner can infer the correct flow_id
+        const detail = { presetId: activePresetId, stage: s, runId, graph, nodeId: node.id };
         window.dispatchEvent(new CustomEvent('maid-chan:logic:run-stage', { detail }));
       }catch(_e){}
     }
@@ -1202,8 +1474,8 @@
         for(const t of cat.nodes){
           const li = document.createElement('li'); li.className='mc-palette-item'; li.textContent = t;
           li.addEventListener('click', ()=>{
-            const id = uid();
-            const node = { id, type:t, x: x-80, y: y-20, data: getDefaultNodeData(t) };
+            const id = getNextId(graph.nodes);
+            const node = { id, flow_id: 0, type:t, x: x-80, y: y-20, data: getDefaultNodeData(t) };
             graph.nodes.push(node); persistGraph();
             const built = createNodeEl(node, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode);
             nodeEls.set(id, built.el); viewport.appendChild(built.el); redraw(); closePalette();
@@ -1258,6 +1530,8 @@
   // Public API (optional)
   window.Yuuka = window.Yuuka || {}; window.Yuuka.components = window.Yuuka.components || {};
   window.Yuuka.components.MaidChanLogicUI = { open: openEditor };
+
+
 
   // Auto-register feature early
   registerFeature();

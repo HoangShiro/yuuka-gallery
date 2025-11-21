@@ -1,177 +1,291 @@
 {
+  "preset_id": "p22kkjh7",
+  "preset_name": "Default",
+  "client_ts": 1763716194009,
+  "graph": {
     "nodes": [
       {
-        "id": "n1",
-        "type": "Maid Persona",
-        "x": 80.59926484409725,
-        "y": -38.23219802602337,
-        "data": {},
-        "w": 271.4195049349416,
-        "h": 196.28463614289106
-      },
-      {
-        "id": "n2",
-        "type": "User Persona",
-        "x": 360.59926484409726,
-        "y": -38.23219802602337,
+        "id": 1,
+        "flow_id": 0,
+        "type": "LLM",
+        "x": 681.2016205731959,
+        "y": 390.94993834966647,
         "data": {}
       },
       {
-        "id": "n3",
-        "type": "Chat Samples",
-        "x": -77.11609901301168,
-        "y": 201.44195049349415,
+        "id": 2,
+        "flow_id": 0,
+        "type": "User Input",
+        "x": -246.92121153637808,
+        "y": 464.2964349548124,
+        "data": {}
+      },
+      {
+        "id": 3,
+        "flow_id": 0,
+        "type": "Maid Persona",
+        "x": 317.1488109791386,
+        "y": -144.788902588963,
         "data": {},
-        "w": 313.99632422048626,
+        "w": 265.2269317317829,
+        "h": 193
+      },
+      {
+        "id": 4,
+        "flow_id": 0,
+        "type": "User Persona",
+        "x": 70.56427690709522,
+        "y": -45.45872820157671,
+        "data": {}
+      },
+      {
+        "id": 5,
+        "flow_id": 0,
+        "type": "Chat Samples",
+        "x": -190.5967588536083,
+        "y": 292.18404086937545,
+        "data": {},
+        "w": 254.05100395167523,
         "h": 150
       },
       {
-        "id": "n4",
-        "type": "Custom Prompt",
-        "x": 600.0150939995251,
-        "y": -39.60681184385979,
-        "data": {
-          "text": "Respond to user's last request briefly, keeping in character."
-        }
-      },
-      {
-        "id": "n5",
-        "type": "LLM",
-        "x": 438.09535000804533,
-        "y": 323.58290277852274,
-        "data": {}
-      },
-      {
-        "id": "n7",
-        "type": "Save history",
-        "x": 881.0986734642531,
-        "y": 320.33354925784056,
-        "data": {}
-      },
-      {
-        "id": "n4v4tzag",
-        "type": "Preview",
-        "x": 842.1853771180805,
-        "y": 560.5803948618537,
-        "data": {}
-      },
-      {
-        "id": "nrv03y7g",
-        "type": "LLM loader",
-        "x": -39.104980856254144,
-        "y": 562.6548048184947,
-        "data": {
-          "model": "",
-          "temperature": 0.7,
-          "top_p": 1,
-          "max_tokens": 512
-        }
-      },
-      {
-        "id": "nt8xn28i",
+        "id": 6,
+        "flow_id": 0,
         "type": "Read history",
-        "x": -74.25831936408969,
-        "y": 364.2285222465096,
+        "x": 80.34010511051164,
+        "y": 750.304729973024,
         "data": {
           "maxItems": 20
         }
       },
       {
-        "id": "n50y50f7",
-        "type": "User Input",
-        "x": 844,
-        "y": 117.5871880839961,
+        "id": 7,
+        "flow_id": 0,
+        "type": "Custom Prompt",
+        "x": -78.98242029617958,
+        "y": 101.18404086937544,
+        "data": {
+          "text": "Please answer the last user request briefly and in character."
+        }
+      },
+      {
+        "id": 8,
+        "flow_id": 0,
+        "type": "LLM loader",
+        "x": 368.42353360801377,
+        "y": 783.5242139918158,
+        "data": {
+          "model": "gemini-2.5-flash-lite",
+          "temperature": 1,
+          "top_p": 1,
+          "max_tokens": 512
+        },
+        "w": 220,
+        "h": 314
+      },
+      {
+        "id": 10,
+        "flow_id": 0,
+        "type": "Save history",
+        "x": 1115,
+        "y": 114.72434211195561,
+        "data": {}
+      },
+      {
+        "id": 12,
+        "flow_id": 0,
+        "type": "Send to chat UI",
+        "x": 1116.6378289440222,
+        "y": 272.0246701658818,
+        "data": {}
+      },
+      {
+        "id": 14,
+        "flow_id": 0,
+        "type": "Reply UI effect",
+        "x": 89.31978977897671,
+        "y": 589.6651504150706,
+        "data": {}
+      },
+      {
+        "id": 15,
+        "flow_id": 0,
+        "type": "Reply UI effect",
+        "x": 1115,
+        "y": 424.6395795579534,
+        "data": {}
+      },
+      {
+        "id": 16,
+        "flow_id": 0,
+        "type": "Preview",
+        "x": 1113.5513157760888,
+        "y": 584,
+        "data": {}
+      },
+      {
+        "id": 17,
+        "flow_id": 0,
+        "type": "Send to chat bubble",
+        "x": 1114.2917764577617,
+        "y": -16.929605416051047,
         "data": {}
       }
     ],
     "edges": [
       {
-        "id": "e1",
-        "fromNodeId": "n1",
-        "fromPort": 0,
-        "toNodeId": "n5",
+        "id": 1,
+        "fromNodeId": 2,
+        "fromPort": 1,
+        "toNodeId": 6,
         "toPort": 0,
-        "index": 1
+        "index": 1,
+        "_branchIndex": 0
       },
       {
-        "id": "e2",
-        "fromNodeId": "n2",
+        "id": 2,
+        "fromNodeId": 3,
         "fromPort": 0,
-        "toNodeId": "n5",
+        "toNodeId": 1,
         "toPort": 0,
-        "index": 2
+        "index": 1,
+        "_branchIndex": 0
       },
       {
-        "id": "e3",
-        "fromNodeId": "n4",
+        "id": 3,
+        "fromNodeId": 4,
         "fromPort": 0,
-        "toNodeId": "n5",
+        "toNodeId": 1,
         "toPort": 0,
-        "index": 3
+        "index": 2,
+        "_branchIndex": 0
       },
       {
-        "id": "e4",
-        "fromNodeId": "n3",
+        "id": 4,
+        "fromNodeId": 5,
         "fromPort": 0,
-        "toNodeId": "n5",
+        "toNodeId": 1,
         "toPort": 1,
-        "index": 1
+        "index": 1,
+        "_branchIndex": 0
       },
       {
-        "id": "e6",
-        "fromNodeId": "n5",
+        "id": 5,
+        "fromNodeId": 6,
         "fromPort": 0,
-        "toNodeId": "n7",
+        "toNodeId": 1,
+        "toPort": 1,
+        "index": 2,
+        "_branchIndex": 0
+      },
+      {
+        "id": 6,
+        "fromNodeId": 2,
+        "fromPort": 0,
+        "toNodeId": 1,
+        "toPort": 1,
+        "index": 3,
+        "_branchIndex": 1
+      },
+      {
+        "id": 7,
+        "fromNodeId": 7,
+        "fromPort": 0,
+        "toNodeId": 1,
         "toPort": 0,
-        "index": 2
+        "index": 3,
+        "_branchIndex": 0
       },
       {
-        "id": "erj3ly7a",
-        "fromNodeId": "nrv03y7g",
+        "id": 8,
+        "fromNodeId": 8,
         "fromPort": 0,
-        "toNodeId": "n5",
+        "toNodeId": 1,
         "toPort": 3,
-        "index": 1
+        "index": 1,
+        "_branchIndex": 0
       },
       {
-        "id": "esn53ekk",
-        "fromNodeId": "n5",
+        "id": 9,
+        "fromNodeId": 2,
         "fromPort": 0,
-        "toNodeId": "n4v4tzag",
-        "toPort": 1,
-        "index": 1
-      },
-      {
-        "id": "e3prwyt7",
-        "fromNodeId": "n5",
-        "fromPort": 0,
-        "toNodeId": "n4v4tzag",
+        "toNodeId": 10,
         "toPort": 0,
-        "index": 1
+        "index": 1,
+        "_branchIndex": 2
       },
       {
-        "id": "epecx6u4",
-        "fromNodeId": "nt8xn28i",
+        "id": 10,
+        "fromNodeId": 1,
         "fromPort": 0,
-        "toNodeId": "n5",
-        "toPort": 1,
-        "index": 2
-      },
-      {
-        "id": "e5303fua",
-        "fromNodeId": "n50y50f7",
-        "fromPort": 0,
-        "toNodeId": "n5",
-        "toPort": 1,
-        "index": 3
-      },
-      {
-        "id": "empi1eit",
-        "fromNodeId": "n50y50f7",
-        "fromPort": 0,
-        "toNodeId": "n7",
+        "toNodeId": 10,
         "toPort": 0,
-        "index": 1
+        "index": 2,
+        "_branchIndex": 0
+      },
+      {
+        "id": 13,
+        "fromNodeId": 1,
+        "fromPort": 0,
+        "toNodeId": 12,
+        "toPort": 0,
+        "index": 1,
+        "_branchIndex": 1
+      },
+      {
+        "id": 16,
+        "fromNodeId": 2,
+        "fromPort": 1,
+        "toNodeId": 1,
+        "toPort": 5,
+        "index": 1,
+        "_branchIndex": 1
+      },
+      {
+        "id": 18,
+        "fromNodeId": 1,
+        "fromPort": 0,
+        "toNodeId": 15,
+        "toPort": 1,
+        "index": 1,
+        "_branchIndex": 2
+      },
+      {
+        "id": 19,
+        "fromNodeId": 1,
+        "fromPort": 0,
+        "toNodeId": 16,
+        "toPort": 0,
+        "index": 1,
+        "_branchIndex": 3
+      },
+      {
+        "id": 20,
+        "fromNodeId": 1,
+        "fromPort": 0,
+        "toNodeId": 16,
+        "toPort": 1,
+        "index": 1,
+        "_branchIndex": 4
+      },
+      {
+        "id": 21,
+        "fromNodeId": 2,
+        "fromPort": 0,
+        "toNodeId": 14,
+        "toPort": 0,
+        "index": 1,
+        "_branchIndex": 0
+      },
+      {
+        "id": 22,
+        "fromNodeId": 1,
+        "fromPort": 0,
+        "toNodeId": 17,
+        "toPort": 0,
+        "index": 1,
+        "_branchIndex": 5
       }
     ]
   }
+}

@@ -31,7 +31,12 @@
 }
 .maid-chan-bubble:hover { box-shadow: 0 6px 18px rgba(0,0,0,.5); transform: translateY(-3px); }
 .maid-chan-bubble img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-.maid-chan-bubble.is-dragging { box-shadow: 0 0 0 3px rgba(255,255,255,.25); cursor: grabbing; transform: none !important; }
+.maid-chan-bubble.is-dragging {
+  box-shadow: 0 0 0 3px rgba(255,255,255,.25);
+  cursor: grabbing;
+  transform: none !important;
+  transition: none;
+}
 
 /* Idle/unfocused state: dim and shrink a bit */
 .maid-chan-bubble.is-idle { opacity: .55; transform: scale(.86); filter: saturate(.9) blur(.4px); }
@@ -62,9 +67,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(30,31,38,0.92);
+  background: rgba(30, 31, 38, 0.541);
   color: #ffb0d3;
-  box-shadow: 0 4px 12px rgba(0,0,0,.55);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.301);
   cursor: pointer;
   transition: transform .18s ease, box-shadow .2s ease, background .2s ease, color .2s ease;
 }
@@ -104,10 +109,69 @@
   to   { opacity: 0; transform: translateY(4px) scale(.94); }
 }
 
+.maid-quick-chat-panel {
+  position: fixed;
+  z-index: 5005;
+  display: none;
+  flex-direction: column;
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  padding: 12px;
+  pointer-events: auto;
+}
+
+.maid-quick-chat-panel.open {
+  display: flex;
+  animation: maidQuickFadeIn .22s ease-out;
+}
+
+.maid-quick-chat-body {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.maid-quick-chat-input {
+  flex: 1 1 auto;
+  min-height: 44px;
+  max-height: 160px;
+  resize: none;
+}
+
+.maid-quick-chat-send {
+  flex: 0 0 auto;
+  width: 46px;
+  border: none;
+  background: transparent;
+  color: #ff9fbf;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  transition: color .2s ease, transform .15s ease;
+}
+
+.maid-quick-chat-send:hover {
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.maid-quick-chat-send:active {
+  transform: translateY(1px);
+}
+
+.maid-quick-chat-send:focus-visible {
+  outline: 2px solid #ff6fa9;
+  outline-offset: 2px;
+}
+
 /* Maid chat bubbles (toast-like) */
 .maid-chat-container { position: fixed; display: flex; flex-direction: column; align-items: stretch; gap: 8px; z-index: 6000; pointer-events: none; }
 .maid-chat-container.right { align-items: flex-start; }
 .maid-chat-container.left { align-items: flex-end; }
+.maid-chat-container.below { flex-direction: column; }
+.maid-chat-container.above { flex-direction: column-reverse; }
 .maid-chat-bubble { pointer-events: auto; max-width: 320px; background: #21222b; color: #eaeaf1; border: none; border-radius: 12px; padding: 10px 12px; box-shadow: 0 6px 18px rgba(0,0,0,.5); position: relative; overflow: hidden; }
 .maid-chat-bubble .maid-chat-text { font-size: 13px; line-height: 1.5; }
 .maid-chat-bubble.enter { animation: mcChatEnter .28s ease-out; }
@@ -570,8 +634,8 @@
   resize: none;
   padding: 8px 10px;
   border-radius: 10px;
-  border: 1px solid #3a3b44;
-  background: #181920;
+  border: 1px solid transparent;
+  background: #18192083;
   color: #f0eff4;
   font-size: 13px;
   line-height: 1.4;
@@ -589,10 +653,9 @@
 }
 
 .maid-chan-chat-send {
-  padding: 8px 12px;
+  padding: 6px 8px;
   border-radius: 999px;
-  border: 1px solid #3a3b44;
-  background: #2a2b33;
+  background: #18192083;
   color: #f0eff4;
   cursor: pointer;
   display: inline-flex;
@@ -989,6 +1052,38 @@ body.mc-logic-lock-scroll { overflow: hidden; }
 /* Node textarea small variant */
 .mc-node-textarea-small { font-size: 12px; }
 
+/* Node input small variant */
+.mc-node-input {
+  background: #1f2230;
+  border: 1px solid #3a3b44;
+  color: #e5e7ee;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color .2s;
+}
+.mc-node-input:focus { border-color: #7c4dff; }
+
+/* Generic button inside node body */
+.mc-node-body button {
+  background: #2a2b33;
+  border: 1px solid #3a3b44;
+  color: #d0d1d7;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all .2s;
+}
+.mc-node-body button:hover {
+  background: #33343d;
+  color: #fff;
+  border-color: #555;
+}
+.mc-node-body button:active {
+  transform: translateY(1px);
+}
+
 /* Resizable corners for nodes (icon-only, no background/border) */
 .mc-node-resize { position: absolute; width: 18px; height: 18px; background: transparent; border: none; z-index: 2; cursor: nwse-resize; display: inline-flex; align-items: center; justify-content: center; color: #e5e7ee; opacity: 0; transition: opacity .15s ease; }
 .mc-node-resize:hover { opacity: .9; }
@@ -1338,3 +1433,85 @@ body.mc-logic-lock-scroll { overflow: hidden; }
 .mc-custom-msg-arrow { opacity: 0.5; }
 .mc-custom-msg-del-btn { background: transparent; border: none; color: #ff5252; cursor: pointer; padding: 0 4px; }
 .mc-custom-msg-del-btn:hover { color: #ff8282; }
+
+/* Logger node */
+.mc-logger-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mc-logger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.mc-logger-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.mc-logger-time {
+  font-size: 11px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.mc-logger-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #12141b;
+  border: 1px solid #2b2d36;
+  color: #e5e7ee;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.mc-logger-remove {
+  border: none;
+  background: transparent;
+  color: #ff8282;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.mc-logger-remove:hover {
+  color: #ffb0b0;
+}
+
+.mc-logger-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.mc-logger-control {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.mc-logger-control input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  background: #12141b;
+  border: 1px solid #2b2d36;
+  color: #e5e7ee;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+/* Branching Edge Styles */
+.mc-edge-branch { stroke: #ffd700 !important; stroke-opacity: 0.9 !important; }
+.mc-edge-branch-label { fill: #ffd700; font-size: 10px; font-family: sans-serif; font-weight: bold; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+.mc-edge-branch-bg { fill: #1f2130; }

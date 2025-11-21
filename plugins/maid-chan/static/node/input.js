@@ -127,43 +127,133 @@
   add({
     type: 'User Input',
     category: 'input',
-    ports: { inputs: [], outputs: [ { id:'messages', label:'Messages' } ] },
-    defaultData(){ return {}; },
-    buildConfigUI(bodyEl){ /* intentionally blank */ },
-    execute(ctx){
-      // Return the text provided in the execution context (from user input)
-      const text = (ctx && ctx.text) || '';
-      return { messages: text ? [{ role: 'user', content: text }] : [] };
-    }
-  });
-
-  // Simulated user input node: allows entering text directly on the node.
-  // AILogic will inject this text into LLM history when wired to an LLM History port,
-  // and will also persist it if wired to "Save history".
-  add({
-    type: 'User Input SM',
-    category: 'input',
-    ports: { inputs: [], outputs: [ { id:'messages', label:'Messages' } ] },
-    defaultData(){ return { text: '' }; },
+    // Added Message control output to coordinate Regen mode behavior downstream
+    ports: { inputs: [], outputs: [ { id:'messages', label:'Messages' }, { id:'message_control', label:'Message control' } ] },
+    defaultData(){ return { user_text: '', user_msg_id: '', assistant_msg_id: '' }; },
     buildConfigUI(bodyEl, node, { onDataChange }){
-      const lab = document.createElement('div');
-      lab.textContent = 'Simulated user input';
-      lab.style.fontSize = '12px';
-      lab.style.opacity = '.8';
-      lab.style.marginBottom = '6px';
-      const ta = document.createElement('textarea');
-      ta.placeholder = 'Type simulated user message...';
-      ta.value = (node.data && node.data.text) || '';
-      ta.style.width = '100%';
-      ta.rows = 5;
-      ta.classList.add('mc-node-textarea-small');
-      ta.addEventListener('change', ()=>{ node.data = node.data||{}; node.data.text = ta.value; if(onDataChange) onDataChange(); });
-      bodyEl.appendChild(lab);
-      bodyEl.appendChild(ta);
+      const makeId = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : ('msg_'+Date.now()+'_'+Math.random().toString(36).slice(2)));
+      
+      const createRow = (label, key, elType='input', props={}) => {
+        const div = document.createElement('div');
+        div.style.marginBottom = '5px';
+        const lab = document.createElement('div');
+        lab.textContent = label;
+        lab.style.fontSize = '11px';
+        lab.style.opacity = '0.7';
+        const el = document.createElement(elType);
+        el.style.width = '100%';
+        el.classList.add('mc-node-input');
+        if(elType === 'textarea') {
+            el.rows = 3;
+            el.classList.add('mc-node-textarea-small');
+        }
+        el.value = (node.data && node.data[key]) || '';
+        Object.assign(el, props);
+        el.addEventListener('change', (e) => {
+            node.data[key] = e.target.value;
+            onDataChange();
+        });
+        div.appendChild(lab);
+        div.appendChild(el);
+        bodyEl.appendChild(div);
+        return el;
+      };
+
+      createRow('User Text (Manual)', 'user_text', 'textarea', { placeholder: 'Enter text for manual run...' });
+      const userIdInput = createRow('User Msg ID', 'user_msg_id', 'input', { placeholder: 'Optional UUID...' });
+      const asstIdInput = createRow('Assistant Msg ID', 'assistant_msg_id', 'input', { placeholder: 'Optional UUID...' });
+
+      const btn = document.createElement('button');
+      btn.textContent = 'Random IDs';
+      btn.style.fontSize = '11px';
+      btn.style.marginTop = '5px';
+      btn.onclick = () => {
+        const u = makeId();
+        const a = makeId();
+        userIdInput.value = u;
+        asstIdInput.value = a;
+        node.data.user_msg_id = u;
+        node.data.assistant_msg_id = a;
+        onDataChange();
+      };
+      bodyEl.appendChild(btn);
     },
     execute(ctx){
-      const text = (ctx.node.data && ctx.node.data.text) || '';
-      return { messages: text ? [{ role: 'user', content: text }] : [] };
+      // Enhanced to support two modes: New msg (default) and Regen.
+      // Mode is expected from ctx.context.mode or ctx.context.userInputMode provided by chat_panel.
+      let text = (ctx && ctx.text) || '';
+      let context = (ctx && ctx.context) || {};
+      
+      // Detect if run from Chat Panel (context usually has keys like mode, userMessageId etc)
+      // If text is empty and context is empty, assume manual run from editor.
+      const isChatPanel = (text !== '') || (Object.keys(context).length > 0);
+
+      if (!isChatPanel) {
+          // Manual run: use node data
+          text = (ctx.node.data && ctx.node.data.user_text) || '';
+          // Inject IDs into context if provided
+          if (ctx.node.data && ctx.node.data.user_msg_id) {
+              context = { ...context, userMessageId: ctx.node.data.user_msg_id };
+          }
+          if (ctx.node.data && ctx.node.data.assistant_msg_id) {
+              context = { ...context, assistantMessageId: ctx.node.data.assistant_msg_id };
+          }
+          // Force mode to new for manual run
+          context.mode = 'new';
+      }
+
+      const modeRaw = context.mode || context.userInputMode || 'new';
+      const mode = String(modeRaw).toLowerCase() === 'regen' ? 'regen' : 'new';
+
+      // History passed in via ctx.history for determining existing user msg id in Regen mode.
+      const history = Array.isArray(ctx && ctx.history) ? ctx.history : [];
+
+      // Helper create new id
+      const makeId = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : ('msg_'+Date.now()+'_'+Math.random().toString(36).slice(2)));
+
+      let userMsgId = context.userMessageId || context.messageId;
+      if(mode === 'regen'){
+        // Find last user message id from history
+        for(let i = history.length - 1; i >= 0; i--){
+          const m = history[i];
+          if(m && m.role === 'user' && m.id){ userMsgId = m.id; break; }
+        }
+        if(!userMsgId) userMsgId = makeId(); // fallback if history missing
+      }else{
+        if(!userMsgId) userMsgId = makeId();
+      }
+
+      // Determine if tail assistant/model exists (used by Read history to trim on regen)
+      let lastAssistantId = null;
+      for(let i = history.length - 1; i >= 0; i--){
+        const m = history[i];
+        if(m && (m.role === 'assistant' || m.role === 'model')){ lastAssistantId = m.id || null; break; }
+      }
+
+      let assistantMsgId = context.assistantMessageId || context.assistant_message_id || null;
+      if(mode === 'regen'){
+        if(!assistantMsgId) assistantMsgId = lastAssistantId || makeId();
+      }else{
+        if(!assistantMsgId) assistantMsgId = makeId();
+      }
+
+      // Build user message object embedding id and mode for downstream Save history logic.
+      const userMessage = text ? { role: 'user', content: text, id: userMsgId, mode } : null;
+
+      // Message control payload
+      const control = {
+        mode,
+        user_message_id: userMsgId,
+        last_assistant_id: lastAssistantId,
+        assistant_message_id: assistantMsgId,
+        assistantMessageId: assistantMsgId,
+        has_tail_assistant: !!lastAssistantId
+      };
+
+      return {
+        messages: userMessage ? [userMessage] : [],
+        message_control: control
+      };
     }
   });
 
@@ -171,7 +261,8 @@
   add({
     type: 'Read history',
     category: 'input',
-    ports: { inputs: [], outputs: [ { id:'messages', label:'Messages' } ] },
+    // Added Message control input to allow regen trimming of last assistant/model message.
+    ports: { inputs: [ { id:'message_control', label:'Message control' } ], outputs: [ { id:'messages', label:'Messages' } ] },
     defaultData(){ return { maxItems: 20 }; },
     buildConfigUI(bodyEl, node, {onDataChange}){
       // ...existing code...
@@ -288,6 +379,9 @@
     async execute(ctx){
       // Try to fetch from backend first (async)
       const max = (ctx.node.data && ctx.node.data.maxItems) || 20;
+      const controlInputRaw = (ctx && ctx.inputs && ctx.inputs.message_control) ? ctx.inputs.message_control : null;
+      const controlObj = Array.isArray(controlInputRaw) ? (controlInputRaw[controlInputRaw.length-1] || null) : controlInputRaw;
+      const regenMode = controlObj && typeof controlObj === 'object' && String(controlObj.mode).toLowerCase() === 'regen';
       
       // Helper to fetch from backend
       const fetchHistory = async () => {
@@ -326,6 +420,26 @@
       }
 
       const recent = items.slice(-max);
+
+      // Regen mode trimming (option 1):
+      // nếu có assistant/model cuối, tìm user ngay trước nó và cắt luôn cặp user+assistant này
+      if(regenMode && recent.length){
+        let lastAssistantIdx = -1;
+        for(let i = recent.length - 1; i >= 0; i--){
+          const it = recent[i];
+          if(it && (it.role === 'assistant' || it.role === 'model')){ lastAssistantIdx = i; break; }
+        }
+        if(lastAssistantIdx !== -1){
+          // tìm user ngay trước assistant cuối
+          let lastUserIdx = -1;
+          for(let j = lastAssistantIdx - 1; j >= 0; j--){
+            const it = recent[j];
+            if(it && it.role === 'user'){ lastUserIdx = j; break; }
+          }
+          const cutFrom = lastUserIdx !== -1 ? lastUserIdx : lastAssistantIdx;
+          recent.splice(cutFrom); // bỏ từ user/assistant đó trở về cuối
+        }
+      }
       
       // Convert to standard message objects
       const messages = recent.map(entry => {

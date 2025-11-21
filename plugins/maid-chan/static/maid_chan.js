@@ -58,6 +58,72 @@
 
   const DEFAULT_AVATAR = `data:image/svg+xml;charset=UTF-8,${DEFAULT_AVATAR_SVG}`;
 
+  function mcGetMaidStorage(){
+    return (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidStorage) || null;
+  }
+  function mcGetMaidCore(){
+    return (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore) || null;
+  }
+  function mcGetAILogic(){
+    return (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.AILogic) || null;
+  }
+  function mcIsLogicEnabled(){
+    try{
+      const logic = mcGetAILogic();
+      if(logic && typeof logic.isEnabled === 'function'){
+        return !!logic.isEnabled();
+      }
+    }catch(_e){/* ignore */}
+    return false;
+  }
+  function mcGetPluginApi(){
+    const root = window.Yuuka || {};
+    const ns = root.plugins && root.plugins['maid-chan'];
+    const coreApi = ns && ns.coreApi;
+    if(coreApi && typeof coreApi.createPluginApiClient === 'function'){
+      coreApi.createPluginApiClient('maid');
+      return coreApi.maid || null;
+    }
+    return null;
+  }
+  async function mcApiGet(path){
+    const pluginApi = mcGetPluginApi();
+    if(pluginApi && typeof pluginApi.get === 'function'){
+      const rel = path.replace(/^\/api\/plugin\/maid/, '');
+      return await pluginApi.get(rel || '/chat/history');
+    }
+    if(window.Yuuka?.services?.api?.get){
+      return await window.Yuuka.services.api.get(path);
+    }
+    const res = await fetch(path, { credentials: 'include' });
+    if(res.status === 404){
+      return { items: [] };
+    }
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    return await res.json();
+  }
+  async function mcApiPost(path, payload){
+    const pluginApi = mcGetPluginApi();
+    if(pluginApi && typeof pluginApi.post === 'function'){
+      const rel = path.replace(/^\/api\/plugin\/maid/, '');
+      return await pluginApi.post(rel || '/chat/append', payload);
+    }
+    if(window.Yuuka?.services?.api?.post){
+      return await window.Yuuka.services.api.post(path, payload);
+    }
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload || {})
+    });
+    if(res.status === 404){
+      return {};
+    }
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    return await res.json();
+  }
+
   // Global registry and API for Maid bubble triggers
   // Allows features to register actions that fire when user clicks the bubble
   window.Yuuka = window.Yuuka || {};
@@ -148,10 +214,26 @@
       this._onTouchEnd = this._onTouchEnd.bind(this);
       // Deferred bubble img reference
       this._imgEl = null;
-      // Chat bubbles state
-      this._chat = { container: null, items: [] };
+      // Chat bubbles state, including custom anchor handling
+      this._chat = { container: null, items: [], anchorOverride: null, anchorLocks: 0 };
       // Quick menu state (uses maid idle timer for auto-hide)
       this._quickMenu = { el: null, isOpen: false };
+      // Quick chat composer state
+      this._quickChat = {
+        panel: null,
+        textarea: null,
+        sendBtn: null,
+        statusEl: null,
+        isOpen: false,
+        sending: false,
+        historyLoaded: false,
+        historyLoading: false,
+        historyPromise: null,
+        history: []
+      };
+      this._quickChatHistoryLimit = 200;
+      this._onChatMessageAppended = (ev)=> this._handleChatMessageAppended(ev);
+      window.addEventListener('maid-chan:chat:message-appended', this._onChatMessageAppended);
     }
 
     // Public API: service launcher entry point
@@ -186,6 +268,9 @@
         this._save('maid-chan:pos', this.state.pos);
         this.element.style.display = 'none';
       }
+      if(this._quickChat?.isOpen){
+        this._toggleQuickChatPanel(false);
+      }
       this.state.isOpen = false; this._save('maid-chan:isOpen', false);
     }
 
@@ -214,10 +299,13 @@
         this.state.longPressTimer = setTimeout(()=>{ this._suppressNextClick = true; this._openModal(); }, 550);
         this._didDrag = false;
         this._pressStart = { x: e.clientX, y: e.clientY };
-        this.state.isDragging = true;
         const rect = el.getBoundingClientRect();
         this._dragOffset = {x: e.clientX - rect.left, y: e.clientY - rect.top};
+        this.state.isDragging = true;
         el.classList.add('is-dragging');
+        // Re-apply absolute positioning immediately so removing transforms
+        // (idle/hover) does not cause the bubble to slide away from pointer.
+        this._applyPosition(e.clientX - this._dragOffset.x, e.clientY - this._dragOffset.y);
         document.addEventListener('mousemove', this._onMouseMove);
         document.addEventListener('mouseup', (ev)=>{ this._clearLongPress(); this._onMouseUp(ev); }, {once: true});
       });
@@ -232,6 +320,7 @@
         this._didDrag = false;
         this._pressStart = { x: t.clientX, y: t.clientY };
         el.classList.add('is-dragging');
+        this._applyPosition(t.clientX - this._dragOffset.x, t.clientY - this._dragOffset.y);
         document.addEventListener('touchmove', this._onTouchMove, {passive:false});
         document.addEventListener('touchend', this._onTouchEnd, {once:true});
 
@@ -297,11 +386,12 @@
       this.element = el;
       this._keepInViewport();
       window.addEventListener('resize', ()=> this._keepInViewport());
-    	window.addEventListener('resize', ()=> this._positionChatContainer());
+	window.addEventListener('resize', ()=> this._positionChatContainer());
 
-    	  // Ensure quick menu exists and is kept under the bubble
-    	  this._ensureQuickMenu();
-    	  window.addEventListener('resize', ()=> this._positionQuickMenu());
+	  // Ensure quick menu exists and is kept under the bubble
+	  this._ensureQuickMenu();
+	  window.addEventListener('resize', ()=> this._positionQuickMenu());
+      window.addEventListener('resize', ()=> this._positionQuickChatPanel());
 
       // Idle/focus management listeners (set up once)
       this._setupIdleManagement();
@@ -388,6 +478,7 @@
       this._positionChatContainer();
       // Reposition quick menu directly under bubble
       this._positionQuickMenu();
+      this._positionQuickChatPanel();
     }
 
     _keepInViewport(){
@@ -468,31 +559,101 @@
       this._positionChatContainer();
       return el;
     }
-    _positionChatContainer(){
-      const c = this._chat.container; if(!c || !this.element) return;
-      const r = this.element.getBoundingClientRect();
+    _resolveAnchorRect(source){
+      const fallback = ()=>{
+        if(!this.element) return null;
+        const rect = this.element.getBoundingClientRect();
+        return rect ? { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height } : null;
+      };
+      if(!source) return fallback();
+      if(typeof source.getBoundingClientRect === 'function'){
+        try{
+          const rect = source.getBoundingClientRect();
+          if(rect) return { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height };
+        }catch(_e){/* ignore */}
+      }
+      if(typeof source === 'object'){
+        const val = source;
+        if(typeof val.left === 'number' && typeof val.top === 'number'){
+          const width = typeof val.width === 'number' ? val.width : (typeof val.right === 'number' ? val.right - val.left : 0);
+          const height = typeof val.height === 'number' ? val.height : (typeof val.bottom === 'number' ? val.bottom - val.top : 0);
+          const right = typeof val.right === 'number' ? val.right : val.left + width;
+          const bottom = typeof val.bottom === 'number' ? val.bottom : val.top + height;
+          return { top: val.top, left: val.left, right, bottom, width, height };
+        }
+        if(typeof val.x === 'number' && typeof val.y === 'number'){
+          return { top: val.y, bottom: val.y, left: val.x, right: val.x, width: 0, height: 0 };
+        }
+        if(typeof val.clientX === 'number' && typeof val.clientY === 'number'){
+          return { top: val.clientY, bottom: val.clientY, left: val.clientX, right: val.clientX, width: 0, height: 0 };
+        }
+      }
+      return fallback();
+    }
+    _positionChatContainer(anchorOverride){
+      if(typeof anchorOverride !== 'undefined'){
+        this._chat.anchorOverride = anchorOverride;
+      }
+      const c = this._chat.container;
+      if(!c) return;
+      const rect = this._resolveAnchorRect(this._chat.anchorOverride);
+      if(!rect) return;
       const gap = 10;
       const vw = window.innerWidth;
-      const preferRightSpace = vw - (r.right + gap);
-      const preferLeftSpace = r.left - gap;
-      // Decide side: if not enough space on right (<340px) but left has space, use left.
-      const needed = 340; // approximate bubble max width + margin
-      const useLeft = preferRightSpace < needed && preferLeftSpace > needed;
+      const vh = window.innerHeight;
+      const clamp = (value, min, max)=> Math.max(min, Math.min(value, Math.max(min, max)));
+      const preferRightSpace = vw - (rect.right + gap);
+      const preferLeftSpace = rect.left - gap;
+      const widthGuess = c.offsetWidth || 0;
+      const neededWidth = Math.max(300, widthGuess || 0);
+      const useLeft = preferRightSpace < neededWidth && preferLeftSpace > preferRightSpace;
       c.classList.toggle('left', useLeft);
       c.classList.toggle('right', !useLeft);
-      c.style.position = 'fixed';
       if(useLeft){
+        const rightOffset = clamp(vw - rect.left + gap, 8, vw - 8);
         c.style.left = 'auto';
-        c.style.right = `${Math.round(vw - r.left + gap)}px`; // anchor to left side of maid
+        c.style.right = `${Math.round(rightOffset)}px`;
       }else{
-        c.style.left = `${Math.round(r.right + gap)}px`;
+        const leftOffset = clamp(rect.right + gap, 8, vw - 8);
+        c.style.left = `${Math.round(leftOffset)}px`;
         c.style.right = 'auto';
       }
-      c.style.top = `${Math.round(r.top)}px`;
-      c.style.bottom = 'auto';
+
+      const heightGuess = c.offsetHeight || 0;
+      const neededHeight = Math.max(180, heightGuess || 0);
+      const spaceBelow = vh - (rect.bottom + gap);
+      const spaceAbove = rect.top - gap;
+      const useAbove = spaceBelow < neededHeight && spaceAbove > spaceBelow;
+      c.classList.toggle('above', useAbove);
+      c.classList.toggle('below', !useAbove);
+      if(useAbove){
+        const bottomOffset = clamp(vh - rect.top + gap, 8, vh - 8);
+        c.style.bottom = `${Math.round(bottomOffset)}px`;
+        c.style.top = 'auto';
+      }else{
+        const maxTop = vh - (heightGuess || neededHeight) - 8;
+        const topOffset = clamp(rect.bottom + gap, 8, maxTop);
+        c.style.top = `${Math.round(topOffset)}px`;
+        c.style.bottom = 'auto';
+      }
     }
-    _showChatBubble({ text = '', duration = 5000, type = 'info' } = {}){
+    _showChatBubble({ text = '', duration = 5000, type = 'info', anchor, coords } = {}){
       const c = this._ensureChatContainer();
+      const anchorHint = typeof anchor !== 'undefined' ? anchor : coords;
+      const usesCustomAnchor = typeof anchorHint !== 'undefined' && anchorHint !== null;
+      let releaseAnchor = null;
+      if(usesCustomAnchor){
+        this._chat.anchorLocks = (this._chat.anchorLocks || 0) + 1;
+        releaseAnchor = ()=>{
+          this._chat.anchorLocks = Math.max(0, (this._chat.anchorLocks || 0) - 1);
+          if(this._chat.anchorLocks === 0){
+            this._positionChatContainer(null);
+          }
+        };
+        this._positionChatContainer(anchorHint);
+      }else{
+        this._positionChatContainer();
+      }
       const item = document.createElement('div');
       item.className = `maid-chat-bubble type-${type}`;
       item.setAttribute('role', 'status');
@@ -506,25 +667,41 @@
       item.classList.add('enter');
       c.appendChild(item);
       this._positionChatContainer();
-
+      const entry = { el: item, timer: null, remove: null, releaseAnchor };
       const removeItem = ()=>{
         if(!item.isConnected) return;
         item.classList.remove('enter');
         item.classList.add('leaving');
-        const finish = ()=>{ try{ item.removeEventListener('animationend', finish); item.remove(); }catch(_){} };
+        const finish = ()=>{
+          try{ item.removeEventListener('animationend', finish); item.remove(); }catch(_){/* ignore */}
+          if(entry.releaseAnchor){
+            entry.releaseAnchor();
+            entry.releaseAnchor = null;
+          }
+          this._positionChatContainer();
+        };
         item.addEventListener('animationend', finish);
         // Fallback remove
         setTimeout(finish, 600);
       };
 
-  const tId = setTimeout(removeItem, Math.max(1000, duration|0 || 5000));
+      const tId = setTimeout(removeItem, Math.max(1000, duration|0 || 5000));
+      entry.timer = tId;
+      entry.remove = removeItem;
       item.addEventListener('click', (e)=>{ if(e.target === item || e.target === content){ clearTimeout(tId); removeItem(); }});
 
-      this._chat.items.push({ el: item, timer: tId, remove: removeItem });
+      this._chat.items.push(entry);
       // Cleanup array on removal
       const obs = new MutationObserver(()=>{
         if(!item.isConnected){
-          this._chat.items = this._chat.items.filter(x=> x.el !== item);
+          this._chat.items = this._chat.items.filter(x=>{
+            if(x.el === item){
+              if(x.releaseAnchor){ x.releaseAnchor(); x.releaseAnchor = null; }
+              return false;
+            }
+            return true;
+          });
+          this._positionChatContainer();
           obs.disconnect();
         }
       });
@@ -609,6 +786,347 @@
       try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }catch(err){ return fallback; }
     }
 
+    // --- Quick chat helpers ---
+    _ensureQuickChatPanel(){
+      if(this._quickChat.panel && document.body.contains(this._quickChat.panel)) return this._quickChat.panel;
+      const panel = document.createElement('div');
+      panel.className = 'maid-quick-chat-panel';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-label', 'Quick chat with Maid-chan');
+      panel.innerHTML = `
+        <div class="maid-quick-chat-body">
+          <textarea class="maid-chan-chat-input maid-quick-chat-input" rows="1" placeholder="Nhắn cho Maid-chan..." aria-label="Quick chat input"></textarea>
+          <button type="button" class="maid-chan-chat-send maid-quick-chat-send" aria-label="Send quick chat">
+            <span class="material-symbols-outlined">send</span>
+          </button>
+        </div>
+      `;
+      document.body.appendChild(panel);
+      const textarea = panel.querySelector('.maid-quick-chat-input');
+      const sendBtn = panel.querySelector('.maid-quick-chat-send');
+      if(textarea){
+        textarea.addEventListener('input', ()=> this._autoResizeQuickInput());
+        textarea.addEventListener('keydown', (e)=>{
+          if(e.key === 'Enter' && !e.shiftKey){
+            e.preventDefault();
+            this._handleQuickChatSend();
+          }else if(e.key === 'Escape'){
+            e.preventDefault();
+            this._toggleQuickChatPanel(false);
+          }
+        });
+      }
+      if(sendBtn){
+        sendBtn.addEventListener('click', ()=> this._handleQuickChatSend());
+      }
+      if(!this._quickChat._outsideHandler){
+        this._quickChat._outsideHandler = (e)=>{
+          if(!this._quickChat.isOpen) return;
+          if(panel.contains(e.target)) return;
+          if(this.element && this.element.contains(e.target)) return;
+          this._toggleQuickChatPanel(false);
+        };
+        document.addEventListener('click', this._quickChat._outsideHandler);
+      }
+      this._quickChat.panel = panel;
+      this._quickChat.textarea = textarea;
+      this._quickChat.sendBtn = sendBtn;
+      this._quickChat.statusEl = null;
+      this._positionQuickChatPanel();
+      return panel;
+    }
+
+    _toggleQuickChatPanel(force){
+      const panel = this._ensureQuickChatPanel();
+      if(!panel) return;
+      const shouldOpen = typeof force === 'boolean' ? force : !this._quickChat.isOpen;
+      if(shouldOpen){
+        panel.classList.add('open');
+        panel.style.display = 'flex';
+        this._quickChat.isOpen = true;
+        this._idleDisabled = true;
+        this._bumpActivity(null);
+        this._positionQuickChatPanel();
+        setTimeout(()=>{ this._quickChat.textarea?.focus(); }, 0);
+      }else{
+        panel.classList.remove('open');
+        panel.style.display = 'none';
+        this._quickChat.isOpen = false;
+        this._idleDisabled = false;
+        this._bumpActivity();
+      }
+    }
+
+    _positionQuickChatPanel(){
+      const panel = this._quickChat.panel;
+      if(!panel || !this.element || !this._quickChat.isOpen) return;
+      const r = this.element.getBoundingClientRect();
+      const panelWidth = panel.offsetWidth || 280;
+      const panelHeight = panel.offsetHeight || 160;
+      const centerX = (r.left + r.right) / 2;
+      const x = Math.max(8, Math.min(centerX - panelWidth / 2, window.innerWidth - panelWidth - 8));
+      const baseY = r.bottom + 54; // leave space for quick menu buttons
+      const y = Math.min(baseY, window.innerHeight - panelHeight - 8);
+      panel.style.left = `${Math.round(x)}px`;
+      panel.style.top = `${Math.round(y)}px`;
+    }
+
+    _setQuickChatStatus(text){
+      if(this._quickChat.statusEl){
+        this._quickChat.statusEl.textContent = text || '';
+      }
+    }
+
+    _autoResizeQuickInput(){
+      const textarea = this._quickChat.textarea;
+      if(!textarea) return;
+      textarea.style.height = 'auto';
+      const computed = window.getComputedStyle(textarea);
+      const border = parseFloat(computed.borderTopWidth || '0') + parseFloat(computed.borderBottomWidth || '0');
+      const target = Math.min(160, textarea.scrollHeight + border);
+      textarea.style.height = `${target}px`;
+      this._positionQuickChatPanel();
+    }
+
+    async _ensureQuickChatHistory(){
+      if(this._quickChat.historyLoaded) return;
+      if(this._quickChat.historyPromise) return this._quickChat.historyPromise;
+      this._quickChat.historyPromise = (async ()=>{
+        try{
+          const storage = mcGetMaidStorage();
+          let list = [];
+          if(storage && typeof storage.loadHistory === 'function'){
+            const raw = await storage.loadHistory();
+            list = Array.isArray(raw) ? raw : [];
+          }else{
+            const data = await mcApiGet('/api/plugin/maid/chat/history');
+            list = Array.isArray(data?.items) ? data.items : [];
+          }
+          this._quickChat.history = list.map(it => ({
+            id: it.id || null,
+            role: it.role || 'user',
+            text: it.role === 'assistant' ? undefined : (it.text || ''),
+            kind: it.kind || 'chat',
+            timestamp: it.role === 'assistant' ? undefined : (it.timestamp || Date.now()),
+            snapshots: (it.role === 'assistant' && it.snapshots && it.snapshots.parts) ? it.snapshots : undefined,
+            tool_contents: Array.isArray(it.tool_contents) ? it.tool_contents : undefined
+          }));
+        }catch(err){
+          console.warn('[Maid-chan quick chat] history load failed', err);
+          this._quickChat.history = [];
+        }finally{
+          this._quickChat.historyLoaded = true;
+        }
+      })();
+      await this._quickChat.historyPromise;
+      this._quickChat.historyPromise = null;
+    }
+
+    _updateQuickChatHistory(message){
+      if(!message) return;
+      const entry = {
+        id: message.id || ('ext_'+Date.now()),
+        role: message.role || 'system',
+        text: message.text,
+        kind: message.kind || 'chat',
+        timestamp: message.timestamp || Date.now(),
+        snapshots: message.snapshots ? JSON.parse(JSON.stringify(message.snapshots)) : undefined,
+        tool_contents: message.tool_contents ? JSON.parse(JSON.stringify(message.tool_contents)) : undefined
+      };
+      const idx = this._quickChat.history.findIndex(m => m.id === entry.id);
+      if(idx >= 0) this._quickChat.history[idx] = entry;
+      else this._quickChat.history.push(entry);
+      if(this._quickChat.history.length > this._quickChatHistoryLimit){
+        this._quickChat.history.splice(0, this._quickChat.history.length - this._quickChatHistoryLimit);
+      }
+    }
+
+    _handleChatMessageAppended(ev){
+      if(!this._quickChat.historyLoaded) return;
+      const msg = ev && ev.detail && ev.detail.message;
+      if(!msg) return;
+      this._updateQuickChatHistory(msg);
+    }
+
+    async _persistQuickChatMessage(msg){
+      if(mcIsLogicEnabled()) return;
+      try{
+        const storage = mcGetMaidStorage();
+        if(storage && typeof storage.appendMessage === 'function'){
+          await storage.appendMessage(msg);
+        }else{
+          await mcApiPost('/api/plugin/maid/chat/append', { message: msg });
+        }
+      }catch(err){
+        console.warn('[Maid-chan quick chat] persist failed', err);
+      }
+    }
+
+    _buildLLMHistory(excludeMessageId, logicMode){
+      const source = logicMode ? this._quickChat.history.filter(m => m.id !== excludeMessageId) : this._quickChat.history;
+      return source.map(m => {
+        if(m.role === 'assistant'){
+          const parts = (m.snapshots && Array.isArray(m.snapshots.parts)) ? m.snapshots.parts : [];
+          if(parts.length){
+            const idx = typeof m.snapshots.current_index === 'number' ? m.snapshots.current_index : (parts.length - 1);
+            const safeIdx = Math.max(0, Math.min(idx, parts.length - 1));
+            const part = parts[safeIdx];
+            const base = typeof part === 'string' ? part : (part && part.text) || '';
+            const toolText = (part && typeof part.tool_results_text === 'string') ? part.tool_results_text : '';
+            return { role: 'assistant', content: toolText ? (base + '\n\n' + toolText) : base };
+          }
+          return { role: 'assistant', content: m.text || '' };
+        }
+        return { role: m.role, content: m.text || '' };
+      });
+    }
+
+    _broadcastChatMessage(msg){
+      try{
+        window.dispatchEvent(new CustomEvent('maid-chan:chat:external-append', { detail: { message: msg, source: 'quick-chat' } }));
+      }catch(_e){/* noop */}
+    }
+
+    async _handleQuickChatSend(){
+      const textarea = this._quickChat.textarea;
+      const sendBtn = this._quickChat.sendBtn;
+      if(!textarea || !sendBtn) return;
+      const raw = (textarea.value || '').trim();
+      if(!raw || this._quickChat.sending) return;
+      await this._ensureQuickChatHistory();
+      this._quickChat.sending = true;
+      sendBtn.disabled = true;
+      this._setQuickChatStatus('Sending...');
+      const now = Date.now();
+      const userId = `quick_user_${now}_${Math.random().toString(16).slice(2)}`;
+      const userMsg = { id: userId, role: 'user', text: raw, kind: 'chat', timestamp: now };
+      textarea.value = '';
+      this._autoResizeQuickInput();
+      this._updateQuickChatHistory(userMsg);
+      this._broadcastChatMessage(userMsg);
+      await this._persistQuickChatMessage(userMsg);
+
+      const logicOn = mcIsLogicEnabled();
+      const assistantId = `quick_assistant_${now}_${Math.random().toString(16).slice(2)}`;
+      const MaidCoreDynamic = mcGetMaidCore();
+      const logic = mcGetAILogic();
+      let result = null;
+      let executedAny = false;
+      try{
+        const history = this._buildLLMHistory(userId, logicOn);
+        if(logicOn && logic){
+          try{
+            const graph = (logic && typeof logic.loadGraph === 'function') ? logic.loadGraph() : null;
+            const userNodes = (graph && Array.isArray(graph.nodes)) ? graph.nodes.filter(n => n && n.type === 'User Input') : [];
+            const seenFlows = new Set();
+            for(const node of userNodes){
+              const fid = node.flow_id !== undefined ? node.flow_id : 0;
+              if(seenFlows.has(fid)) continue;
+              seenFlows.add(fid);
+              window.dispatchEvent(new CustomEvent('maid-chan:logic:run-stage', {
+                detail: {
+                  stage: 1,
+                  nodeId: node.id,
+                  text: raw,
+                  runId: 'quick-'+Date.now()+'-'+Math.random().toString(16).slice(2),
+                  userMessageId: userId,
+                  assistantMessageId: assistantId,
+                  context: { userMessageId: userId, assistantMessageId: assistantId }
+                }
+              }));
+              executedAny = true;
+            }
+            if(!executedAny && typeof logic.execute === 'function'){
+              const execRes = await logic.execute({ text: raw, context: { userMessageId: userId, assistantMessageId: assistantId }, history });
+              result = execRes && (execRes.response || execRes) || null;
+              if(result && typeof result === 'object' && !result._maid_assistant_id){
+                result._maid_assistant_id = assistantId;
+              }
+            }
+          }catch(err){ console.warn('[Maid-chan quick chat] logic run failed', err); }
+        }else if(MaidCoreDynamic && typeof MaidCoreDynamic.askMaid === 'function'){
+          try{
+            result = await MaidCoreDynamic.askMaid(raw, { history });
+            if(result && typeof result === 'object' && !result._maid_assistant_id){
+              result._maid_assistant_id = assistantId;
+            }
+          }catch(err){ console.warn('[Maid-chan quick chat] askMaid failed', err); }
+        }
+
+        if(result){
+          let assistantText = '';
+          let toolResultsText = (result && typeof result === 'object' && typeof result.tool_results_text === 'string') ? result.tool_results_text.trim() : '';
+          const toolContents = (result && typeof result === 'object' && Array.isArray(result.tool_contents)) ? result.tool_contents : [];
+          if(typeof result === 'string'){
+            assistantText = result;
+          }else if(typeof result === 'object'){
+            assistantText = result.text || result.message || result.content || '';
+            if(!assistantText && Array.isArray(result.choices) && result.choices.length){
+              const choice = result.choices[0];
+              if(choice && choice.message && typeof choice.message.content === 'string'){
+                assistantText = choice.message.content;
+              }
+            }
+            if(!assistantText && Array.isArray(result.candidates) && result.candidates.length){
+              const cand = result.candidates[0];
+              const parts = cand && cand.content && Array.isArray(cand.content.parts) ? cand.content.parts : [];
+              if(parts.length && typeof parts[0].text === 'string'){
+                assistantText = parts[0].text;
+              }
+            }
+          }
+          if(assistantText){
+            const part = { text: assistantText, timestamp: Date.now() };
+            if(toolResultsText) part.tool_results_text = toolResultsText;
+            if(toolContents && toolContents.length){
+              part.tool_info = toolContents.map(c => ({
+                name: c.name || c.id,
+                type: (c.type||'').toLowerCase(),
+                pluginId: c.pluginId || '',
+                stage: c.stage,
+                arguments_list: Array.isArray(c?.arguments_list) ? c.arguments_list.slice() : (function(v){
+                  const src = (v !== undefined ? v : (c.arguments !== undefined ? c.arguments : c.args));
+                  if(src == null) return [];
+                  if(Array.isArray(src)) return src.slice();
+                  if(typeof src === 'object') return Object.values(src);
+                  return [src];
+                })(c.arguments_list),
+                result_list: Array.isArray(c?.result_list) ? c.result_list.slice() : (function(v){
+                  const src = (v !== undefined ? v : c.result);
+                  if(src == null) return [];
+                  if(Array.isArray(src)) return src.slice();
+                  if(typeof src === 'object') return Object.values(src);
+                  return [src];
+                })(c.result_list)
+              })).filter(t => t.name);
+            }
+            const maidMsg = { id: (result && typeof result === 'object' && result._maid_assistant_id) ? result._maid_assistant_id : assistantId, role: 'assistant', kind: 'chat', snapshots: { parts: [part], current_index: 0 } };
+            if(toolContents && toolContents.length){ maidMsg.tool_contents = toolContents; }
+            this._updateQuickChatHistory(maidMsg);
+            this._broadcastChatMessage(maidMsg);
+            await this._persistQuickChatMessage(maidMsg);
+            const preview = assistantText.length > 220 ? assistantText.slice(0, 220)+'…' : assistantText;
+            this._showChatBubble({ text: preview, duration: Math.min(9000, Math.max(5000, preview.length * 40)) });
+            this._setQuickChatStatus('Reply received.');
+          }else{
+            this._setQuickChatStatus('Maid-chan replied without text.');
+          }
+        }else if(executedAny){
+          this._setQuickChatStatus('Logic graph is processing...');
+        }else{
+          this._setQuickChatStatus('No reply received.');
+        }
+      }catch(err){
+        console.warn('[Maid-chan quick chat] send failed', err);
+        this._setQuickChatStatus('Failed to send message.');
+        this._showChatBubble({ text: 'Không gửi được tin nhắn.', duration: 4000, type: 'error' });
+      }finally{
+        this._quickChat.sending = false;
+        sendBtn.disabled = false;
+        setTimeout(()=> this._setQuickChatStatus(''), 2500);
+      }
+    }
+
     // --- Quick menu helpers ---
     _ensureQuickMenu(){
       if(this._quickMenu.el && document.body.contains(this._quickMenu.el)) return this._quickMenu.el;
@@ -627,7 +1145,7 @@
           actions = actions.slice(0, 29);
         }
 
-        // Always include core settings button
+        // Always include quick chat and core settings buttons
         actions.unshift({
           id: 'maid_core_settings',
           icon: 'settings_heart',
@@ -636,6 +1154,18 @@
           requireEnabled: false,
           handler: ({ bubble })=>{
             bubble?._openModal();
+          }
+        });
+        actions.unshift({
+          id: 'maid_quick_chat',
+          icon: 'chat_bubble',
+          title: 'Quick chat',
+          order: -1000,
+          requireEnabled: false,
+          handler: ({ bubble })=>{
+            if(bubble){
+              bubble._toggleQuickChatPanel();
+            }
           }
         });
 

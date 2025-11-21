@@ -141,6 +141,21 @@
       loadingAssistant: null // { el, startedAt, timerId, timeoutId }
     };
 
+    const getMaidTitle = ()=>{
+      let title = 'Maid-chan';
+      try{
+        const storedTitle = window.localStorage.getItem('maid-chan:title');
+        if(storedTitle && storedTitle.trim()){
+          let normalized = storedTitle.trim();
+          if((normalized.startsWith('"') && normalized.endsWith('"')) || (normalized.startsWith("'") && normalized.endsWith("'"))){
+            normalized = normalized.slice(1, -1).trim();
+          }
+          if(normalized) title = normalized;
+        }
+      }catch(_e){}
+      return title;
+    };
+
     const setStatus = (txt)=>{
       if(!statusEl) return;
       statusEl.textContent = txt || '';
@@ -542,8 +557,22 @@
       // Prefer AILogic when enabled; suppress persistence because regen should append snapshot to existing message id
       const MaidCoreDynamic = (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore) || MaidCore;
       const logicOn = isLogicEnabled();
+      // Determine last user message id from priorMessages to pass into logic context (helps Save history node re-use IDs)
+      let _lastUserMessageId = null;
+      for(let i = priorMessages.length - 1; i >= 0; i--){ const mm = priorMessages[i]; if(mm && mm.role === 'user' && mm.id){ _lastUserMessageId = mm.id; break; } }
+      const _assistantMessageId = msg && msg.id ? msg.id : undefined;
       const callPromise = (logicOn && AILogic && typeof AILogic.execute === 'function')
-        ? AILogic.execute({ text: lastUserText || 'Please continue.', history: historyForApi, suppressPersistence: true })
+        // AILogic path: pass text and context so nodes (User Input / Save history) can reuse frontend IDs.
+        ? AILogic.execute({
+            text: lastUserText || 'Please continue.',
+            suppressPersistence: true,
+            context: {
+              mode: 'regen',
+              userInputMode: 'regen',
+              userMessageId: _lastUserMessageId,
+              assistantMessageId: _assistantMessageId
+            }
+          })
         : ((MaidCoreDynamic && typeof MaidCoreDynamic.askMaid === 'function')
             ? MaidCoreDynamic.askMaid(lastUserText || 'Please continue.', { history: historyForApi, maxStages: 2, forceDisableAfterFirst: true })
             : apiPost('/api/plugin/maid/chat', payload));
@@ -1115,6 +1144,9 @@
             doReplay();
           }else if(action === 'delete'){
             const id = msg.id;
+            try{
+              console.log('[MaidChat][delete-click]', { messageId: id, role: msg.role });
+            }catch(_e){/* noop */}
             if(!id) return;
             // Remove from state: message này và toàn bộ phía dưới (state.messages: oldest -> newest)
             const idx = state.messages.findIndex(m => m.id === id);
@@ -1179,9 +1211,110 @@
       state.loadingAssistant = null;
     };
 
+    const startLoadingPlaceholder = ()=>{
+      removeLoadingPlaceholder();
+      if(!scrollBox) return null;
+
+      const placeholderEl = document.createElement('div');
+      placeholderEl.className = 'maid-chan-chat-placeholder';
+      const timerEl = document.createElement('span');
+      timerEl.className = 'maid-chan-chat-placeholder-timer';
+      timerEl.textContent = '0s';
+      placeholderEl.appendChild(timerEl);
+      scrollBox.appendChild(placeholderEl);
+      requestAnimationFrame(()=>{
+        scrollBox.scrollTop = scrollBox.scrollHeight;
+      });
+
+      const startedAt = Date.now();
+      const laData = {
+        el: placeholderEl,
+        timerEl,
+        startedAt,
+        timerId: null,
+        timeoutId: null
+      };
+
+      laData.timerId = window.setInterval(()=>{
+        const secs = Math.floor((Date.now() - startedAt) / 1000);
+        if(laData.timerEl) laData.timerEl.textContent = secs + 's';
+      }, 1000);
+
+      laData.timeoutId = window.setTimeout(()=>{
+        if(state.loadingAssistant !== laData) return;
+        removeLoadingPlaceholder();
+        const timeoutMsg = {
+          role: 'assistant',
+          kind: 'chat',
+          snapshots: {
+            parts: [{ text: getMaidTitle() + ' hiện đang bận, hãy chat lại sau.', timestamp: Date.now() }],
+            current_index: 0
+          }
+        };
+        appendMessage(timeoutMsg);
+      }, 30000);
+
+      state.loadingAssistant = laData;
+      return laData;
+    };
+
+    const mergeSnapshots = (existingSnap, incomingSnap)=>{
+      const existingParts = (existingSnap && Array.isArray(existingSnap.parts)) ? existingSnap.parts.slice() : [];
+      const incomingParts = (incomingSnap && Array.isArray(incomingSnap.parts)) ? incomingSnap.parts.slice() : [];
+      if(!incomingParts.length){
+        return existingSnap || null;
+      }
+      const combined = existingParts.concat(incomingParts);
+      return {
+        parts: combined,
+        current_index: combined.length ? combined.length - 1 : 0
+      };
+    };
+
+    const mergeMessages = (existing, incoming)=>{
+      if(!existing) return incoming;
+      const merged = { ...existing, ...incoming };
+      if(existing.role === 'assistant'){
+        merged.role = 'assistant';
+        if(existing.tool_contents && !incoming.tool_contents){ merged.tool_contents = existing.tool_contents; }
+        const mergedSnapshots = mergeSnapshots(existing.snapshots, incoming.snapshots);
+        if(mergedSnapshots) merged.snapshots = mergedSnapshots;
+      }
+      return merged;
+    };
+
+    const emitAppendedEvent = (message)=>{
+      if(!message) return;
+      try{
+        window.dispatchEvent(new CustomEvent('maid-chan:chat:message-appended', { detail: { message } }));
+      }catch(_e){/* noop */}
+    };
+
     const appendMessage = (msg)=>{
       if(!msg.id){
         msg.id = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+      }
+      if(msg.role === 'assistant'){
+        try{
+          console.log('[MaidChat][append]', { messageId: msg.id, hasSnapshots: !!msg.snapshots, source: msg._source || 'chat_panel' });
+        }catch(_e){/* noop */}
+      }
+      const existingIdx = state.messages.findIndex(m => m.id === msg.id);
+      if(existingIdx !== -1){
+        const merged = mergeMessages(state.messages[existingIdx], msg);
+        state.messages[existingIdx] = merged;
+        state.snapshots.delete(msg.id);
+        if(scrollBox){
+          const node = scrollBox.querySelector(`.maid-chan-chat-item[data-message-id="${msg.id}"]`);
+          const replacement = renderMessage(merged);
+          if(node && node.parentElement === scrollBox){
+            scrollBox.replaceChild(replacement, node);
+          }else{
+            renderAll();
+          }
+        }
+        emitAppendedEvent(merged);
+        return;
       }
       state.messages.push(msg);
       if(scrollBox){
@@ -1191,7 +1324,17 @@
           scrollBox.scrollTop = scrollBox.scrollHeight;
         });
       }
+      emitAppendedEvent(msg);
     };
+
+    const onExternalAppend = (ev)=>{
+      const detail = ev && ev.detail;
+      if(!detail || !detail.message) return;
+      try{
+        appendMessage(detail.message);
+      }catch(_e){/* noop */}
+    };
+    window.addEventListener('maid-chan:chat:external-append', onExternalAppend);
 
     const loadHistory = async ()=>{
       state.loading = true;
@@ -1258,6 +1401,7 @@
       try{
         const now = Date.now();
         const msg = { role: 'user', text: raw, kind: 'chat', timestamp: now };
+        const assistantId = 'msg_'+ now + '_' + Math.random().toString(16).slice(2);
         input.value = '';
         appendMessage(msg);
         // In logic mode, persistence is managed by graph (Save history). Skip legacy save.
@@ -1289,83 +1433,58 @@
               }
               return { role: m.role, content: m.text || '' };
             });
-            // create loading placeholder
-            removeLoadingPlaceholder();
-            let placeholderEl = null;
-            let timerEl = null;
-            if(scrollBox){
-              placeholderEl = document.createElement('div');
-              placeholderEl.className = 'maid-chan-chat-placeholder';
-              timerEl = document.createElement('span');
-              timerEl.className = 'maid-chan-chat-placeholder-timer';
-              timerEl.textContent = '0s';
-              placeholderEl.appendChild(timerEl);
-              scrollBox.appendChild(placeholderEl);
-              requestAnimationFrame(()=>{
-                scrollBox.scrollTop = scrollBox.scrollHeight;
-              });
-            }
-
-            const startedAt = Date.now();
-            let secs = 0;
-            const timerId = window.setInterval(()=>{
-              secs = Math.floor((Date.now() - startedAt) / 1000);
-              if(timerEl) timerEl.textContent = secs + 's';
-            }, 1000);
-
-            const timeoutId = window.setTimeout(()=>{
-              removeLoadingPlaceholder();
-              const maidTitle = (function(){
-                let t = 'Maid-chan';
-                try{
-                  const storedTitle = window.localStorage.getItem('maid-chan:title');
-                  if(storedTitle && storedTitle.trim()){
-                    let s = storedTitle.trim();
-                    if((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))){
-                      s = s.slice(1, -1).trim();
-                    }
-                    if(s) t = s;
-                  }
-                }catch(_e){}
-                return t;
-              })();
-              const timeoutMsg = {
-                role: 'assistant',
-                kind: 'chat',
-                snapshots: { parts: [{ text: maidTitle + ' hiện đang bận, hãy chat lại sau.', timestamp: Date.now() }], current_index: 0 }
-              };
-              appendMessage(timeoutMsg);
-            }, 30000);
-
-            state.loadingAssistant = {
-              el: placeholderEl,
-              timerEl,
-              startedAt,
-              timerId,
-              timeoutId
-            };
+            startLoadingPlaceholder();
             let result = null;
+            let executedAny = false;
             if(logicOn && AILogic && typeof AILogic.execute === 'function'){
-              // Pre-generate assistant message id so AILogic can persist using the same id
-              const assistantId = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
-              const r = await AILogic.execute({ text: raw, history, userMessageId: msg.id, assistantMessageId: assistantId });
-              // AILogic returns { __maidLogicHandled, response }
-              result = (r && (r.response || r)) || null;
-              // Attach the predetermined id to be used by UI append
-              if(result && typeof result === 'object'){
-                result._maid_assistant_id = assistantId;
+              // New behavior: run all flows containing a "User Input" node; exclude flows without it.
+              try{
+                const graph = (AILogic && typeof AILogic.loadGraph === 'function') ? AILogic.loadGraph() : null;
+                const userInputNodes = (graph && Array.isArray(graph.nodes)) ? graph.nodes.filter(n => n && n.type === 'User Input') : [];
+                // Deduplicate by flow_id
+                const seenFlows = new Set();
+                for(const n of userInputNodes){
+                  const fid = (n.flow_id !== undefined) ? n.flow_id : 0;
+                  if(seenFlows.has(fid)) continue;
+                  seenFlows.add(fid);
+                  // Dispatch run-stage event so runner executes only that flow starting at this node
+                  window.dispatchEvent(new CustomEvent('maid-chan:logic:run-stage', {
+                      detail: {
+                        stage: 1,
+                        nodeId: n.id,
+                        text: raw,
+                        runId: 'chat-'+Date.now()+'-'+Math.random().toString(16).slice(2),
+                        userMessageId: msg.id,
+                        assistantMessageId: assistantId,
+                        context: { userMessageId: msg.id, assistantMessageId: assistantId }
+                      }
+                    }));
+                  try{
+                    console.log('[MaidChat][dispatch]', { nodeId: n.id, userMessageId: msg.id, assistantMessageId: assistantId });
+                  }catch(_e){/* noop */}
+                  executedAny = true;
+                }
+              }catch(_e){/* swallow */}
+              if(!executedAny){
+                // Fallback to legacy single-flow execution (previous behavior)
+                const r = await AILogic.execute({ text: raw, context: { userMessageId: msg.id, assistantMessageId: assistantId } });
+                result = (r && (r.response || r)) || null;
+                if(result && typeof result === 'object') result._maid_assistant_id = assistantId;
+              } else {
+                // When multi-flow execution is triggered we let output nodes handle appends; skip direct result handling.
+                result = null;
               }
             } else {
               result = await MaidCoreDynamic.askMaid(raw, { history });
+              if(result && typeof result === 'object' && !result._maid_assistant_id){
+                result._maid_assistant_id = assistantId;
+              }
             }
 
             // if we got result before timeout, clear placeholder & timers
             const la = state.loadingAssistant;
-            if(la){
-              if(la.timerId) clearInterval(la.timerId);
-              if(la.timeoutId) clearTimeout(la.timeoutId);
-              if(la.el && la.el.parentElement){ la.el.parentElement.removeChild(la.el); }
-              state.loadingAssistant = null;
+            if(la && (!logicOn || !executedAny)){
+              removeLoadingPlaceholder();
             }
 
             // Backend may return OpenAI-style or Gemini-style payloads.
@@ -1422,7 +1541,7 @@
                   })(c.result_list)
                 })).filter(t=> t.name);
               }
-              const predefinedId = (result && typeof result === 'object' && result._maid_assistant_id) ? result._maid_assistant_id : undefined;
+              const predefinedId = (result && typeof result === 'object' && result._maid_assistant_id) ? result._maid_assistant_id : assistantId;
               const maidMsg = { id: predefinedId, role: 'assistant', kind: 'chat', snapshots: { parts: [part], current_index: 0 } };
               if(toolContents && toolContents.length){ maidMsg.tool_contents = toolContents; }
               appendMessage(maidMsg);
@@ -1471,6 +1590,32 @@
     input.addEventListener('input', autoResize);
     autoResize();
 
+    // External typing/replying indicator controlled via custom event
+    try{
+      window.addEventListener('maid-chan:chat:typing', (ev)=>{
+        const d = (ev && ev.detail) || {};
+        const active = !!d.active;
+        if(!statusEl) return;
+        if(active){
+          // Preserve context-aware message when logic mode is enabled
+          setStatus(getMaidTitle() + ' đang trả lời...');
+        }else{
+          setStatus('');
+        }
+      });
+    }catch(_e){}
+
+    try{
+      window.addEventListener('maid-chan:chat:placeholder', (ev)=>{
+        const detail = (ev && ev.detail) || {};
+        if(detail && detail.active){
+          startLoadingPlaceholder();
+        }else{
+          removeLoadingPlaceholder();
+        }
+      });
+    }catch(_e){}
+
     if(promptBtn){
       promptBtn.addEventListener('click', togglePromptView);
     }
@@ -1487,9 +1632,16 @@
           kind: message.kind || 'event',
           timestamp: message.timestamp || Date.now()
         };
+        msg.id = message.id || message.assistant_message_id || message.user_message_id || ('push_'+Date.now()+'_'+Math.random().toString(16).slice(2));
+        if(message.assistant_message_id){ msg.assistant_message_id = message.assistant_message_id; }
+        if(message.user_message_id){ msg.user_message_id = message.user_message_id; }
+        msg._source = message._source || 'push-api';
         // Support pushing assistant with snapshots/tool info from AI Logic UI
         if(message.snapshots && message.snapshots.parts){ msg.snapshots = message.snapshots; }
         if(Array.isArray(message.tool_contents)){ msg.tool_contents = message.tool_contents; }
+        try{
+          console.log('[MaidChat][push-api]', { messageId: msg.id, role: msg.role });
+        }catch(_e){/* noop */}
         appendMessage(msg);
         // When logic mode is enabled, do not persist pushes; assume logic handled it.
         if(!isLogicEnabled()) persistMessage(msg);

@@ -80,8 +80,6 @@
 
       // 1. Build System Prompt
       const systemParts = [];
-      const title = window.localStorage.getItem('maid-chan:title') || 'Maid-chan';
-      systemParts.push(`# Character: ${title}`);
       
       for(const p of prompts){
         let val = (p && typeof p === 'object' && p.system_prompt) ? p.system_prompt : p;
@@ -151,7 +149,9 @@
         { id:'system_prompt', label:'System Prompt' },
         { id:'messages', label:'Messages' },
         { id:'tool_definitions', label:'Tool Definitions' },
-        { id:'llm_settings', label:'LLM Settings' }
+        { id:'llm_settings', label:'LLM Settings' },
+        { id:'flow', label:'Flow' },
+        { id:'message_control', label:'Message Control' }
       ], outputs: [
         { id:'response_message', label:'Response Message' },
         { id:'tool_calls', label:'Tool Calls' }
@@ -168,16 +168,26 @@
       btn.onclick = () => showInspector(node.id);
       bodyEl.appendChild(btn);
     },
-    // Gating: Only run if we have messages or a prompt
+    // Gating: Only run if we have messages or a prompt.
+    // If a Flow input is connected, it acts as an additional trigger-only gate.
     shouldRun(ctx) {
         const inputs = ctx.inputs || {};
-        const hasMsg = inputs.messages && inputs.messages.length > 0;
-        const hasPrompt = inputs.system_prompt && inputs.system_prompt.length > 0;
+        const hasMsg = Array.isArray(inputs.messages) ? inputs.messages.length > 0 : !!inputs.messages;
+        const hasPrompt = Array.isArray(inputs.system_prompt) ? inputs.system_prompt.length > 0 : !!inputs.system_prompt;
+        const hasFlow = Array.isArray(inputs.flow) ? inputs.flow.length > 0 : !!inputs.flow;
+        if ('flow' in inputs) {
+          return hasFlow && (hasMsg || hasPrompt);
+        }
         return hasMsg || hasPrompt;
     },
     async execute(ctx){
       const inputs = ctx.inputs || {};
       const { messages, settings, allowedTools, customTools } = prepareLLMRequest(inputs);
+      const controlRaw = inputs.message_control;
+      const control = Array.isArray(controlRaw) ? controlRaw[controlRaw.length - 1] : controlRaw;
+      const assistantIdFromControl = control && (control.assistant_message_id || control.assistantMessageId);
+      const assistantIdFromContext = ctx && ctx.context && (ctx.context.assistantMessageId || ctx.context.assistant_message_id);
+      const assistantMsgId = assistantIdFromControl || assistantIdFromContext || null;
 
       // 5. Call LLM
       const MaidCore = window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidCore;
@@ -199,6 +209,13 @@
         })(res);
 
         const responseMsg = { role: 'assistant', content: text };
+        if(assistantMsgId){
+          responseMsg.id = assistantMsgId;
+          responseMsg.assistant_message_id = assistantMsgId;
+        }
+        try{
+          console.log('[MaidLogic][LLM]', { nodeId: ctx?.node?.id, assistantMessageId: responseMsg.id || null, hadControlId: !!assistantMsgId });
+        }catch(_e){/* noop */}
         if(calls.length) responseMsg.tool_calls = calls;
 
         return { 
@@ -209,62 +226,6 @@
       } catch(err) {
         return { response_message: { role: 'assistant', content: `(Error: ${err.message})` } };
       }
-    }
-  });
-
-  // Choice node: exposes a custom tool for LLM to pick among 3 options,
-  // and emits activation-only outputs for wiring into downstream LLM Prompt ports.
-  add({
-    type: 'Choice',
-    category: 'process',
-    ports: { inputs: [], outputs: [ { id:'tool_definitions', label:'Tool Definitions' }, { id:'choice1', label:'Choice 1' }, { id:'choice2', label:'Choice 2' }, { id:'choice3', label:'Choice 3' } ] },
-    defaultData(){ return { toolName: 'mc_choice', choice1: 'Choice 1', choice2: 'Choice 2', choice3: 'Choice 3' }; },
-    buildConfigUI(bodyEl, node, { onDataChange }){
-      const wrap = document.createElement('div');
-      wrap.style.display='flex'; wrap.style.flexDirection='column'; wrap.style.gap='6px';
-      const hint = document.createElement('div'); hint.className='mc-chip'; hint.textContent='Defines a simple choice tool for the LLM'; wrap.appendChild(hint);
-
-      const nameRow = document.createElement('div'); nameRow.style.display='flex'; nameRow.style.gap='6px'; nameRow.style.alignItems='center';
-      const nameLab = document.createElement('span'); nameLab.textContent='Tool name'; nameLab.style.fontSize='12px'; nameLab.style.opacity='.8'; nameRow.appendChild(nameLab);
-      const nameInp = document.createElement('input'); nameInp.type='text'; nameInp.value=(node.data && node.data.toolName) || 'mc_choice'; nameInp.style.flex='1';
-      nameInp.addEventListener('change', ()=>{ node.data = node.data||{}; node.data.toolName = String(nameInp.value||'mc_choice'); onDataChange && onDataChange(node.data); reRenderLabels(); });
-      nameRow.appendChild(nameInp); wrap.appendChild(nameRow);
-
-      function mkRow(key, label){
-        const row = document.createElement('div'); row.style.display='flex'; row.style.gap='6px'; row.style.alignItems='center';
-        const lab = document.createElement('span'); lab.textContent=label; lab.style.fontSize='12px'; lab.style.opacity='.8'; row.appendChild(lab);
-        const inp = document.createElement('input'); inp.type='text'; inp.value=(node.data && node.data[key]) || label; inp.style.flex='1';
-        inp.addEventListener('change', ()=>{ node.data=node.data||{}; node.data[key]=String(inp.value||label); onDataChange && onDataChange(node.data); reRenderLabels(); });
-        row.appendChild(inp);
-        return row;
-      }
-      const c1 = mkRow('choice1','Choice 1');
-      const c2 = mkRow('choice2','Choice 2');
-      const c3 = mkRow('choice3','Choice 3');
-      wrap.appendChild(c1); wrap.appendChild(c2); wrap.appendChild(c3);
-
-      function reRenderLabels(){
-        try{
-          const el = bodyEl.closest('.mc-node'); if(!el) return;
-          const portsWrap = el.querySelector('.mc-node-ports'); if(!portsWrap) return;
-          // Update output labels (indexes: 1..3 are choice ports)
-          const outs = portsWrap.querySelectorAll('[data-port="out"]');
-          const labels = [null, node.data?.choice1 || 'Choice 1', node.data?.choice2 || 'Choice 2', node.data?.choice3 || 'Choice 3'];
-          outs.forEach((p, idx)=>{ if(labels[idx]){ const s = p.querySelector('span'); if(s) s.textContent = labels[idx]; } });
-        }catch(_e){}
-      }
-
-      bodyEl.appendChild(wrap);
-    },
-    execute(ctx){
-      // Provide custom tool declaration via Tools output; choice outputs are activation-only.
-      const d = (ctx && ctx.node && ctx.node.data) || {};
-      const name = (d.toolName || 'mc_choice').toString();
-      const choice1 = (d.choice1 || 'Choice 1').toString();
-      const choice2 = (d.choice2 || 'Choice 2').toString();
-      const choice3 = (d.choice3 || 'Choice 3').toString();
-      const tool = { name, description: 'Select among predefined options', parameters: { type:'object', properties:{ choice:{ anyOf:[ {type:'string', enum:[choice1,choice2,choice3,'1','2','3']}, {type:'array', items:{ type:'string', enum:[choice1,choice2,choice3,'1','2','3'] } } ] } }, additionalProperties:true } };
-      return { tool_definitions: { custom: [tool] } };
     }
   });
 
@@ -612,4 +573,434 @@
     }
   });
 
+  // Add Infinite Choice node: exposes a custom tool for LLM to pick among N options,
+  // and emits a flow output to branch the execution context.
+  add({
+    type: 'Infinite Choice',
+    category: 'process',
+    ports: { 
+        inputs: [ { id:'tool_calls', label:'Tool Calls' } ], 
+        outputs: [ 
+            { id:'tool_definitions', label:'Tool Definitions' }, 
+            { id:'flow', label:'Flow', branching: true } 
+        ] 
+    },
+    defaultData(){ return { toolName: 'mc_choice', description: 'Select one option from the list', options: 'Option 1\nOption 2' }; },
+    buildConfigUI(bodyEl, node, { onDataChange }){
+      const wrap = document.createElement('div');
+      wrap.style.display='flex'; wrap.style.flexDirection='column'; wrap.style.gap='6px';
+      
+      const nameRow = document.createElement('div'); nameRow.style.display='flex'; nameRow.style.gap='6px'; nameRow.style.alignItems='center';
+      const nameLab = document.createElement('span'); nameLab.textContent='Tool name'; nameLab.style.fontSize='12px'; nameLab.style.opacity='.8'; nameRow.appendChild(nameLab);
+      const nameInp = document.createElement('input'); nameInp.type='text'; nameInp.value=(node.data && node.data.toolName) || 'mc_choice'; nameInp.style.flex='1';
+      nameInp.addEventListener('change', ()=>{ node.data = node.data||{}; node.data.toolName = String(nameInp.value||'mc_choice'); onDataChange && onDataChange(node.data); });
+      nameRow.appendChild(nameInp); wrap.appendChild(nameRow);
+
+      const descLab = document.createElement('div'); descLab.textContent='Description'; descLab.style.fontSize='12px'; descLab.style.opacity='.8'; wrap.appendChild(descLab);
+      const descTa = document.createElement('textarea');
+      descTa.rows = 2;
+      descTa.classList.add('mc-node-textarea-small');
+      descTa.placeholder = 'Tool description for the LLM...';
+      descTa.value = (node.data && node.data.description) || 'Select one option from the list';
+      descTa.addEventListener('change', ()=>{ node.data = node.data||{}; node.data.description = descTa.value; onDataChange && onDataChange(node.data); });
+      wrap.appendChild(descTa);
+
+      const optLab = document.createElement('div'); optLab.textContent='Options (one per line)'; optLab.style.fontSize='12px'; optLab.style.opacity='.8'; wrap.appendChild(optLab);
+      const optTa = document.createElement('textarea');
+      optTa.rows = 5;
+      optTa.value = (node.data && node.data.options) || '';
+      optTa.classList.add('mc-node-textarea-small');
+      optTa.addEventListener('change', ()=>{ node.data = node.data||{}; node.data.options = optTa.value; onDataChange && onDataChange(node.data); });
+      wrap.appendChild(optTa);
+
+      bodyEl.appendChild(wrap);
+    },
+    execute(ctx){
+      const d = (ctx && ctx.node && ctx.node.data) || {};
+      const name = (d.toolName || 'mc_choice').toString();
+      const description = (d.description || 'Select one option from the list').toString();
+      const rawOpts = (d.options || '').split('\n').map(s => s.trim()).filter(s => s);
+      const options = rawOpts.length ? rawOpts : ['Option 1', 'Option 2'];
+
+      // 1. Generate Tool Definition
+      const tool = { 
+          name, 
+        description, 
+          parameters: { 
+              type:'object', 
+              properties:{ 
+                  choice:{ type:'string', enum: options },
+                  index:{ type:'integer', description: 'Index of the selected option (0-based)' }
+              },
+              required: ['choice']
+          } 
+      };
+
+      // 2. Check for execution results
+      let selectedIndex = -1;
+      let selectedValue = null;
+
+      const inputs = (ctx.inputs && ctx.inputs.tool_calls) ? ctx.inputs.tool_calls : [];
+      const calls = inputs.flat();
+      
+      for(const call of calls){
+          // call structure: { name: '...', arguments: {...} }
+          if(call && call.name === name){
+             const args = call.arguments || {};
+             if(args.choice){
+                  const idx = options.indexOf(args.choice);
+                  if(idx >= 0) { selectedIndex = idx; selectedValue = args.choice; }
+              }
+              // Fallback: check if index was provided directly
+              if(selectedIndex === -1 && typeof args.index === 'number'){
+                  if(args.index >= 0 && args.index < options.length){
+                      selectedIndex = args.index;
+                      selectedValue = options[selectedIndex];
+                  }
+              }
+          }
+      }
+
+      const result = { tool_definitions: { custom: [tool] } };
+      
+      // Flow output is trigger-only: we only care which branch index is active.
+      // Downstream nodes should not rely on the payload value itself.
+      if(selectedIndex >= 0){
+          result.flow = { __branchIndex: selectedIndex, value: true };
+      }
+
+      return result;
+    }
+  });
+
+  // Logger node: keep editable log lines with time + limits
+  add({
+    type: 'Logger',
+    category: 'process',
+    ports: {
+      inputs: [
+        { id: 'raw_results', label: 'Raw Results' }
+      ],
+      outputs: [
+        { id: 'system_prompt', label: 'System Prompt' }
+      ]
+    },
+    defaultData() {
+      return {
+        logs: [],
+        minuteLimit: 60,
+        logLimit: 50
+      };
+    },
+    buildConfigUI(bodyEl, node, { onDataChange }) {
+      node.data = node.data || {};
+      if (!Array.isArray(node.data.logs)) node.data.logs = [];
+      if (typeof node.data.minuteLimit !== 'number') node.data.minuteLimit = 60;
+      if (typeof node.data.logLimit !== 'number') node.data.logLimit = 50;
+
+      const container = document.createElement('div');
+      container.className = 'mc-logger-container';
+
+      const listEl = document.createElement('div');
+      listEl.className = 'mc-logger-list';
+      container.appendChild(listEl);
+
+      const controlsRow = document.createElement('div');
+      controlsRow.className = 'mc-logger-controls';
+
+      const minuteWrap = document.createElement('div');
+      minuteWrap.className = 'mc-logger-control';
+      const minuteLabel = document.createElement('span');
+      minuteLabel.textContent = 'Minute limit';
+      const minuteInput = document.createElement('input');
+      minuteInput.type = 'number';
+      minuteInput.min = '0';
+      minuteInput.value = String(node.data.minuteLimit || 0);
+      minuteInput.onchange = () => {
+        const v = parseInt(minuteInput.value, 10);
+        node.data.minuteLimit = isNaN(v) ? 0 : v;
+        onDataChange();
+      };
+      minuteWrap.appendChild(minuteLabel);
+      minuteWrap.appendChild(minuteInput);
+
+      const logWrap = document.createElement('div');
+      logWrap.className = 'mc-logger-control';
+      const logLabel = document.createElement('span');
+      logLabel.textContent = 'Log limit';
+      const logInput = document.createElement('input');
+      logInput.type = 'number';
+      logInput.min = '0';
+      logInput.value = String(node.data.logLimit || 0);
+      logInput.onchange = () => {
+        const v = parseInt(logInput.value, 10);
+        node.data.logLimit = isNaN(v) ? 0 : v;
+        // trim immediately if needed
+        if (node.data.logLimit > 0 && node.data.logs.length > node.data.logLimit) {
+          node.data.logs.splice(0, node.data.logs.length - node.data.logLimit);
+        }
+        renderList();
+        onDataChange();
+      };
+      logWrap.appendChild(logLabel);
+      logWrap.appendChild(logInput);
+
+      controlsRow.appendChild(minuteWrap);
+      controlsRow.appendChild(logWrap);
+      container.appendChild(controlsRow);
+
+      let lastSnapshot = '';
+
+      function formatLocalTime(ts) {
+        const d = new Date(ts);
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mi = String(d.getMinutes()).padStart(2, '0');
+        return `${mm}/${dd} - ${hh}:${mi}`;
+      }
+
+      function renderList() {
+        listEl.innerHTML = '';
+        const now = Date.now();
+        const minuteMs = (node.data.minuteLimit || 0) * 60 * 1000;
+        // filter expired logs
+        node.data.logs = node.data.logs.filter(l => {
+          if (!minuteMs) return true;
+          return now - l.timestamp <= minuteMs;
+        });
+        // enforce limit
+        if (node.data.logLimit > 0 && node.data.logs.length > node.data.logLimit) {
+          node.data.logs.splice(0, node.data.logs.length - node.data.logLimit);
+        }
+
+        node.data.logs.forEach((log, idx) => {
+          const row = document.createElement('div');
+          row.className = 'mc-logger-row';
+
+          const timeSpan = document.createElement('span');
+          timeSpan.className = 'mc-logger-time';
+          timeSpan.textContent = formatLocalTime(log.timestamp);
+
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'mc-logger-input';
+          input.value = log.text || '';
+          input.onchange = () => {
+            log.text = input.value;
+            onDataChange();
+          };
+
+          const btn = document.createElement('button');
+          btn.className = 'mc-logger-remove';
+          btn.textContent = 'x';
+          btn.onclick = () => {
+            node.data.logs.splice(idx, 1);
+            renderList();
+            onDataChange();
+          };
+
+          row.appendChild(timeSpan);
+          row.appendChild(input);
+          row.appendChild(btn);
+          listEl.appendChild(row);
+        });
+
+        // update snapshot after render
+        try {
+          lastSnapshot = JSON.stringify(node.data.logs.map(l => ({
+            t: l.timestamp,
+            x: l.text
+          })));
+        } catch (_e) {
+          lastSnapshot = '';
+        }
+      }
+
+      renderList();
+      bodyEl.appendChild(container);
+
+      // Poll for runtime changes in node.data.logs while panel is open
+      const pollInterval = setInterval(() => {
+        // stop if panel removed
+        if (!document.body.contains(bodyEl)) {
+          clearInterval(pollInterval);
+          return;
+        }
+        if (!node.data || !Array.isArray(node.data.logs)) return;
+        let current = '';
+        try {
+          current = JSON.stringify(node.data.logs.map(l => ({
+            t: l.timestamp,
+            x: l.text
+          })));
+        } catch (_e) {
+          current = '';
+        }
+        if (current !== lastSnapshot) {
+          renderList();
+        }
+      }, 800);
+    },
+    execute(ctx) {
+      const node = ctx.node;
+      node.data = node.data || {};
+      if (!Array.isArray(node.data.logs)) node.data.logs = [];
+
+      const inputs = ctx.inputs || {};
+      const raw = inputs.raw_results;
+      const now = Date.now();
+
+      let changed = false;
+
+      if (raw !== undefined && raw !== null) {
+        let text = '';
+        try {
+          if (typeof raw === 'string') {
+            text = raw;
+          } else if (Array.isArray(raw)) {
+            text = raw.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join('\n');
+          } else if (typeof raw === 'object') {
+            text = JSON.stringify(raw);
+          } else {
+            text = String(raw);
+          }
+        } catch (_e) {
+          text = String(raw);
+        }
+
+        if (text) {
+          node.data.logs.push({
+            timestamp: now,
+            text
+          });
+          changed = true;
+        }
+      }
+
+      const beforeLen = node.data.logs.length;
+      const minuteMs = (node.data.minuteLimit || 0) * 60 * 1000;
+      if (minuteMs) {
+        node.data.logs = node.data.logs.filter(l => now - l.timestamp <= minuteMs);
+      }
+      if (node.data.logLimit > 0 && node.data.logs.length > node.data.logLimit) {
+        node.data.logs.splice(0, node.data.logs.length - node.data.logLimit);
+      }
+      if (beforeLen !== node.data.logs.length) {
+        changed = true;
+      }
+
+      if (changed && typeof ctx.onDataChange === 'function') {
+        ctx.onDataChange(node.data);
+      }
+
+      const lines = node.data.logs.map(l => {
+        const d = new Date(l.timestamp);
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mi = String(d.getMinutes()).padStart(2, '0');
+        const timeStr = `${dd}/${mm} - ${hh}:${mi}`;
+        return `${timeStr} | ${l.text || ''}`;
+      });
+
+      return {
+        system_prompt: lines.join('\n')
+      };
+    }
+  });
+
+  add({
+    type: 'Message builder',
+    category: 'process',
+    ports: {
+      inputs: [ { id: 'raw_results', label: 'Raw Results' } ],
+      outputs: [ { id: 'system_prompt', label: 'System Prompt' }, { id: 'messages', label: 'Messages' } ]
+    },
+    defaultData() { return { role: 'system' }; },
+    buildConfigUI(bodyEl, node, { onDataChange }) {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.gap = '6px';
+      
+      const label = document.createElement('span');
+      label.textContent = 'Role:';
+      label.style.fontSize = '12px';
+      
+      const select = document.createElement('select');
+      select.className = 'mc-node-select';
+      select.style.flex = '1';
+      ['system', 'user', 'assistant', 'model'].forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = r;
+        if (r === (node.data.role || 'system')) opt.selected = true;
+        select.appendChild(opt);
+      });
+      
+      select.addEventListener('change', () => {
+        node.data.role = select.value;
+        onDataChange(node.data);
+      });
+      
+      row.appendChild(label);
+      row.appendChild(select);
+      bodyEl.appendChild(row);
+    },
+    execute(ctx) {
+      const raw = (ctx.inputs && ctx.inputs.raw_results);
+      const targetRole = ctx.node.data.role || 'system';
+      
+      const processItem = (item) => {
+          if (item === undefined || item === null) return null;
+          
+          let content = '';
+          let baseMsg = {};
+          
+          if (typeof item === 'string') {
+              content = item;
+              baseMsg = { role: targetRole, content: item };
+          } else if (typeof item === 'object') {
+              if ('content' in item) {
+                  content = item.content;
+                  baseMsg = { ...item, role: targetRole };
+              } else {
+                  content = JSON.stringify(item);
+                  baseMsg = { role: targetRole, content: content };
+              }
+          } else {
+              content = String(item);
+              baseMsg = { role: targetRole, content: content };
+          }
+          
+          return { content, message: baseMsg };
+      };
+
+      let system_prompt = [];
+      let messages = [];
+
+      if (Array.isArray(raw)) {
+          const flat = raw.flat();
+          for (const item of flat) {
+              const res = processItem(item);
+              if (res) {
+                  system_prompt.push(res.content);
+                  messages.push(res.message);
+              }
+          }
+      } else {
+          const res = processItem(raw);
+          if (res) {
+              system_prompt.push(res.content);
+              messages.push(res.message);
+          }
+      }
+
+      return {
+          system_prompt: system_prompt.length === 1 ? system_prompt[0] : system_prompt,
+          messages: messages
+      };
+    }
+  });
 })();

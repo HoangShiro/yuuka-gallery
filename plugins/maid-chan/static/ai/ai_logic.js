@@ -49,6 +49,55 @@
     }catch(_e){ /* ignore */ }
   }
 
+  // Compute flow_id per weakly-connected component so that each
+  // disconnected branch becomes its own flow. This is kept lightweight
+  // and only affects the in-memory graph used by AILogic; the editor
+  // persists flow ids separately.
+  function normalizeFlows(graph){
+    if(!graph || !Array.isArray(graph.nodes)) return graph || { nodes: [], edges: [] };
+    const nodes = graph.nodes;
+    const edges = Array.isArray(graph.edges) ? graph.edges : [];
+
+    const nodeIds = nodes.map(n=>n && n.id).filter(id=>id!==undefined && id!==null);
+    const adj = new Map();
+    for(const id of nodeIds){ adj.set(id, new Set()); }
+
+    for(const e of edges){
+      if(!e) continue;
+      const a = e.fromNodeId;
+      const b = e.toNodeId;
+      if(!adj.has(a) || !adj.has(b)) continue;
+      adj.get(a).add(b);
+      adj.get(b).add(a);
+    }
+
+    const visited = new Set();
+    let nextFlowId = 0;
+    for(const id of nodeIds){
+      if(visited.has(id)) continue;
+      const stack = [id];
+      const comp = [];
+      visited.add(id);
+      while(stack.length){
+        const v = stack.pop();
+        comp.push(v);
+        const nbrs = adj.get(v) || [];
+        for(const nId of nbrs){
+          if(!visited.has(nId)){
+            visited.add(nId);
+            stack.push(nId);
+          }
+        }
+      }
+      for(const nid of comp){
+        const n = nodes.find(x=>x && x.id === nid);
+        if(n){ n.flow_id = nextFlowId; }
+      }
+      nextFlowId += 1;
+    }
+    return graph;
+  }
+
   function getPluginApi(){
     const root = window.Yuuka || {};
     const ns = root.plugins && root.plugins['maid-chan'];
@@ -204,16 +253,88 @@
     return sorted;
   }
 
-  async function execute({ text = '', context = {}, history = [], signal, graph: providedGraph, runId, presetId } = {}){
+  async function execute({ text = '', context = {}, history = [], signal, graph: providedGraph, runId, presetId, startNodeId } = {}){
     if(!isEnabled()) return null;
-    const graph = providedGraph || loadGraph();
+    const rawGraph = providedGraph || loadGraph();
+    const graph = normalizeFlows(rawGraph);
     if(!graph || !Array.isArray(graph.nodes) || graph.nodes.length === 0){
       return null;
     }
 
-    const sortedIds = getSortedNodes(graph);
+    // Build basic maps used by routing logic
     const nodeById = new Map(graph.nodes.map(n => [n.id, n]));
     const results = new Map();
+
+    // Determine target flow
+    let targetFlowId = 0;
+    if (startNodeId && nodeById.has(startNodeId)) {
+        targetFlowId = nodeById.get(startNodeId).flow_id || 0;
+    }
+
+    // Filter nodes by flow_id
+    const flowNodes = graph.nodes.filter(n => (n.flow_id !== undefined ? n.flow_id : 0) === targetFlowId);
+    const flowNodeIds = new Set(flowNodes.map(n => n.id));
+    
+    // Create a subgraph for topological sort
+    const subGraph = {
+        nodes: flowNodes,
+        edges: (graph.edges || []).filter(e => flowNodeIds.has(e.fromNodeId) && flowNodeIds.has(e.toNodeId))
+    };
+
+    // If a startNodeId is provided, restrict execution to the subgraph that
+    // is reachable from that node ("play" semantics). Otherwise fall back
+    // to running the entire graph as before.
+    let sortedIds;
+    if(startNodeId && nodeById.has(startNodeId)){
+      // Collect downstream nodes from the start and all ancestors of any
+      // of those downstream nodes. This ensures dependencies of nodes
+      // we plan to run (e.g. prompts/settings) are included even if they
+      // are not ancestors of the start node itself.
+      const forwardAdj = new Map();
+      const reverseAdj = new Map();
+      for(const e of subGraph.edges){
+        if(!forwardAdj.has(e.fromNodeId)) forwardAdj.set(e.fromNodeId, new Set());
+        forwardAdj.get(e.fromNodeId).add(e.toNodeId);
+        if(!reverseAdj.has(e.toNodeId)) reverseAdj.set(e.toNodeId, new Set());
+        reverseAdj.get(e.toNodeId).add(e.fromNodeId);
+      }
+      const downstream = new Set();
+      // Forward DFS from start
+      (function collectDown(start){
+        const stack = [start];
+        while(stack.length){
+          const id = stack.pop();
+          if(downstream.has(id)) continue;
+          downstream.add(id);
+          const nexts = forwardAdj.get(id) || [];
+          for(const nid of nexts){ stack.push(nid); }
+        }
+      })(startNodeId);
+
+      // Collect ancestors for every downstream node
+      const ancestors = new Set();
+      const collectUp = (node)=>{
+        const stack = [node];
+        while(stack.length){
+          const id = stack.pop();
+          if(ancestors.has(id)) continue;
+          ancestors.add(id);
+          const prevs = reverseAdj.get(id) || [];
+          for(const pid of prevs){ stack.push(pid); }
+        }
+      };
+      for(const d of downstream){ collectUp(d); }
+
+      const needed = new Set([...downstream, ...ancestors]);
+      const allSorted = getSortedNodes(subGraph);
+      sortedIds = allSorted.filter(id => needed.has(id));
+    } else {
+      sortedIds = getSortedNodes(subGraph);
+    }
+
+    if(!sortedIds || sortedIds.length === 0){
+      return null;
+    }
 
     // Helper to get port definition ID
     const getPortId = (nodeType, portIndex, isInput) => {
@@ -252,10 +373,32 @@
             const inPortId = getPortId(node.type, edge.toPort, true);
 
             if (outPortId && inPortId) {
-                if (!inputs[inPortId]) inputs[inPortId] = [];
-                if (sourceRes[outPortId] !== undefined) {
-                    inputs[inPortId].push(sourceRes[outPortId]);
+              let value = sourceRes[outPortId];
+                
+              // Check for branching logic
+              const srcDef = window.MaidChanNodeDefs && window.MaidChanNodeDefs[srcNode.type];
+              const outPortDef = srcDef && srcDef.ports && srcDef.ports.outputs && srcDef.ports.outputs[edge.fromPort];
+                
+              if(outPortDef && (outPortDef.branching === true || outPortDef.type === 'branching')){
+                const outgoing = (graph.edges || []).filter(e => e.fromNodeId === edge.fromNodeId && e.fromPort === edge.fromPort);
+                outgoing.sort((a,b) => String(a.id).localeCompare(String(b.id)));
+                const myIndex = outgoing.findIndex(e => e.id === edge.id);
+                    
+                if(value && typeof value === 'object' && '__branchIndex' in value){
+                  if(value.__branchIndex === myIndex){
+                    // For trigger-only flows, downstream nodes don't use the payload itself.
+                    // We still normalize to the inner value (typically boolean true).
+                    value = value.value;
+                  } else {
+                    value = undefined; 
+                  }
                 }
+              }
+
+              if (!inputs[inPortId]) inputs[inPortId] = [];
+              if (value !== undefined) {
+                inputs[inPortId].push(value);
+              }
             }
         }
 
@@ -312,9 +455,11 @@
   }
 
   // Stage runner: run from a given stage to the end, emitting begin/done per stage
-  async function runFromStage({ startStage = 1, text = '', context = {}, history = [], signal, graph: providedGraph, runId, presetId } = {}){
-    // Just delegate to generic execute
-    return execute({ text, context, history, signal, graph: providedGraph, runId, presetId });
+  async function runFromStage({ startStage = 1, text = '', context = {}, history = [], signal, graph: providedGraph, runId, presetId, nodeId } = {}){
+    // Stage semantics are currently UI-level only. For execution we
+    // interpret a run-stage request as "run from this node forward" if
+    // a nodeId is provided, otherwise fall back to full-graph execution.
+    return execute({ text, context, history, signal, graph: providedGraph, runId, presetId, startNodeId: nodeId });
   }
 
   // Listen for UI play requests
@@ -324,8 +469,15 @@
     const runId = d.runId;
     const presetId = d.presetId;
     const graph = d.graph || null;
-    // We don't have text/context/history here; run with empty input unless provided externally
-    runFromStage({ startStage, runId, presetId, graph }).catch(()=>{});
+    const nodeId = d.nodeId || d.startNodeId || null;
+    // Support passing text and history from event detail so chat panel can trigger per-flow runs.
+    const text = typeof d.text === 'string' ? d.text : '';
+    const history = Array.isArray(d.history) ? d.history : [];
+    // Build context from event detail: allow userMessageId / assistantMessageId or an explicit context object
+    const context = Object.assign({}, (d.context && typeof d.context === 'object') ? d.context : {});
+    if(d.userMessageId) context.userMessageId = d.userMessageId;
+    if(d.assistantMessageId) context.assistantMessageId = d.assistantMessageId;
+    runFromStage({ startStage, runId, presetId, graph, nodeId, text, history, context }).catch(()=>{});
   });
 
   // Expose API
@@ -350,15 +502,22 @@
 
     const results = new Map();
     
+    const targetFlowId = targetNode.flow_id !== undefined ? targetNode.flow_id : 0;
+
     const getIncomingEdges = (nid)=>{
       const list = (graph.edges||[]).filter(e => e && e.toNodeId === nid);
-      list.sort((a,b)=>{
+      // Filter out edges from different flows
+      const filtered = list.filter(e => {
+          const src = nodeById.get(e.fromNodeId);
+          return src && (src.flow_id !== undefined ? src.flow_id : 0) === targetFlowId;
+      });
+      filtered.sort((a,b)=>{
         const ia = Number.isFinite(a.index)? a.index : Infinity;
         const ib = Number.isFinite(b.index)? b.index : Infinity;
         if(ia !== ib) return ia - ib;
         return String(a.id).localeCompare(String(b.id));
       });
-      return list;
+      return filtered;
     };
 
     const executeDependency = async (nid, visited = new Set()) => {
@@ -392,7 +551,19 @@
           const outPort = (srcDef.ports.outputs || [])[e.fromPort];
           const inPort = (def.ports.inputs || [])[e.toPort];
           if(outPort && inPort){
-            const val = srcRes[outPort.id];
+            let val = srcRes[outPort.id];
+            
+            // Branching logic
+            if(outPort.branching === true || outPort.type === 'branching'){
+                const outgoing = (graph.edges || []).filter(ed => ed.fromNodeId === e.fromNodeId && ed.fromPort === e.fromPort);
+                outgoing.sort((a,b) => String(a.id).localeCompare(String(b.id)));
+                const myIndex = outgoing.findIndex(ed => ed.id === e.id);
+                if(val && typeof val === 'object' && '__branchIndex' in val){
+                    if(val.__branchIndex === myIndex) val = val.value;
+                    else val = undefined;
+                }
+            }
+
             if(val !== undefined){
               if(!inputs[inPort.id]) inputs[inPort.id] = [];
               inputs[inPort.id].push(val);
@@ -421,7 +592,19 @@
             const outPort = (srcDef.ports.outputs || [])[e.fromPort];
             const inPort = (window.MaidChanNodeDefs[targetNode.type].ports.inputs || [])[e.toPort];
             if(outPort && inPort){
-                const val = srcRes[outPort.id];
+                let val = srcRes[outPort.id];
+                
+                // Branching logic
+                if(outPort.branching === true || outPort.type === 'branching'){
+                    const outgoing = (graph.edges || []).filter(ed => ed.fromNodeId === e.fromNodeId && ed.fromPort === e.fromPort);
+                    outgoing.sort((a,b) => String(a.id).localeCompare(String(b.id)));
+                    const myIndex = outgoing.findIndex(ed => ed.id === e.id);
+                    if(val && typeof val === 'object' && '__branchIndex' in val){
+                        if(val.__branchIndex === myIndex) val = val.value;
+                        else val = undefined;
+                    }
+                }
+
                 if(val !== undefined){
                     if(!inputs[inPort.id]) inputs[inPort.id] = [];
                     inputs[inPort.id].push(val);
