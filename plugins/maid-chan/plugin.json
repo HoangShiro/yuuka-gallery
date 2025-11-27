@@ -13,6 +13,7 @@
     "js": [
       "node/input.js",
       "node/process.js",
+      "node/storage.js",
       "node/output.js",
       "plugin.js",
       "ai/maid_storage.js",

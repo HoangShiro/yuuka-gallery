@@ -660,8 +660,37 @@
     async execute(ctx){
       const d = (ctx && ctx.node && ctx.node.data) || {};
       const selected = Array.isArray(d.selected) ? d.selected.slice() : [];
+      const root = window.Yuuka || {};
+      const services = root.services || {};
+      const capsSvc = services.capabilities;
+      const allCaps = (capsSvc && typeof capsSvc.listLLMCallable === 'function') ? (capsSvc.listLLMCallable() || []) : [];
+      const resolveCap = (fnName)=>{
+        const target = String(fnName||'').trim().toLowerCase();
+        if(!target) return null;
+        for(const c of allCaps){
+          if(!c || !c.llmCallable) continue;
+          const n = ((c.llmName && String(c.llmName)) || String(c.id||'')).trim().toLowerCase();
+          if(n && n === target) return c;
+        }
+        return null;
+      };
       
       const defs = { selected };
+
+      const structuredProps = {};
+      selected.forEach(name => {
+        const key = typeof name === 'string' ? name.trim() : '';
+        if(!key) return;
+        const cap = resolveCap(key);
+        const label = cap && (cap.title || cap.description || cap.id);
+        structuredProps[key] = {
+          type: ['string', 'null'],
+          description: label ? `Summary field for tool "${label}"` : `Summary field for tool "${key}"`
+        };
+      });
+      if(Object.keys(structuredProps).length){
+        defs.structured_output = { properties: structuredProps };
+      }
 
       if(!d.execute){
         return { tool_definitions: defs };
@@ -678,17 +707,6 @@
       });
 
       // Execute synchronously so stage runner can route results to Preview
-      const root = window.Yuuka || {}; const services = root.services || {}; const capsSvc = services.capabilities;
-      const all = (capsSvc && typeof capsSvc.listLLMCallable === 'function') ? (capsSvc.listLLMCallable()||[]) : [];
-      const resolveCap = (fnName)=>{
-        const target = String(fnName||'').trim().toLowerCase();
-        for(const c of all){
-          if(!c || !c.llmCallable) continue;
-          const n = ((c.llmName && String(c.llmName)) || String(c.id||'')).trim().toLowerCase();
-          if(n && n === target) return c;
-        }
-        return null;
-      };
       const results = [];
       for(const c of calls){
         const cap = resolveCap(c.name);

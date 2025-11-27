@@ -183,6 +183,7 @@ async def chat(
     tool_mode: Optional[str] = None,
     tool_executor: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
     max_turns: int = 3,
+    structured_output: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Multi-turn chat with optional tool-calling execution.
@@ -229,6 +230,14 @@ async def chat(
     # Work on a local copy of conversation, as we append model/tool messages.
     history: List[Dict[str, Any]] = [dict(m) for m in (conversation or []) if isinstance(m, dict)]
 
+    structured_mode = False
+    structured_schema: Optional[Dict[str, Any]] = None
+    if structured_output and isinstance(structured_output, dict):
+        schema_candidate = structured_output.get("schema")
+        if isinstance(schema_candidate, dict) and schema_candidate:
+            structured_schema = schema_candidate
+            structured_mode = True
+
     for turn in range(max_turns):
         # 1) Build request config
         config_kwargs: Dict[str, Any] = {"safety_settings": DEFAULT_SAFETY}
@@ -236,6 +245,9 @@ async def chat(
             config_kwargs["temperature"] = temperature
         if max_tokens is not None:
             config_kwargs["max_output_tokens"] = max_tokens
+        if structured_mode and structured_schema:
+            config_kwargs["response_mime_type"] = "application/json"
+            config_kwargs["response_json_schema"] = structured_schema
 
         # Only pass tools on the first call of this multi-turn exchange (via config, not top-level args)
         if tools and turn == 0:
@@ -425,7 +437,32 @@ async def chat(
                 history.append(response_dict)
                 final_text = "".join(p.get("text", "") for p in response_dict.get("parts", []))
                 ret = dict(response_dict)
+
+                structured_payload: Optional[Any] = None
+                structured_error: Optional[str] = None
+                raw_structured_text: Optional[str] = None
+                if structured_mode:
+                    try:
+                        raw_structured_text = getattr(response, "text", None) or final_text
+                    except Exception:
+                        raw_structured_text = final_text
+                    if raw_structured_text:
+                        try:
+                            structured_payload = json.loads(raw_structured_text)
+                        except json.JSONDecodeError as json_err:
+                            structured_error = f"Failed to parse structured output: {json_err}"
+                        except Exception as generic_err:  # noqa: BLE001
+                            structured_error = f"Unexpected structured output error: {generic_err}"
+                    if isinstance(structured_payload, dict):
+                        final_text = str(structured_payload.get("text", final_text))
+
                 ret["text"] = final_text
+                if structured_payload is not None:
+                    ret["structured_output"] = structured_payload
+                elif structured_error:
+                    ret["structured_output_error"] = structured_error
+                    if raw_structured_text is not None:
+                        ret["structured_output_raw"] = raw_structured_text
                 return ret
 
         except Exception as parse_err:  # noqa: BLE001

@@ -695,6 +695,7 @@ class MaidChanPlugin:
                     # Non-Gemini providers can safely ignore these fields.
                     'tools': tools,
                     'tool_mode': tool_mode,
+                    'structured_output': payload.get('structured_output'),
                 },
             }
 

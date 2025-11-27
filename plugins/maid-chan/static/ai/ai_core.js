@@ -163,7 +163,7 @@
     return tools;
   }
 
-  async function callLLMChat({ messages, signal, disableTools, allowedTools, customTools, settings } = {}){
+  async function callLLMChat({ messages, signal, disableTools, allowedTools, customTools, settings, structuredOutput } = {}){
     const cfg = loadLLMConfig();
     const provider = cfg.provider || 'openai';
     const model = cfg.model || '';
@@ -191,10 +191,16 @@
       if(Number.isFinite(settings.max_tokens)) payload.max_tokens = settings.max_tokens;
     }
 
+    const effectiveProvider = String(payload.provider || provider || '').trim().toLowerCase();
+    const wantsStructuredOutput = effectiveProvider === 'gemini'
+      && structuredOutput
+      && typeof structuredOutput === 'object'
+      && structuredOutput.enabled !== false;
+
     // When using Gemini, attach tools built from capabilities so the model
     // can perform function calling. Other providers simply ignore this field.
     // Support explicit disabling of tools in final stage
-    if(provider === 'gemini' && !disableTools){
+    if(effectiveProvider === 'gemini' && !disableTools && !wantsStructuredOutput){
       let tools = buildToolsFromCapabilities();
       if(Array.isArray(allowedTools)){
         const allowSet = new Set(allowedTools.filter(Boolean).map(String));
@@ -217,9 +223,24 @@
         // No tools available after filtering
         payload.tool_mode = 'none';
       }
-    }else if(provider === 'gemini' && disableTools){
-      // Explicitly disable tools for this round
+    }else if(effectiveProvider === 'gemini' && (disableTools || wantsStructuredOutput)){
+      // Explicitly disable tools when forced off or when using structured outputs
       payload.tool_mode = 'none';
+    }
+
+    if(wantsStructuredOutput){
+      const schema = structuredOutput.schema;
+      if(schema && typeof schema === 'object'){
+        try{
+          // Clone to avoid accidental shared references with upstream callers
+          payload.structured_output = JSON.parse(JSON.stringify(structuredOutput));
+        }catch(_e){
+          payload.structured_output = {
+            schema,
+            enabled: structuredOutput.enabled !== false
+          };
+        }
+      }
     }
 
     // Prefer using plugin API client

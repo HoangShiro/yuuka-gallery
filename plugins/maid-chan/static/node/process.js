@@ -40,6 +40,7 @@
             { title: 'Settings', data: processed.settings },
             { title: 'Allowed Tools', data: processed.allowedTools },
             { title: 'Custom Tools', data: processed.customTools },
+          { title: 'Structured Output Hints', data: processed.structuredOutput },
             { title: 'Raw Inputs', data: inputs }
         ];
         
@@ -116,6 +117,16 @@
       let allowedTools = [];
       const customTools = [];
       const allowSet = new Set();
+      const structuredProps = {};
+      const structuredRequired = new Set();
+      let hasStructuredContrib = false;
+      const cloneSchema = (val) => {
+        try {
+          return JSON.parse(JSON.stringify(val));
+        } catch(_e) {
+          return val;
+        }
+      };
 
       for(const t of toolsList){
         const val = (t && t.tool_definitions) ? t.tool_definitions : t;
@@ -124,6 +135,22 @@
         }
         if(val && val.custom && Array.isArray(val.custom)){
             customTools.push(...val.custom);
+        }
+        if(val && val.structured_output && typeof val.structured_output === 'object'){
+            const contrib = val.structured_output;
+            const props = contrib.properties;
+            if(props && typeof props === 'object'){
+                Object.entries(props).forEach(([key, schema]) => {
+                    if(!key) return;
+                    structuredProps[key] = cloneSchema(schema);
+                    hasStructuredContrib = true;
+                });
+            }
+            if(Array.isArray(contrib.required)){
+                contrib.required.forEach(req => {
+                    if(req) structuredRequired.add(req);
+                });
+            }
         }
       }
       allowedTools = Array.from(allowSet);
@@ -138,7 +165,452 @@
         try{ const raw = window.localStorage.getItem('maid-chan:llm-config'); if(raw){ const cfg = JSON.parse(raw); if(cfg && typeof cfg==='object') settings = cfg; } }catch(_e){}
       }
       
-      return { messages, settings, allowedTools, customTools };
+      const structuredOutput = hasStructuredContrib ? {
+        properties: structuredProps,
+        required: Array.from(structuredRequired)
+      } : null;
+
+      return { messages, settings, allowedTools, customTools, structuredOutput };
+  }
+  // -----------------------
+  
+  // --- Tags manager helpers ---
+  function tmNormalizeList(value){
+    if(value == null) return [];
+    if(Array.isArray(value)){
+      return value.map(v => (v == null ? '' : String(v))).map(v => v.trim()).filter(Boolean);
+    }
+    if(typeof value === 'string'){
+      return value.split(/[\n,]+/).map(v => v.trim()).filter(Boolean);
+    }
+    if(typeof value === 'object' && value){
+      if(Array.isArray(value.tags)) return tmNormalizeList(value.tags);
+      if(Array.isArray(value.values)) return tmNormalizeList(value.values);
+    }
+    return [];
+  }
+
+  function tmNormalizeKey(value){
+    if(value == null) return '';
+    let text = String(value).toLowerCase();
+    try{ text = text.normalize('NFD'); }catch(_e){}
+    text = text.replace(/[\u0300-\u036f]/g, '');
+    text = text.replace(/[\s_\-]+/g, ' ');
+    text = text.replace(/[^a-z0-9]+/g, '');
+    return text;
+  }
+
+  function tmNormalizeName(value){
+    if(typeof value !== 'string') return '';
+    return value.trim().toLowerCase();
+  }
+
+  function tmUniqueList(list, blocked){
+    const blockedSet = new Set(blocked ? Array.from(blocked) : []);
+    const result = [];
+    (list || []).forEach(item => {
+      const text = item == null ? '' : String(item).trim();
+      if(!text) return;
+      const key = tmNormalizeKey(text);
+      if(!key || blockedSet.has(key)) return;
+      blockedSet.add(key);
+      result.push(text);
+    });
+    return result;
+  }
+
+  function tmEnsureEntryShape(entry){
+    const next = entry || {};
+    if(!next.id) next.id = `tm_${Math.random().toString(36).slice(2, 9)}`;
+    next.category = typeof next.category === 'string' ? next.category : '';
+    next.component = typeof next.component === 'string' ? next.component : '';
+    if(!Array.isArray(next.current)) next.current = [];
+    if(!Array.isArray(next.removed)) next.removed = [];
+    next.current = tmUniqueList(next.current);
+    next.removed = tmUniqueList(next.removed, next.current.map(tmNormalizeKey));
+    next.onlyWhenAboveEmpty = !!next.onlyWhenAboveEmpty;
+    next.customRaw = typeof next.customRaw === 'string' ? next.customRaw : '';
+    next.customList = Array.isArray(next.customList) ? tmUniqueList(next.customList) : tmNormalizeList(next.customRaw);
+    return next;
+  }
+
+  function tmEnsureState(node){
+    node.data = node.data || {};
+    if(!Array.isArray(node.data.entries)) node.data.entries = [];
+    node.data.entries = node.data.entries.map(tmEnsureEntryShape);
+    if(typeof node.data.addCommandName !== 'string' || !node.data.addCommandName) node.data.addCommandName = 'add';
+    if(typeof node.data.removeCommandName !== 'string' || !node.data.removeCommandName) node.data.removeCommandName = 'remove';
+    return node.data.entries;
+  }
+
+  function tmEntryKey(category, component){
+    return `${tmNormalizeName(category)}::${tmNormalizeName(component)}`;
+  }
+
+  function tmArrayEqual(a, b){
+    if(a === b) return true;
+    if(!Array.isArray(a) || !Array.isArray(b)) return false;
+    if(a.length !== b.length) return false;
+    for(let i = 0; i < a.length; i++){
+      if(a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+
+  function tmParseStructure(payload){
+    if(!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    const entries = [];
+    Object.entries(payload).forEach(([catName, compObj]) => {
+      if(!compObj || typeof compObj !== 'object' || Array.isArray(compObj)) return;
+      Object.entries(compObj).forEach(([compName, tags]) => {
+        entries.push({
+          category: typeof catName === 'string' ? catName : '',
+          component: typeof compName === 'string' ? compName : '',
+          tags: tmNormalizeList(tags)
+        });
+      });
+    });
+    return entries.length ? entries : null;
+  }
+
+  function tmSyncEntriesFromStructure(node, structure){
+    if(!Array.isArray(structure) || !structure.length) return false;
+    const prevMap = new Map();
+    (node.data.entries || []).forEach(entry => {
+      prevMap.set(tmEntryKey(entry.category, entry.component), tmEnsureEntryShape(entry));
+    });
+    const nextEntries = [];
+    let mutated = false;
+    structure.forEach(item => {
+      const key = tmEntryKey(item.category, item.component);
+      const prev = prevMap.get(key);
+      const inbound = tmUniqueList(item.tags);
+      if(prev){
+        if(!tmArrayEqual(prev.current, inbound)){
+          prev.current = inbound;
+          mutated = true;
+        }
+        const blocked = inbound.map(tmNormalizeKey);
+        const filteredRemoved = tmUniqueList(prev.removed, blocked);
+        if(!tmArrayEqual(prev.removed, filteredRemoved)){
+          prev.removed = filteredRemoved;
+          mutated = true;
+        }
+        prev.category = item.category;
+        prev.component = item.component;
+        nextEntries.push(prev);
+        prevMap.delete(key);
+      }else{
+        const created = tmEnsureEntryShape({
+          category: item.category,
+          component: item.component,
+          current: inbound,
+          removed: [],
+          onlyWhenAboveEmpty: false,
+          customRaw: '',
+          customList: []
+        });
+        nextEntries.push(created);
+        mutated = true;
+      }
+    });
+    if(prevMap.size) mutated = true;
+    node.data.entries = nextEntries;
+    return mutated;
+  }
+
+  function tmFindTagIndex(list, normalizedKey){
+    if(!Array.isArray(list)) return -1;
+    for(let i = 0; i < list.length; i++){
+      if(tmNormalizeKey(list[i]) === normalizedKey) return i;
+    }
+    return -1;
+  }
+
+  function tmMoveTag(entry, normalizedKey, fromField, toField){
+    if(!Array.isArray(entry[fromField])) entry[fromField] = [];
+    if(!Array.isArray(entry[toField])) entry[toField] = [];
+    const idx = tmFindTagIndex(entry[fromField], normalizedKey);
+    if(idx === -1) return false;
+    const [tag] = entry[fromField].splice(idx, 1);
+    if(tmFindTagIndex(entry[toField], normalizedKey) === -1){
+      entry[toField].push(tag);
+    }
+    return true;
+  }
+
+  function tmPickMetaField(sources, keys){
+    for(const src of sources){
+      if(!src || typeof src !== 'object') continue;
+      for(const key of keys){
+        if(src[key] !== undefined && src[key] !== null){
+          return src[key];
+        }
+      }
+    }
+    return '';
+  }
+
+  function tmNormalizeCommandToken(value){
+    if(typeof value !== 'string') return '';
+    return value.trim().toLowerCase().replace(/[\s_]+/g, '');
+  }
+
+  function tmParseCommands(input, options){
+    options = options || {};
+    const addAliasNorm = tmNormalizeCommandToken(options.addAlias) || 'add';
+    const removeAliasNorm = tmNormalizeCommandToken(options.removeAlias) || 'remove';
+    const matchAction = (name) => {
+      const normalized = tmNormalizeCommandToken(name);
+      if(!normalized) return null;
+      if(normalized === addAliasNorm || normalized === 'add') return 'add';
+      if(normalized === removeAliasNorm || normalized === 'remove') return 'remove';
+      return null;
+    };
+    const pickCommandField = (obj, action) => {
+      if(!obj || typeof obj !== 'object') return undefined;
+      for(const key of Object.keys(obj)){
+        if(matchAction(key) === action){
+          return obj[key];
+        }
+      }
+      return undefined;
+    };
+    const commands = [];
+    const pushCommand = (action, tagsSource, metaSources) => {
+      const tags = tmNormalizeList(tagsSource);
+      if(!tags.length) return;
+      const componentRaw = tmPickMetaField(metaSources, ['component','component_name','componentName','target_component','targetComponent']);
+      const categoryRaw = tmPickMetaField(metaSources, ['category','category_name','categoryName']);
+      commands.push({
+        action,
+        tags,
+        component: tmNormalizeName(componentRaw),
+        category: tmNormalizeName(categoryRaw)
+      });
+    };
+
+    const tryParseJson = (value) => {
+      if(typeof value !== 'string') return null;
+      const trimmed = value.trim();
+      if(!trimmed) return null;
+      try{ return JSON.parse(trimmed); }
+      catch(_e){ return null; }
+    };
+
+    const emitCommand = (action, payload, metaSources = []) => {
+      if(payload == null) return;
+      let source = payload;
+      let meta = Array.isArray(metaSources) ? metaSources.slice() : [];
+      if(typeof source === 'string'){
+        const parsed = tryParseJson(source);
+        if(parsed !== null) source = parsed;
+      }
+      if(source && typeof source === 'object' && !Array.isArray(source)){
+        meta.unshift(source);
+        const nested = source.tags || source.values || source.list || source.data || source.raw || source.allowed || pickCommandField(source, action);
+        if(nested !== undefined) source = nested;
+      }
+      pushCommand(action, source, meta);
+    };
+
+    const visit = (item, metaStack = [], depth = 0) => {
+      if(item == null || depth > 16) return;
+      if(typeof item === 'string'){
+        const parsed = tryParseJson(item);
+        if(parsed !== null){
+          visit(parsed, metaStack, depth + 1);
+        }
+        return;
+      }
+      if(Array.isArray(item)){
+        item.forEach(child => visit(child, metaStack, depth + 1));
+        return;
+      }
+      if(typeof item !== 'object') return;
+
+      Object.keys(item).forEach(key => {
+        const maybeAction = matchAction(key);
+        if(maybeAction){
+          emitCommand(maybeAction, item[key], [item, ...metaStack]);
+        }
+      });
+
+      const rawName = item.name || (item.function && item.function.name) || '';
+      const actionName = matchAction(rawName);
+      if(actionName === 'add' || actionName === 'remove'){
+        let args = item.arguments || item.args || (item.function && item.function.arguments) || {};
+        if(typeof args === 'string'){
+          const parsedArgs = tryParseJson(args);
+          if(parsedArgs !== null) args = parsedArgs;
+        }
+        let tagSource;
+        if(Array.isArray(args) || typeof args === 'string'){
+          tagSource = args;
+        }else if(args && typeof args === 'object'){
+          tagSource = args.tags || args.values || args.list || args.tag || args.value || args.data || pickCommandField(args, actionName);
+        }
+        if(tagSource === undefined && item && typeof item === 'object'){
+          tagSource = pickCommandField(item, actionName);
+        }
+        if(tagSource === undefined) tagSource = args;
+        emitCommand(actionName, tagSource, [args, item, ...metaStack]);
+        visit(args, [args, item, ...metaStack], depth + 1);
+      }
+
+      Object.values(item).forEach(child => visit(child, [item, ...metaStack], depth + 1));
+    };
+
+    const initial = Array.isArray(input) ? input.flat(Infinity) : (input ? [input] : []);
+    initial.forEach(item => visit(item, []));
+    return commands;
+  }
+
+  function tmApplyCommands(entries, commands){
+    if(!Array.isArray(entries) || !Array.isArray(commands) || !commands.length) return false;
+    let mutated = false;
+    commands.forEach(cmd => {
+      entries.forEach(entry => {
+        if(cmd.component && tmNormalizeName(entry.component) !== cmd.component) return;
+        if(cmd.category && tmNormalizeName(entry.category) !== cmd.category) return;
+        cmd.tags.forEach(tag => {
+          const key = tmNormalizeKey(tag);
+          if(!key) return;
+          if(cmd.action === 'remove'){
+            mutated = tmMoveTag(entry, key, 'current', 'removed') || mutated;
+          }else if(cmd.action === 'add'){
+            mutated = tmMoveTag(entry, key, 'removed', 'current') || mutated;
+          }
+        });
+      });
+    });
+    return mutated;
+  }
+
+  function tmEntriesSnapshot(entries){
+    try{
+      return JSON.stringify((entries || []).map(e => ({
+        id: e.id,
+        category: e.category,
+        component: e.component,
+        current: e.current,
+        removed: e.removed,
+        onlyWhenAboveEmpty: !!e.onlyWhenAboveEmpty,
+        customRaw: e.customRaw
+      })));
+    }catch(_e){ return String(Date.now()); }
+  }
+
+  function tmBuildOutputs(entries){
+    const structure = {};
+    const removedStructure = {};
+    const custom = [];
+    if(!Array.isArray(entries) || !entries.length){
+      return { structure, removedStructure, custom };
+    }
+    const catMap = new Map();
+    entries.forEach(entry => {
+      const cat = entry && typeof entry.category === 'string' && entry.category ? entry.category : null;
+      const comp = entry && typeof entry.component === 'string' && entry.component ? entry.component : null;
+      if(!cat || !comp) return;
+      if(!catMap.has(cat)) catMap.set(cat, []);
+      catMap.get(cat).push(entry);
+    });
+    catMap.forEach((list, catName) => {
+      structure[catName] = {};
+      removedStructure[catName] = {};
+      list.forEach((entry, idx) => {
+        const prev = idx > 0 ? list[idx - 1] : null;
+        const prevHas = prev && Array.isArray(prev.current) && prev.current.filter(Boolean).length > 0;
+        const shouldEmit = entry.onlyWhenAboveEmpty ? !prevHas : true;
+        const curated = Array.isArray(entry.current) ? entry.current.filter(Boolean) : [];
+        structure[catName][entry.component] = shouldEmit ? curated.slice() : [];
+        const removedList = Array.isArray(entry.removed) ? entry.removed.filter(Boolean) : [];
+        removedStructure[catName][entry.component] = shouldEmit ? removedList.slice() : [];
+        if(Array.isArray(entry.customList) && entry.customList.length && curated.length === 0){
+          custom.push(...entry.customList);
+        }
+      });
+    });
+    return { structure, removedStructure, custom: tmUniqueList(custom) };
+  }
+  
+  const TM_TAGS_UPDATED_EVENT = 'maid-chan:tags-storage:updated';
+
+  function tmLoadGraphSnapshot(){
+    try{
+      const api = window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.AILogic;
+      if(api && typeof api.loadGraph === 'function'){
+        const graph = api.loadGraph();
+        if(graph && typeof graph === 'object') return graph;
+      }
+    }catch(_e){}
+    try{
+      const raw = window.localStorage.getItem('maid-chan:logic:graph');
+      return raw ? JSON.parse(raw) : {};
+    }catch(_e){ return {}; }
+  }
+
+  function tmCategoriesToStructureSnapshot(categories){
+    const result = {};
+    (categories || []).forEach(cat => {
+      if(!cat || typeof cat !== 'object') return;
+      const catName = typeof cat.name === 'string' ? cat.name.trim() : '';
+      if(!catName) return;
+      const compMap = {};
+      (cat.components || []).forEach(comp => {
+        if(!comp || typeof comp !== 'object') return;
+        const compName = typeof comp.name === 'string' ? comp.name.trim() : '';
+        if(!compName) return;
+        compMap[compName] = tmNormalizeList(comp.tags);
+      });
+      result[catName] = compMap;
+    });
+    return result;
+  }
+
+  function tmReadStoredSnapshot(nodeId){
+    if(nodeId == null) return null;
+    try{
+      const raw = window.localStorage.getItem(`maid-chan:tags-storage:last:${nodeId}`);
+      if(!raw) return null;
+      const payload = JSON.parse(raw);
+      if(payload && typeof payload === 'object'){
+        if(payload.structure && typeof payload.structure === 'object'){
+          return payload.structure;
+        }
+      }
+    }catch(_e){ return null; }
+    return null;
+  }
+
+  function tmFindConnectedStorageInfo(nodeId){
+    if(nodeId == null) return null;
+    const graph = tmLoadGraphSnapshot();
+    const nodes = new Map();
+    (Array.isArray(graph.nodes) ? graph.nodes : []).forEach(n => {
+      if(n && n.id !== undefined && n.id !== null){
+        nodes.set(String(n.id), n);
+      }
+    });
+    const edges = Array.isArray(graph.edges) ? graph.edges : [];
+    const targetId = String(nodeId);
+    for(const edge of edges){
+      if(!edge) continue;
+      if(String(edge.toNodeId) !== targetId) continue;
+      const idxRaw = edge.toPort;
+      const idx = typeof idxRaw === 'number' ? idxRaw : (idxRaw == null ? 0 : parseInt(idxRaw, 10));
+      if(idx !== 0) continue; // raw_results port
+      const source = nodes.get(String(edge.fromNodeId));
+      if(!source || source.type !== 'Tags storage') continue;
+      const fromGraph = tmCategoriesToStructureSnapshot(source.data && source.data.categories);
+      const fallback = tmReadStoredSnapshot(source.id);
+      return {
+        storageNodeId: String(source.id),
+        structure: (fromGraph && typeof fromGraph === 'object') ? fromGraph : fallback
+      };
+    }
+    return null;
   }
   // -----------------------
 
@@ -156,9 +628,46 @@
         { id:'response_message', label:'Response Message' },
         { id:'tool_calls', label:'Tool Calls' }
       ] },
-    defaultData(){ return {}; },
+    defaultData(){ return { structured_output_enabled: false }; },
     buildConfigUI(bodyEl, node){
-      const hint = document.createElement('div'); hint.className='mc-chip'; hint.textContent='No settings'; bodyEl.appendChild(hint);
+      node.data = node.data || {};
+      if(typeof node.data.structured_output_enabled !== 'boolean'){
+        node.data.structured_output_enabled = false;
+      }
+
+      const hint = document.createElement('div');
+      hint.className='mc-chip';
+      hint.textContent='Outputs plain text unless structured mode is enabled.';
+      bodyEl.appendChild(hint);
+
+      const toggleRow = document.createElement('div');
+      toggleRow.className = 'mc-custom-msg-toggle-row';
+      const toggleLabel = document.createElement('span');
+      toggleLabel.className = 'mc-custom-msg-label';
+      toggleLabel.textContent = 'Structured outputs (Gemini)';
+      const toggleSwitch = document.createElement('div');
+      toggleSwitch.className = 'mc-custom-msg-switch';
+      const toggleKnob = document.createElement('div');
+      toggleKnob.className = 'mc-custom-msg-knob';
+      toggleSwitch.appendChild(toggleKnob);
+      const syncToggle = () => {
+        const enabled = !!node.data.structured_output_enabled;
+        toggleSwitch.style.background = enabled ? '#ff6fa9' : '#3a3b44';
+        toggleKnob.style.left = enabled ? '18px' : '2px';
+      };
+      toggleSwitch.onclick = () => {
+        node.data.structured_output_enabled = !node.data.structured_output_enabled;
+        syncToggle();
+      };
+      syncToggle();
+      toggleRow.appendChild(toggleLabel);
+      toggleRow.appendChild(toggleSwitch);
+      bodyEl.appendChild(toggleRow);
+
+      const toggleHint = document.createElement('div');
+      toggleHint.className = 'mc-chip';
+      toggleHint.textContent = 'When on, Gemini returns JSON (text + optional fields from Tool Definitions).';
+      bodyEl.appendChild(toggleHint);
       
       const btn = document.createElement('button');
       btn.textContent = 'Inspect Inputs';
@@ -182,7 +691,53 @@
     },
     async execute(ctx){
       const inputs = ctx.inputs || {};
-      const { messages, settings, allowedTools, customTools } = prepareLLMRequest(inputs);
+      const { messages, settings, allowedTools, customTools, structuredOutput } = prepareLLMRequest(inputs);
+      const nodeData = (ctx && ctx.node && ctx.node.data) || {};
+      const structuredModeEnabled = !!nodeData.structured_output_enabled;
+      const cloneSchema = (schema) => {
+        try { return JSON.parse(JSON.stringify(schema)); }
+        catch(_e){ return schema; }
+      };
+      const buildStructuredPayload = (hints) => {
+        const props = {};
+        if(hints && hints.properties && typeof hints.properties === 'object'){
+          Object.entries(hints.properties).forEach(([key, schema]) => {
+            if(!key) return;
+            const cloned = cloneSchema(schema);
+            if(cloned && typeof cloned === 'object' && !cloned.type){
+              cloned.type = 'string';
+            }
+            props[key] = cloned || { type: 'string' };
+          });
+        }
+        if(!props.text){
+          props.text = { type: 'string', description: 'Primary assistant reply text.' };
+        }else if(typeof props.text === 'object'){
+          if(!props.text.type) props.text.type = 'string';
+          if(!props.text.description) props.text.description = 'Primary assistant reply text.';
+        }
+        const requiredSet = new Set(['text']);
+        if(hints && Array.isArray(hints.required)){
+          hints.required.forEach(r => { if(r) requiredSet.add(r); });
+        }
+        const requiredList = Array.from(requiredSet);
+        const metadata = {
+          fields: Object.keys(props),
+          optional_fields: Object.keys(props).filter(name => !requiredSet.has(name)),
+          source: 'maid-chan-llm'
+        };
+        return {
+          enabled: true,
+          schema: {
+            type: 'object',
+            properties: props,
+            required: requiredList,
+            additionalProperties: false
+          },
+          metadata
+        };
+      };
+      const structuredPayload = structuredModeEnabled ? buildStructuredPayload(structuredOutput || null) : null;
       const controlRaw = inputs.message_control;
       const control = Array.isArray(controlRaw) ? controlRaw[controlRaw.length - 1] : controlRaw;
       const assistantIdFromControl = control && (control.assistant_message_id || control.assistantMessageId);
@@ -194,7 +749,7 @@
       if(!MaidCore) return { response_message: { role: 'assistant', content: '(Error: MaidCore not found)' } };
 
       try {
-        const res = await MaidCore.callLLMChat({ messages, settings, allowedTools, customTools, signal: ctx.signal });
+        const res = await MaidCore.callLLMChat({ messages, settings, allowedTools, customTools, signal: ctx.signal, structuredOutput: structuredPayload });
         
         // 6. Return outputs
         const text = res.text || res.message || res.content || '';
@@ -208,6 +763,20 @@
           return [];
         })(res);
 
+        let structuredData = null;
+        if(structuredPayload){
+          if(res && typeof res.structured_output === 'object'){
+            structuredData = res.structured_output;
+          }else if(res && res.structured_output_raw){
+            structuredData = {
+              raw: res.structured_output_raw,
+              error: res.structured_output_error || 'Structured output missing'
+            };
+          }else if(res && res.structured_output_error){
+            structuredData = { error: res.structured_output_error };
+          }
+        }
+
         const responseMsg = { role: 'assistant', content: text };
         if(assistantMsgId){
           responseMsg.id = assistantMsgId;
@@ -216,11 +785,13 @@
         try{
           console.log('[MaidLogic][LLM]', { nodeId: ctx?.node?.id, assistantMessageId: responseMsg.id || null, hadControlId: !!assistantMsgId });
         }catch(_e){/* noop */}
-        if(calls.length) responseMsg.tool_calls = calls;
+        if(!structuredPayload && calls.length) responseMsg.tool_calls = calls;
+
+        const toolOutput = structuredPayload ? (structuredData || null) : (calls.length ? calls : null);
 
         return { 
             response_message: responseMsg,
-            tool_calls: calls.length ? calls : null,
+            tool_calls: toolOutput,
             _raw: res 
         };
       } catch(err) {
@@ -346,11 +917,12 @@
       inputs: [ { id:'tool_results', label:'Raw Results' } ], 
       outputs: [ { id:'response_message', label:'Response Message' } ] 
     },
-    defaultData(){ return { mode: 'prompt', template: '', replacements: [] }; },
+    defaultData(){ return { mode: 'prompt', template: '', customWords: '', replacements: [] }; },
     buildConfigUI(bodyEl, node, { onDataChange }){
       node.data = node.data || {};
       if(!node.data.mode) node.data.mode = 'prompt';
       if(!node.data.template) node.data.template = '';
+      if(typeof node.data.customWords !== 'string') node.data.customWords = '';
       if(!Array.isArray(node.data.replacements)) node.data.replacements = [];
 
       const container = document.createElement('div');
@@ -392,6 +964,32 @@
       promptDesc.className = 'mc-chip';
       promptDesc.textContent = 'Use {{key}} to insert values from Raw Results. {{raw}} for full content.';
       promptContainer.appendChild(promptDesc);
+
+      const fallbackWrap = document.createElement('div');
+      fallbackWrap.className = 'mc-custom-msg-fallback';
+
+      const fallbackLabel = document.createElement('label');
+      fallbackLabel.className = 'mc-custom-msg-fallback-label';
+      fallbackLabel.textContent = 'Custom words when {{key}} missing';
+
+      const fallbackInput = document.createElement('input');
+      fallbackInput.type = 'text';
+      fallbackInput.className = 'mc-custom-msg-fallback-input';
+      fallbackInput.value = node.data.customWords || '';
+      fallbackInput.placeholder = 'Example: (unknown)';
+      fallbackInput.oninput = () => {
+        node.data.customWords = fallbackInput.value;
+        onDataChange();
+      };
+
+      const fallbackHint = document.createElement('div');
+      fallbackHint.className = 'mc-custom-msg-fallback-hint';
+      fallbackHint.textContent = 'Fallback text when a key is missing or empty.';
+
+      fallbackWrap.appendChild(fallbackLabel);
+      fallbackWrap.appendChild(fallbackInput);
+      fallbackWrap.appendChild(fallbackHint);
+      promptContainer.appendChild(fallbackWrap);
 
       const textarea = document.createElement('textarea');
       textarea.className = 'mc-custom-msg-textarea';
@@ -498,6 +1096,31 @@
 
       if (mode === 'prompt') {
         let template = ctx.node.data.template || '';
+        const originalTemplate = template;
+        const placeholderRegex = /\{\{([^}]+)\}\}/g;
+        const hasNonPlaceholderContent = originalTemplate.replace(placeholderRegex, '').trim().length > 0;
+        let insertedAnyValue = false;
+        const whitespaceOnlyRegex = /^[\s\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$/;
+        const isBlankString = (value) => typeof value === 'string' && whitespaceOnlyRegex.test(value);
+        const isBlankValue = (value) => {
+          if(value === undefined || value === null) return true;
+          if(typeof value === 'string') return isBlankString(value);
+          if(Array.isArray(value)) return value.length === 0 || value.every(isBlankValue);
+          if(typeof value === 'object') return Object.keys(value).length === 0;
+          return false;
+        };
+        const formatValue = (value) => {
+          if(value === undefined || value === null) return '';
+          if(Array.isArray(value)){
+            const parts = value.map(v => formatValue(v)).filter(part => part !== '');
+            return parts.join(', ');
+          }
+          if(typeof value === 'object'){
+            try { return JSON.stringify(value); }
+            catch(_e){ return String(value); }
+          }
+          return String(value);
+        };
         
         const findValue = (obj, key) => {
             if (!obj) return undefined;
@@ -520,19 +1143,37 @@
             return undefined;
         };
 
+        const fallbackText = typeof ctx.node.data.customWords === 'string' ? ctx.node.data.customWords : '';
+        const hasFallbackText = fallbackText.trim().length > 0;
+
         if (template.includes('{{raw}}')) {
-            let rawStr = '';
-            try { rawStr = JSON.stringify(rawResults, null, 2); }
-            catch(e) { rawStr = String(rawResults); }
-            template = template.replace(/\{\{raw\}\}/g, rawStr);
+          let rawStr = '';
+          try { rawStr = JSON.stringify(rawResults, null, 2); }
+          catch(e) { rawStr = String(rawResults); }
+          template = template.replace(/\{\{raw\}\}/g, () => {
+            if(rawStr) insertedAnyValue = true;
+            return rawStr;
+          });
         }
 
         template = template.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
             key = key.trim();
             if (key === 'raw') return match;
             let val = findValue(rawResults, key);
-            return val !== undefined ? String(val) : match;
+          if (!isBlankValue(val)) {
+            insertedAnyValue = true;
+            return formatValue(val);
+          }
+          if (hasFallbackText) {
+            insertedAnyValue = true;
+            return fallbackText;
+          }
+          return match;
         });
+
+        if (!hasNonPlaceholderContent && !insertedAnyValue) {
+          return { response_message: null };
+        }
 
         return { response_message: template };
 
@@ -575,6 +1216,13 @@
 
   // Add Infinite Choice node: exposes a custom tool for LLM to pick among N options,
   // and emits a flow output to branch the execution context.
+  const sanitizeIdentifier = (value) => {
+    if(value == null) return '';
+    const trimmed = String(value).trim();
+    if(!trimmed) return '';
+    return trimmed.replace(/\s+/g, '_');
+  };
+
   add({
     type: 'Infinite Choice',
     category: 'process',
@@ -582,331 +1230,317 @@
         inputs: [ { id:'tool_calls', label:'Tool Calls' } ], 
         outputs: [ 
             { id:'tool_definitions', label:'Tool Definitions' }, 
-            { id:'flow', label:'Flow', branching: true } 
+            { id:'flow', label:'Flow', branching: true },
+            { id:'raw_results', label:'Raw Results' }
         ] 
     },
-    defaultData(){ return { toolName: 'mc_choice', description: 'Select one option from the list', options: 'Option 1\nOption 2' }; },
+    defaultData(){ 
+      return { 
+        toolName: 'mc_choice', 
+        description: 'Select one option from the list', 
+        properties: [],
+        required: ''
+      }; 
+    },
     buildConfigUI(bodyEl, node, { onDataChange }){
+      node.data = node.data || {};
+      let mutated = false;
+      if (!Array.isArray(node.data.properties)){
+        const legacy = typeof node.data.options === 'string' ? node.data.options : '';
+        const legacyList = legacy.split('\n').map(s=>s.trim()).filter(Boolean);
+        node.data.properties = legacyList.length ? legacyList.map(opt => ({ name: opt, description: '' })) : [{ name: 'choice', description: 'Selected option name or description' }];
+        delete node.data.options;
+        mutated = true;
+      }
+      if (Array.isArray(node.data.required)){
+        node.data.required = node.data.required.join('\n');
+        mutated = true;
+      }
+      if(mutated && onDataChange){ onDataChange(node.data); }
+
+      const applyAutoSize = (textarea) => {
+        if(!textarea) return;
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
+      };
+      const initAutoSize = (textarea) => {
+        if(!textarea) return;
+        textarea.rows = 1;
+        textarea.style.minHeight = '22px';
+        textarea.style.resize = 'none';
+        textarea.style.overflowY = 'hidden';
+        const syncHeight = () => applyAutoSize(textarea);
+        syncHeight();
+        if(typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(syncHeight);
+        } else {
+          setTimeout(syncHeight, 0);
+        }
+      };
+
       const wrap = document.createElement('div');
       wrap.style.display='flex'; wrap.style.flexDirection='column'; wrap.style.gap='6px';
       
       const nameRow = document.createElement('div'); nameRow.style.display='flex'; nameRow.style.gap='6px'; nameRow.style.alignItems='center';
       const nameLab = document.createElement('span'); nameLab.textContent='Tool name'; nameLab.style.fontSize='12px'; nameLab.style.opacity='.8'; nameRow.appendChild(nameLab);
-      const nameInp = document.createElement('input'); nameInp.type='text'; nameInp.value=(node.data && node.data.toolName) || 'mc_choice'; nameInp.style.flex='1';
-      nameInp.addEventListener('change', ()=>{ node.data = node.data||{}; node.data.toolName = String(nameInp.value||'mc_choice'); onDataChange && onDataChange(node.data); });
+      const nameInp = document.createElement('input'); nameInp.type='text';
+      const initialToolName = sanitizeIdentifier((node.data && node.data.toolName) || 'mc_choice') || 'mc_choice';
+      nameInp.value = initialToolName;
+      if(!node.data) node.data = {};
+      node.data.toolName = initialToolName;
+      nameInp.style.flex='1';
+      nameInp.addEventListener('input', ()=>{
+        const sanitized = sanitizeIdentifier(nameInp.value) || 'mc_choice';
+        if(nameInp.value !== sanitized){
+          nameInp.value = sanitized;
+        }
+        node.data.toolName = sanitized;
+        onDataChange && onDataChange(node.data);
+      });
       nameRow.appendChild(nameInp); wrap.appendChild(nameRow);
 
       const descLab = document.createElement('div'); descLab.textContent='Description'; descLab.style.fontSize='12px'; descLab.style.opacity='.8'; wrap.appendChild(descLab);
       const descTa = document.createElement('textarea');
-      descTa.rows = 2;
       descTa.classList.add('mc-node-textarea-small');
       descTa.placeholder = 'Tool description for the LLM...';
       descTa.value = (node.data && node.data.description) || 'Select one option from the list';
       descTa.addEventListener('change', ()=>{ node.data = node.data||{}; node.data.description = descTa.value; onDataChange && onDataChange(node.data); });
+      descTa.addEventListener('input', ()=> applyAutoSize(descTa));
+      initAutoSize(descTa);
       wrap.appendChild(descTa);
 
-      const optLab = document.createElement('div'); optLab.textContent='Options (one per line)'; optLab.style.fontSize='12px'; optLab.style.opacity='.8'; wrap.appendChild(optLab);
-      const optTa = document.createElement('textarea');
-      optTa.rows = 5;
-      optTa.value = (node.data && node.data.options) || '';
-      optTa.classList.add('mc-node-textarea-small');
-      optTa.addEventListener('change', ()=>{ node.data = node.data||{}; node.data.options = optTa.value; onDataChange && onDataChange(node.data); });
-      wrap.appendChild(optTa);
+      const propLab = document.createElement('div'); propLab.textContent='Properties (string type)'; propLab.style.fontSize='12px'; propLab.style.opacity='.8'; wrap.appendChild(propLab);
+      const propsContainer = document.createElement('div');
+      propsContainer.style.display = 'flex';
+      propsContainer.style.flexDirection = 'column';
+      propsContainer.style.gap = '6px';
+      wrap.appendChild(propsContainer);
+
+      const renderProps = () => {
+        propsContainer.innerHTML = '';
+        const list = node.data.properties; 
+        if(!list.length){
+          list.push({ name: '', description: '' });
+          onDataChange && onDataChange(node.data);
+        }
+        list.forEach((prop, idx) => {
+          const row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.flexDirection = 'column';
+          row.style.gap = '4px';
+          row.style.padding = '8px';
+          row.style.border = '1px solid #2b2d36';
+          row.style.borderRadius = '6px';
+          row.style.background = '#11131a';
+
+          const header = document.createElement('div');
+          header.style.display = 'flex';
+          header.style.gap = '6px';
+          header.style.alignItems = 'center';
+
+          const nameInp = document.createElement('input');
+          nameInp.type = 'text';
+          nameInp.placeholder = 'Property name';
+          const sanitizedPropName = sanitizeIdentifier(prop.name || '');
+          prop.name = sanitizedPropName;
+          nameInp.value = sanitizedPropName;
+          nameInp.style.flex = '1';
+          nameInp.addEventListener('input', ()=>{
+            const sanitized = sanitizeIdentifier(nameInp.value);
+            if(nameInp.value !== sanitized){
+              nameInp.value = sanitized;
+            }
+            prop.name = sanitized;
+            onDataChange && onDataChange(node.data);
+          });
+          header.appendChild(nameInp);
+
+          const delBtn = document.createElement('button');
+          delBtn.textContent = '✕';
+          delBtn.style.fontSize = '11px';
+          delBtn.style.padding = '2px 6px';
+          delBtn.onclick = () => {
+            node.data.properties.splice(idx, 1);
+            renderProps();
+            onDataChange && onDataChange(node.data);
+          };
+          header.appendChild(delBtn);
+
+          const descTa = document.createElement('textarea');
+          descTa.classList.add('mc-node-textarea-small');
+          descTa.placeholder = 'Description shown to the LLM...';
+          descTa.value = prop.description || '';
+          descTa.addEventListener('input', ()=>{ prop.description = descTa.value; onDataChange && onDataChange(node.data); applyAutoSize(descTa); });
+          initAutoSize(descTa);
+
+          row.appendChild(header);
+          row.appendChild(descTa);
+          propsContainer.appendChild(row);
+        });
+
+        const addBtn = document.createElement('button');
+        addBtn.textContent = '+ Add property';
+        addBtn.style.fontSize = '12px';
+        addBtn.style.alignSelf = 'flex-start';
+        addBtn.onclick = () => {
+          node.data.properties.push({ name: '', description: '' });
+          renderProps();
+          onDataChange && onDataChange(node.data);
+        };
+        propsContainer.appendChild(addBtn);
+      };
+
+      renderProps();
+
+      const reqLab = document.createElement('div');
+      reqLab.textContent = 'Required fields (comma or newline)';
+      reqLab.style.fontSize = '12px';
+      reqLab.style.opacity = '.8';
+      wrap.appendChild(reqLab);
+      const reqTa = document.createElement('textarea');
+      reqTa.rows = 2;
+      reqTa.placeholder = 'date, time, topic';
+      reqTa.classList.add('mc-node-textarea-small');
+      reqTa.value = typeof node.data.required === 'string' ? node.data.required : '';
+      reqTa.addEventListener('input', ()=>{ node.data.required = reqTa.value; onDataChange && onDataChange(node.data); });
+      wrap.appendChild(reqTa);
 
       bodyEl.appendChild(wrap);
     },
     execute(ctx){
       const d = (ctx && ctx.node && ctx.node.data) || {};
-      const name = (d.toolName || 'mc_choice').toString();
+      const rawName = (d.toolName || 'mc_choice').toString();
+      const name = sanitizeIdentifier(rawName) || 'mc_choice';
       const description = (d.description || 'Select one option from the list').toString();
-      const rawOpts = (d.options || '').split('\n').map(s => s.trim()).filter(s => s);
-      const options = rawOpts.length ? rawOpts : ['Option 1', 'Option 2'];
+      const rawProps = Array.isArray(d.properties) ? d.properties : [];
+      const properties = rawProps.map(prop => ({
+        name: sanitizeIdentifier(prop && prop.name ? prop.name : ''),
+        description: (prop && prop.description ? String(prop.description) : '').trim()
+      })).filter(prop => prop.name);
+      if(!properties.length){
+        properties.push({ name: 'choice', description: 'Selected option name or description' });
+      }
+
+      const propertiesMap = {};
+      properties.forEach(prop => {
+        const def = { type: 'string' };
+        if(prop.description) def.description = prop.description;
+        propertiesMap[prop.name] = def;
+      });
+
+      const requiredRaw = Array.isArray(d.required)
+        ? d.required
+        : (typeof d.required === 'string' ? d.required.split(/[\n,]+/) : []);
+      const required = requiredRaw
+        .map(s => sanitizeIdentifier(s))
+        .filter(Boolean)
+        .filter(key => propertiesMap[key]);
 
       // 1. Generate Tool Definition
       const tool = { 
           name, 
-        description, 
+          description, 
           parameters: { 
               type:'object', 
-              properties:{ 
-                  choice:{ type:'string', enum: options },
-                  index:{ type:'integer', description: 'Index of the selected option (0-based)' }
-              },
-              required: ['choice']
+              properties: propertiesMap
           } 
+      };
+      if(required.length){
+        tool.parameters.required = required;
+      }
+
+      const normalizeArgs = (raw) => {
+        if(!raw) return {};
+        if(typeof raw === 'object') return raw;
+        if(typeof raw === 'string'){
+          try{ return JSON.parse(raw); }catch(_e){ return {}; }
+        }
+        return {};
       };
 
       // 2. Check for execution results
-      let selectedIndex = -1;
-      let selectedValue = null;
+      const selectedIndexes = new Set();
+      const propertyValues = {};
+      const pushSelection = (idx, key, value) => {
+        if(!Number.isInteger(idx)) return;
+        if(idx < 0 || idx >= properties.length) return;
+        selectedIndexes.add(idx);
+        if(key){
+          if(value === undefined || value === null) return;
+          const str = String(value).trim();
+          if(str === '') return;
+          if(!(key in propertyValues)){
+            propertyValues[key] = value;
+          }
+        }
+      };
 
       const inputs = (ctx.inputs && ctx.inputs.tool_calls) ? ctx.inputs.tool_calls : [];
       const calls = inputs.flat();
+      const matches = [];
       
       for(const call of calls){
-          // call structure: { name: '...', arguments: {...} }
-          if(call && call.name === name){
-             const args = call.arguments || {};
-             if(args.choice){
-                  const idx = options.indexOf(args.choice);
-                  if(idx >= 0) { selectedIndex = idx; selectedValue = args.choice; }
+          if(!(call && call.name === name)) continue;
+          const parsedArgs = normalizeArgs(call.arguments);
+          matches.push(Object.assign({}, call, { arguments: parsedArgs }));
+          if(parsedArgs){
+            for(let i = 0; i < properties.length; i += 1){
+              const key = properties[i].name;
+              if(Object.prototype.hasOwnProperty.call(parsedArgs, key)){
+                const val = parsedArgs[key];
+                if(val !== undefined && val !== null && String(val).trim() !== ''){
+                  pushSelection(i, key, val);
+                }
               }
-              // Fallback: check if index was provided directly
-              if(selectedIndex === -1 && typeof args.index === 'number'){
-                  if(args.index >= 0 && args.index < options.length){
-                      selectedIndex = args.index;
-                      selectedValue = options[selectedIndex];
-                  }
+            }
+            if(typeof parsedArgs.choice === 'string'){
+              const idx = properties.findIndex(prop => prop.name === parsedArgs.choice);
+              if(idx >= 0){
+                const key = properties[idx].name;
+                const val = parsedArgs[key] !== undefined ? parsedArgs[key] : parsedArgs.choice;
+                pushSelection(idx, key, val);
               }
+            }
+            if(typeof parsedArgs.index === 'number'){
+              pushSelection(parsedArgs.index, properties[parsedArgs.index] && properties[parsedArgs.index].name, parsedArgs.choice || parsedArgs.value || parsedArgs.index);
+            }
           }
       }
 
-      const result = { tool_definitions: { custom: [tool] } };
+      const result = { tool_definitions: { custom: [tool] }, raw_results: matches };
+      const structuredProps = {};
+      properties.forEach(prop => {
+        if(!prop || !prop.name) return;
+        structuredProps[prop.name] = {
+          type: 'string',
+          description: prop.description || `Value captured for ${prop.name}`
+        };
+      });
+      if(Object.keys(structuredProps).length){
+        const structuredContribution = { properties: structuredProps };
+        if(required.length){
+          structuredContribution.required = required.slice();
+        }
+        result.tool_definitions.structured_output = structuredContribution;
+      }
       
-      // Flow output is trigger-only: we only care which branch index is active.
-      // Downstream nodes should not rely on the payload value itself.
-      if(selectedIndex >= 0){
-          result.flow = { __branchIndex: selectedIndex, value: true };
+      if(selectedIndexes.size){
+          const indexesArr = Array.from(selectedIndexes).sort((a,b) => a - b);
+          const selectedProps = indexesArr
+            .map(idx => properties[idx] && properties[idx].name)
+            .filter(Boolean)
+            .map(name => ({ name, value: propertyValues[name] }));
+          const flowPayload = { indexes: indexesArr, value: { properties: selectedProps } };
+          if(indexesArr.length === 1){
+            flowPayload.__branchIndex = indexesArr[0];
+            if(selectedProps.length === 1){
+              flowPayload.value.property = selectedProps[0].name;
+            }
+          }
+          result.flow = flowPayload;
       }
 
       return result;
-    }
-  });
-
-  // Logger node: keep editable log lines with time + limits
-  add({
-    type: 'Logger',
-    category: 'process',
-    ports: {
-      inputs: [
-        { id: 'raw_results', label: 'Raw Results' }
-      ],
-      outputs: [
-        { id: 'system_prompt', label: 'System Prompt' }
-      ]
-    },
-    defaultData() {
-      return {
-        logs: [],
-        minuteLimit: 60,
-        logLimit: 50
-      };
-    },
-    buildConfigUI(bodyEl, node, { onDataChange }) {
-      node.data = node.data || {};
-      if (!Array.isArray(node.data.logs)) node.data.logs = [];
-      if (typeof node.data.minuteLimit !== 'number') node.data.minuteLimit = 60;
-      if (typeof node.data.logLimit !== 'number') node.data.logLimit = 50;
-
-      const container = document.createElement('div');
-      container.className = 'mc-logger-container';
-
-      const listEl = document.createElement('div');
-      listEl.className = 'mc-logger-list';
-      container.appendChild(listEl);
-
-      const controlsRow = document.createElement('div');
-      controlsRow.className = 'mc-logger-controls';
-
-      const minuteWrap = document.createElement('div');
-      minuteWrap.className = 'mc-logger-control';
-      const minuteLabel = document.createElement('span');
-      minuteLabel.textContent = 'Minute limit';
-      const minuteInput = document.createElement('input');
-      minuteInput.type = 'number';
-      minuteInput.min = '0';
-      minuteInput.value = String(node.data.minuteLimit || 0);
-      minuteInput.onchange = () => {
-        const v = parseInt(minuteInput.value, 10);
-        node.data.minuteLimit = isNaN(v) ? 0 : v;
-        onDataChange();
-      };
-      minuteWrap.appendChild(minuteLabel);
-      minuteWrap.appendChild(minuteInput);
-
-      const logWrap = document.createElement('div');
-      logWrap.className = 'mc-logger-control';
-      const logLabel = document.createElement('span');
-      logLabel.textContent = 'Log limit';
-      const logInput = document.createElement('input');
-      logInput.type = 'number';
-      logInput.min = '0';
-      logInput.value = String(node.data.logLimit || 0);
-      logInput.onchange = () => {
-        const v = parseInt(logInput.value, 10);
-        node.data.logLimit = isNaN(v) ? 0 : v;
-        // trim immediately if needed
-        if (node.data.logLimit > 0 && node.data.logs.length > node.data.logLimit) {
-          node.data.logs.splice(0, node.data.logs.length - node.data.logLimit);
-        }
-        renderList();
-        onDataChange();
-      };
-      logWrap.appendChild(logLabel);
-      logWrap.appendChild(logInput);
-
-      controlsRow.appendChild(minuteWrap);
-      controlsRow.appendChild(logWrap);
-      container.appendChild(controlsRow);
-
-      let lastSnapshot = '';
-
-      function formatLocalTime(ts) {
-        const d = new Date(ts);
-        const dd = String(d.getDate()).padStart(2, '0');
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const hh = String(d.getHours()).padStart(2, '0');
-        const mi = String(d.getMinutes()).padStart(2, '0');
-        return `${mm}/${dd} - ${hh}:${mi}`;
-      }
-
-      function renderList() {
-        listEl.innerHTML = '';
-        const now = Date.now();
-        const minuteMs = (node.data.minuteLimit || 0) * 60 * 1000;
-        // filter expired logs
-        node.data.logs = node.data.logs.filter(l => {
-          if (!minuteMs) return true;
-          return now - l.timestamp <= minuteMs;
-        });
-        // enforce limit
-        if (node.data.logLimit > 0 && node.data.logs.length > node.data.logLimit) {
-          node.data.logs.splice(0, node.data.logs.length - node.data.logLimit);
-        }
-
-        node.data.logs.forEach((log, idx) => {
-          const row = document.createElement('div');
-          row.className = 'mc-logger-row';
-
-          const timeSpan = document.createElement('span');
-          timeSpan.className = 'mc-logger-time';
-          timeSpan.textContent = formatLocalTime(log.timestamp);
-
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'mc-logger-input';
-          input.value = log.text || '';
-          input.onchange = () => {
-            log.text = input.value;
-            onDataChange();
-          };
-
-          const btn = document.createElement('button');
-          btn.className = 'mc-logger-remove';
-          btn.textContent = 'x';
-          btn.onclick = () => {
-            node.data.logs.splice(idx, 1);
-            renderList();
-            onDataChange();
-          };
-
-          row.appendChild(timeSpan);
-          row.appendChild(input);
-          row.appendChild(btn);
-          listEl.appendChild(row);
-        });
-
-        // update snapshot after render
-        try {
-          lastSnapshot = JSON.stringify(node.data.logs.map(l => ({
-            t: l.timestamp,
-            x: l.text
-          })));
-        } catch (_e) {
-          lastSnapshot = '';
-        }
-      }
-
-      renderList();
-      bodyEl.appendChild(container);
-
-      // Poll for runtime changes in node.data.logs while panel is open
-      const pollInterval = setInterval(() => {
-        // stop if panel removed
-        if (!document.body.contains(bodyEl)) {
-          clearInterval(pollInterval);
-          return;
-        }
-        if (!node.data || !Array.isArray(node.data.logs)) return;
-        let current = '';
-        try {
-          current = JSON.stringify(node.data.logs.map(l => ({
-            t: l.timestamp,
-            x: l.text
-          })));
-        } catch (_e) {
-          current = '';
-        }
-        if (current !== lastSnapshot) {
-          renderList();
-        }
-      }, 800);
-    },
-    execute(ctx) {
-      const node = ctx.node;
-      node.data = node.data || {};
-      if (!Array.isArray(node.data.logs)) node.data.logs = [];
-
-      const inputs = ctx.inputs || {};
-      const raw = inputs.raw_results;
-      const now = Date.now();
-
-      let changed = false;
-
-      if (raw !== undefined && raw !== null) {
-        let text = '';
-        try {
-          if (typeof raw === 'string') {
-            text = raw;
-          } else if (Array.isArray(raw)) {
-            text = raw.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join('\n');
-          } else if (typeof raw === 'object') {
-            text = JSON.stringify(raw);
-          } else {
-            text = String(raw);
-          }
-        } catch (_e) {
-          text = String(raw);
-        }
-
-        if (text) {
-          node.data.logs.push({
-            timestamp: now,
-            text
-          });
-          changed = true;
-        }
-      }
-
-      const beforeLen = node.data.logs.length;
-      const minuteMs = (node.data.minuteLimit || 0) * 60 * 1000;
-      if (minuteMs) {
-        node.data.logs = node.data.logs.filter(l => now - l.timestamp <= minuteMs);
-      }
-      if (node.data.logLimit > 0 && node.data.logs.length > node.data.logLimit) {
-        node.data.logs.splice(0, node.data.logs.length - node.data.logLimit);
-      }
-      if (beforeLen !== node.data.logs.length) {
-        changed = true;
-      }
-
-      if (changed && typeof ctx.onDataChange === 'function') {
-        ctx.onDataChange(node.data);
-      }
-
-      const lines = node.data.logs.map(l => {
-        const d = new Date(l.timestamp);
-        const dd = String(d.getDate()).padStart(2, '0');
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const hh = String(d.getHours()).padStart(2, '0');
-        const mi = String(d.getMinutes()).padStart(2, '0');
-        const timeStr = `${dd}/${mm} - ${hh}:${mi}`;
-        return `${timeStr} | ${l.text || ''}`;
-      });
-
-      return {
-        system_prompt: lines.join('\n')
-      };
     }
   });
 
@@ -1000,6 +1634,283 @@
       return {
           system_prompt: system_prompt.length === 1 ? system_prompt[0] : system_prompt,
           messages: messages
+      };
+    }
+  });
+
+  add({
+    type: 'Tags manager',
+    category: 'process',
+    ports: {
+      inputs: [
+        { id: 'raw_results', label: 'Raw Results' },
+        { id: 'tool_calls', label: 'Tool Calls' }
+      ],
+      outputs: [
+        { id: 'raw_results', label: 'Current tags' },
+        { id: 'removed_tags', label: 'Removed tags' },
+        { id: 'custom_tags', label: 'Custom tags' }
+      ]
+    },
+    defaultData(){
+      return { entries: [], addCommandName: 'add', removeCommandName: 'remove' };
+    },
+    buildConfigUI(bodyEl, node, { onDataChange }){
+      tmEnsureState(node);
+      if(!node.data) node.data = {};
+      if(typeof node.data.addCommandName !== 'string' || !node.data.addCommandName) node.data.addCommandName = 'add';
+      if(typeof node.data.removeCommandName !== 'string' || !node.data.removeCommandName) node.data.removeCommandName = 'remove';
+      const emitChange = () => {
+        if(typeof onDataChange === 'function') onDataChange(node.data);
+      };
+
+      const applyStructureFromStorage = (structure) => {
+        const parsed = tmParseStructure(structure);
+        if(!parsed) return false;
+        const mutated = tmSyncEntriesFromStructure(node, parsed);
+        if(mutated){
+          emitChange();
+          updateSnapshot();
+          render();
+        }
+        return mutated;
+      };
+
+      const wrap = document.createElement('div');
+      wrap.className = 'mc-tags-manager-wrap';
+
+      const controls = document.createElement('div');
+      controls.className = 'mc-tags-manager-controls';
+
+      const buildCommandInput = (action) => {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'mc-tags-manager-command-input';
+        input.placeholder = action === 'add'
+          ? 'Tên lệnh Add (mặc định: add)'
+          : 'Tên lệnh Remove (mặc định: remove)';
+        input.value = action === 'add' ? (node.data.addCommandName || 'add') : (node.data.removeCommandName || 'remove');
+        input.oninput = () => {
+          const val = input.value.trim() || (action === 'add' ? 'add' : 'remove');
+          if(action === 'add') node.data.addCommandName = val;
+          else node.data.removeCommandName = val;
+          emitChange();
+        };
+        return input;
+      };
+
+      controls.appendChild(buildCommandInput('add'));
+      controls.appendChild(buildCommandInput('remove'));
+      const fetchBtn = document.createElement('button');
+      fetchBtn.type = 'button';
+      fetchBtn.className = 'mc-history-view-btn';
+      fetchBtn.textContent = 'Get tags';
+      fetchBtn.onclick = () => {
+        fetchBtn.disabled = true;
+        try{
+          const info = tmFindConnectedStorageInfo(node.id);
+          if(info && info.structure){
+            applyStructureFromStorage(info.structure);
+          }
+        }finally{
+          fetchBtn.disabled = false;
+        }
+      };
+      controls.appendChild(fetchBtn);
+
+      const hint = document.createElement('div');
+      hint.className = 'mc-chip';
+      hint.textContent = 'Theo dõi Current/Removed và thiết lập custom tags.';
+      wrap.appendChild(controls);
+      wrap.appendChild(hint);
+
+      const listEl = document.createElement('div');
+      listEl.className = 'mc-tags-manager-list';
+      wrap.appendChild(listEl);
+      bodyEl.appendChild(wrap);
+
+      const snapshot = () => tmEntriesSnapshot(node.data.entries);
+      let lastSnapshot = snapshot();
+      const updateSnapshot = () => { lastSnapshot = snapshot(); };
+
+      const render = () => {
+        const entries = tmEnsureState(node);
+        listEl.innerHTML = '';
+        if(!entries.length){
+          const empty = document.createElement('div');
+          empty.className = 'mc-tags-manager-empty';
+          empty.textContent = 'Chờ dữ liệu từ Raw Results (Tags storage).';
+          listEl.appendChild(empty);
+          return;
+        }
+
+        entries.forEach(entry => {
+          const card = document.createElement('div');
+          card.className = 'mc-tags-manager-card';
+
+          const header = document.createElement('div');
+          header.className = 'mc-tags-manager-header';
+          const title = document.createElement('div');
+          title.className = 'mc-tags-manager-title';
+          title.textContent = `${entry.category || 'Không tên'} · ${entry.component || 'Component'}`;
+          header.appendChild(title);
+
+          const meta = document.createElement('div');
+          meta.className = 'mc-tags-manager-meta';
+          meta.textContent = `${entry.current.length} current · ${entry.removed.length} removed`;
+          header.appendChild(meta);
+          card.appendChild(header);
+
+          const tabs = document.createElement('div');
+          tabs.className = 'mc-tags-manager-tabs';
+          const currentBtn = document.createElement('button');
+          currentBtn.type = 'button';
+          currentBtn.className = 'mc-tags-manager-tab active';
+          currentBtn.textContent = 'Current';
+          const removedBtn = document.createElement('button');
+          removedBtn.type = 'button';
+          removedBtn.className = 'mc-tags-manager-tab';
+          removedBtn.textContent = 'Removed';
+          tabs.appendChild(currentBtn);
+          tabs.appendChild(removedBtn);
+          card.appendChild(tabs);
+
+          const viewer = document.createElement('textarea');
+          viewer.className = 'mc-tags-manager-viewer';
+          viewer.readOnly = true;
+          viewer.spellcheck = false;
+          viewer.style.resize = 'none';
+          viewer.style.overflow = 'hidden';
+          card.appendChild(viewer);
+
+          const autoSizeViewer = () => {
+            viewer.style.height = 'auto';
+            const next = Math.min(180, Math.max(48, viewer.scrollHeight));
+            viewer.style.height = `${next}px`;
+          };
+
+          const refreshViewer = (mode) => {
+            const list = mode === 'removed' ? entry.removed : entry.current;
+            viewer.value = list && list.length ? list.join(', ') : '(Empty)';
+            viewer.dataset.empty = list && list.length ? '0' : '1';
+            autoSizeViewer();
+          };
+          let active = 'current';
+          const switchView = (mode) => {
+            active = mode;
+            if(mode === 'current'){
+              currentBtn.classList.add('active');
+              removedBtn.classList.remove('active');
+            }else{
+              removedBtn.classList.add('active');
+              currentBtn.classList.remove('active');
+            }
+            refreshViewer(mode);
+          };
+          currentBtn.onclick = () => switchView('current');
+          removedBtn.onclick = () => switchView('removed');
+          switchView(active);
+
+          const checkbox = document.createElement('label');
+          checkbox.className = 'mc-tags-manager-checkbox';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !!entry.onlyWhenAboveEmpty;
+          cb.onchange = () => {
+            entry.onlyWhenAboveEmpty = cb.checked;
+            emitChange();
+            updateSnapshot();
+          };
+          const cbText = document.createElement('span');
+          cbText.textContent = 'Chỉ trả về khi thành phần trên trống';
+          checkbox.appendChild(cb);
+          checkbox.appendChild(cbText);
+          card.appendChild(checkbox);
+
+          const customWrap = document.createElement('div');
+          customWrap.className = 'mc-tags-manager-custom';
+          const customLabel = document.createElement('div');
+          customLabel.textContent = 'Custom tags (fallback)';
+          customWrap.appendChild(customLabel);
+          const customInput = document.createElement('textarea');
+          customInput.className = 'mc-tags-manager-custom-input';
+          customInput.placeholder = 'tag1, tag2 hoặc xuống dòng';
+          customInput.value = entry.customRaw || '';
+          const autoSize = () => {
+            customInput.style.height = 'auto';
+            const next = Math.min(140, Math.max(48, customInput.scrollHeight));
+            customInput.style.height = `${next}px`;
+          };
+          customInput.addEventListener('input', () => {
+            entry.customRaw = customInput.value;
+            entry.customList = tmNormalizeList(customInput.value);
+            autoSize();
+            emitChange();
+            updateSnapshot();
+          });
+          autoSize();
+          customWrap.appendChild(customInput);
+          const customHint = document.createElement('div');
+          customHint.className = 'mc-tags-manager-hint';
+          customHint.textContent = 'Chỉ đẩy ra Custom tags khi Current trống.';
+          customWrap.appendChild(customHint);
+          card.appendChild(customWrap);
+
+          listEl.appendChild(card);
+        });
+      };
+
+      render();
+
+      let poll = null;
+      const teardown = () => {
+        if(poll){
+          clearInterval(poll);
+          poll = null;
+        }
+      };
+
+      poll = setInterval(() => {
+        if(!document.body.contains(bodyEl)){
+          teardown();
+          return;
+        }
+        const next = snapshot();
+        if(next !== lastSnapshot){
+          render();
+          lastSnapshot = next;
+        }
+      }, 650);
+
+    },
+    execute(ctx){
+      const nodeRef = ctx.node || {};
+      tmEnsureState(nodeRef);
+      const inputs = ctx.inputs || {};
+      let mutated = false;
+
+      const structure = tmParseStructure(inputs.raw_results);
+      if(structure){
+        mutated = tmSyncEntriesFromStructure(nodeRef, structure) || mutated;
+      }
+
+      const commands = tmParseCommands(inputs.tool_calls, {
+        addAlias: nodeRef.data.addCommandName,
+        removeAlias: nodeRef.data.removeCommandName
+      });
+      if(commands.length){
+        mutated = tmApplyCommands(nodeRef.data.entries, commands) || mutated;
+      }
+
+      if(mutated && typeof ctx.onDataChange === 'function'){
+        ctx.onDataChange(nodeRef.data);
+      }
+
+      const outputs = tmBuildOutputs(nodeRef.data.entries);
+      return {
+        raw_results: outputs.structure,
+        removed_tags: outputs.removedStructure,
+        custom_tags: outputs.custom
       };
     }
   });

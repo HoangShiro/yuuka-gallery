@@ -3,6 +3,57 @@
   window.MaidChanNodeDefs = window.MaidChanNodeDefs || {};
   function add(def){ window.MaidChanNodeDefs[def.type] = def; }
 
+  const DISPATCH_EVENT_NAME = 'maid-chan:logic:dispatch';
+
+  function getAILogic(){
+    return window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.AILogic;
+  }
+
+  function loadGraphSnapshot(){
+    try{
+      const api = getAILogic();
+      if(api && typeof api.loadGraph === 'function'){ return api.loadGraph() || {}; }
+    }catch(_e){}
+    try{
+      const raw = window.localStorage.getItem('maid-chan:logic:graph');
+      return raw ? JSON.parse(raw) : {};
+    }catch(_e){ return {}; }
+  }
+
+  function findGraphNodeById(nodeId){
+    if(nodeId == null) return null;
+    const g = loadGraphSnapshot();
+    const nodes = Array.isArray(g.nodes) ? g.nodes : [];
+    const target = nodes.find(n => String(n && n.id) === String(nodeId));
+    return target || null;
+  }
+
+  function cloneDispatchPayload(value, depth = 0){
+    if(value == null) return null;
+    if(Array.isArray(value)){
+      if(value.length === 1) return cloneDispatchPayload(value[0], depth + 1);
+      return value.map(v => cloneDispatchPayload(v, depth + 1));
+    }
+    if(typeof value === 'function') return null;
+    if(typeof value === 'object'){
+      try { return JSON.parse(JSON.stringify(value)); }
+      catch(_e){
+        try{
+          const plain = {};
+          for(const key of Object.keys(value)){ plain[key] = cloneDispatchPayload(value[key], depth + 1); }
+          return plain;
+        }catch(_e2){ return null; }
+      }
+    }
+    if(typeof value === 'string') return value;
+    if(typeof value === 'number' || typeof value === 'boolean') return value;
+    try{ return JSON.parse(JSON.stringify(value)); }
+    catch(_e){
+      try{ return String(value); }
+      catch(_e2){ return null; }
+    }
+  }
+
   add({
     type: 'Save history',
     category: 'output',
@@ -351,6 +402,140 @@
             }
         }catch(e){} 
         return {}; 
+    }
+  });
+
+  add({
+    type: 'Dispatch',
+    category: 'output',
+    ports: {
+      inputs: [ { id: 'raw_results', label: 'Raw Results' } ],
+      outputs: []
+    },
+    defaultData(){
+      return {
+        targetNodeId: '',
+        lastKnownTargetName: ''
+      };
+    },
+    buildConfigUI(bodyEl, node, { onDataChange }){
+      node.data = node.data || {};
+      const wrap = document.createElement('div');
+      wrap.className = 'mc-dispatch-config';
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      wrap.style.gap = '8px';
+
+      const label = document.createElement('label');
+      label.className = 'mc-dispatch-label';
+      label.textContent = 'Node ID đích';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'vd: 12 hoặc n_12';
+      input.value = node.data.targetNodeId || '';
+      input.className = 'mc-dispatch-input';
+
+      const helper = document.createElement('div');
+      helper.className = 'mc-dispatch-helper';
+      helper.style.fontSize = '12px';
+      helper.style.opacity = '0.9';
+
+      const status = document.createElement('div');
+      status.className = 'mc-dispatch-status';
+      status.style.fontSize = '13px';
+      status.style.fontWeight = '600';
+
+      const formatTargetLabel = (target) => {
+        if(!target) return '';
+        const idLabel = target.id !== undefined ? `[${target.id}] ` : '';
+        const typeLabel = target.type || 'Node';
+        const nameLabel = target.name ? ` – ${target.name}` : '';
+        return `${idLabel}${typeLabel}${nameLabel}`;
+      };
+
+      const updateStatus = (opts = {}) => {
+        const { persist = true } = opts;
+        const id = input.value.trim();
+        if(persist){
+          node.data.targetNodeId = id;
+        }
+        if(!id){
+          status.textContent = 'Chưa chọn node.';
+          status.style.color = '#888';
+          return;
+        }
+        const target = findGraphNodeById(id);
+        if(target){
+          const labelText = formatTargetLabel(target);
+          status.textContent = labelText || `[${target.id}] ${target.type || 'Node'}`;
+          status.style.color = '#3a9b6f';
+          if(persist){
+            node.data.lastKnownTargetName = status.textContent;
+            if(typeof onDataChange === 'function') onDataChange(node.data);
+          }
+        }else{
+          status.textContent = 'Không tìm thấy.';
+          status.style.color = '#c94343';
+        }
+      };
+
+      helper.textContent = 'Dispatcher không tạo edge mới. Chỉ cần nhập ID node đích.';
+
+      input.addEventListener('change', () => updateStatus({ persist: true }));
+      input.addEventListener('blur', () => updateStatus({ persist: true }));
+
+      if(node.data.lastKnownTargetName){
+        status.textContent = node.data.lastKnownTargetName;
+        status.style.color = '#3a9b6f';
+      }else if(input.value.trim()){
+        updateStatus({ persist: false });
+      }
+
+      label.appendChild(input);
+      wrap.appendChild(label);
+      wrap.appendChild(helper);
+      wrap.appendChild(status);
+      bodyEl.appendChild(wrap);
+    },
+    execute(ctx){
+      const node = ctx && ctx.node ? ctx.node : {};
+      const targetIdRaw = node && node.data && node.data.targetNodeId ? node.data.targetNodeId : '';
+      const targetNodeId = String(targetIdRaw || '').trim();
+      if(!targetNodeId){
+        try{ console.warn('[MaidLogic][Dispatch] Missing target node id', { nodeId: node.id }); }catch(_e){}
+        return {};
+      }
+
+      const incoming = ctx && ctx.inputs ? ctx.inputs.raw_results : undefined;
+      if(incoming === undefined || incoming === null){
+        return {};
+      }
+      const payload = cloneDispatchPayload(incoming);
+      if(payload == null){
+        try{ console.warn('[MaidLogic][Dispatch] Empty payload', { nodeId: node.id, targetNodeId }); }catch(_e){}
+        return {};
+      }
+
+      const detail = {
+        dispatchId: 'disp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        timestamp: Date.now(),
+        sourceNodeId: node.id,
+        targetNodeId,
+        payload
+      };
+
+      try{
+        window.localStorage.setItem(`maid-chan:dispatch:last:${targetNodeId}`, JSON.stringify({ ts: detail.timestamp, payload }));
+      }catch(_e){}
+
+      try{
+        window.dispatchEvent(new CustomEvent(DISPATCH_EVENT_NAME, { detail }));
+      }catch(err){
+        console.error('[MaidLogic][Dispatch] Failed to emit event', err);
+      }
+
+      return {};
     }
   });
 

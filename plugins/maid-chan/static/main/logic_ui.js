@@ -240,7 +240,8 @@
     }
   }
 
-  function drawEdges(svg, nodesPortMap, graph, onRemove, onReindex){
+  function drawEdges(svg, nodesPortMap, graph, edgeDomMap, selectedNodeId, onRemove, onReindex){
+    edgeDomMap.clear();
     while(svg.firstChild) svg.removeChild(svg.firstChild);
     const ns = 'http://www.w3.org/2000/svg';
     // Use transformed client rects and inverse current scale to recover logical coords.
@@ -340,14 +341,22 @@
       else if(fromType === 'process' && toType === 'output'){ stroke = '#6d7ab4'; opacity = '0.6'; }
       else if(fromType === 'input' && toType === 'output'){ stroke = '#8b8e9c'; opacity = '0.5'; }
       
-      if(!isBranching){
+          const isProcessEdge = (fromType === 'process' && toType === 'process');
+          if(!isBranching){
           path.setAttribute('stroke', stroke);
           path.setAttribute('stroke-opacity', opacity);
       }
-      path.setAttribute('stroke-width', '2');
+        const isSelectedEdge = selectedNodeId != null && (Number(e.fromNodeId) === selectedNodeId || Number(e.toNodeId) === selectedNodeId);
+        const strokeWidth = isSelectedEdge ? 4 : 2;
+        path.setAttribute('stroke-width', String(strokeWidth));
+        if(isSelectedEdge){ path.classList.add('mc-edge-selected'); }
       path.setAttribute('fill', 'none');
       path.setAttribute('data-edge-id', e.id);
+          path.dataset.fromNodeId = String(e.fromNodeId);
+          path.dataset.toNodeId = String(e.toNodeId);
+          path.dataset.edgeRole = isProcessEdge ? 'process' : 'aux';
       svg.appendChild(path);
+          edgeDomMap.set(e.id, path);
 
       // Draw branch index label if branching
       if(isBranching && Number.isFinite(e._branchIndex)){
@@ -446,7 +455,7 @@
     // No need to clean orphans since we removed all before drawing
   }
 
-  function createNodeEl(node, canvas, onMove, onDataChange, onResetNode, onDeleteNode, onStartConnect, onRunStage){
+  function createNodeEl(node, canvas, onMove, onDataChange, onResetNode, onDeleteNode, onStartConnect, onRunStage, onSelectNode){
     const el = document.createElement('div'); el.className = 'mc-node'; el.style.left = (node.x||0)+'px'; el.style.top = (node.y||0)+'px'; el.dataset.id = node.id;
     // Apply visual clamps and defaults
     el.style.boxSizing = 'border-box';
@@ -456,7 +465,10 @@
     if(Number.isFinite(node.w)) el.style.width = Math.min(NODE_MAX_W, Math.max(NODE_MIN_W, node.w|0)) + 'px';
     if(Number.isFinite(node.h)) el.style.height = Math.max(NODE_MIN_H, node.h|0) + 'px';
     const header = document.createElement('div'); header.className = 'mc-node-header';
-    const title = document.createElement('span'); title.textContent = node.type; header.appendChild(title);
+    const title = document.createElement('span');
+    const nodeLabel = Number.isFinite(node.id) ? `[${node.id}] ${node.type}` : node.type;
+    title.textContent = nodeLabel;
+    header.appendChild(title);
     const stage = document.createElement('span'); stage.className = 'mc-node-stage'; stage.textContent = ''; header.appendChild(stage);
     const actions = document.createElement('div'); actions.className = 'mc-node-actions';
 
@@ -555,6 +567,7 @@
       const t = ev && ev.target;
       if(t && (t.closest && t.closest('button, input, textarea, select, a'))) return;
       const p = el.parentElement; if(p && p.lastChild !== el){ p.appendChild(el); }
+      if(typeof onSelectNode === 'function'){ onSelectNode(node.id); }
     };
     el.addEventListener('mousedown', bringToFront);
     el.addEventListener('touchstart', bringToFront, { passive: true });
@@ -852,6 +865,13 @@
       if(e.touches.length < 2){ pinchStartDist = 0; pinchCenter = null; }
     });
 
+    canvas.addEventListener('mousedown', (e)=>{
+      if(e.button !== 0) return;
+      if(e.target.closest('.mc-node')) return;
+      if(e.target.closest('[data-edge-button]')) return; // allow edge buttons to fire without losing focus
+      setSelectedNode(null);
+    });
+
     // Panning (left or middle mouse on empty canvas)
     let panning = false, psx=0, psy=0, ptx=0, pty=0;
     canvas.addEventListener('mousedown', (e)=>{
@@ -1007,7 +1027,11 @@
     const nodeEls = new Map();
     let currentStageMap = new Map();
     const nodesPortMap = new Map(); // key: `${nodeId}:in|out:${port}` -> HTMLElement
+    const edgeDomMap = new Map(); // key: edgeId -> SVGPathElement
+    const flowActiveNodes = new Set();
     let draggingEdge = null; // { src:{nodeId,port}, pathEl }
+    let selectedNodeId = null;
+    let setSelectedNode = ()=>{};
 
     // Expose a helper so header duplicate button can clone nodes with current graph context
     window.__MaidChanLogicDuplicateNode = (srcNode)=>{
@@ -1026,7 +1050,7 @@
           data: JSON.parse(JSON.stringify(srcNode.data||{}))
         };
         graph.nodes.push(copy);
-        const built = createNodeEl(copy, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode);
+        const built = createNodeEl(copy, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode, setSelectedNode);
         nodeEls.set(copy.id, built.el);
         viewport.appendChild(built.el);
         persistGraph();
@@ -1069,6 +1093,8 @@
         svg,
         nodesPortMap,
         graph,
+        edgeDomMap,
+        selectedNodeId,
         (edgeId)=>{
           // Remove then renormalize indices for affected group
           const edge = (graph.edges||[]).find(e => e.id === edgeId);
@@ -1105,6 +1131,7 @@
           persistGraph(); redraw();
         }
       );
+      flowActiveNodes.forEach((nodeId)=> updateEdgeFlowClasses(nodeId, true));
       // If dragging edge exists, keep it on top
       if(draggingEdge && draggingEdge.pathEl){ svg.appendChild(draggingEdge.pathEl); }
       updateGridSize();
@@ -1144,10 +1171,67 @@
     const onDataChange = ()=>{ persistGraph(); redraw(); };
     const onMove = ()=>{ redraw(); };
 
+    setSelectedNode = (nodeId)=>{
+      let nextId = null;
+      if(nodeId !== null && nodeId !== undefined){
+        const parsed = Number(nodeId);
+        nextId = Number.isFinite(parsed) ? parsed : null;
+      }
+      const prevId = selectedNodeId;
+      selectedNodeId = nextId;
+      for(const [id, el] of nodeEls){
+        if(selectedNodeId != null && Number(id) === selectedNodeId){
+          el.classList.add('mc-node-selected');
+        } else {
+          el.classList.remove('mc-node-selected');
+        }
+      }
+      if(prevId !== selectedNodeId){ redraw(); }
+    };
+
+    const updateEdgeFlowClasses = (nodeId, isActive)=>{
+      const nodeNum = Number(nodeId);
+      if(!Number.isFinite(nodeNum)) return;
+      const edges = graph && Array.isArray(graph.edges) ? graph.edges : [];
+      for(const edge of edges){
+        if(Number(edge.fromNodeId) !== nodeNum) continue;
+        const path = edgeDomMap.get(edge.id);
+        if(!path) continue;
+        if(isActive){
+          path.classList.add('mc-edge-flow');
+          if(path.dataset.edgeRole === 'process') path.classList.add('mc-edge-flow-process');
+          else path.classList.add('mc-edge-flow-aux');
+        } else {
+          path.classList.remove('mc-edge-flow','mc-edge-flow-process','mc-edge-flow-aux');
+        }
+      }
+    };
+
+    const activateFlowForNode = (nodeId)=>{
+      const nodeNum = Number(nodeId);
+      if(!Number.isFinite(nodeNum)) return;
+      flowActiveNodes.add(nodeNum);
+      updateEdgeFlowClasses(nodeNum, true);
+    };
+
+    const deactivateFlowForNode = (nodeId)=>{
+      const nodeNum = Number(nodeId);
+      if(!Number.isFinite(nodeNum)) return;
+      flowActiveNodes.delete(nodeNum);
+      updateEdgeFlowClasses(nodeNum, false);
+    };
+
+    const clearFlowAnimations = ()=>{
+      flowActiveNodes.clear();
+      for(const path of edgeDomMap.values()){
+        path.classList.remove('mc-edge-flow','mc-edge-flow-process','mc-edge-flow-aux');
+      }
+    };
+
     function rebuildNode(node){
       const old = nodeEls.get(node.id);
       if(old){ old.remove(); nodeEls.delete(node.id); }
-      const { el } = createNodeEl(node, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode);
+      const { el } = createNodeEl(node, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode, setSelectedNode);
       nodeEls.set(node.id, el); viewport.appendChild(el);
     }
 
@@ -1170,6 +1254,7 @@
     function deleteNode(node){
       graph.nodes = (graph.nodes||[]).filter(n => n.id !== node.id);
       graph.edges = (graph.edges||[]).filter(e => e.fromNodeId !== node.id && e.toNodeId !== node.id);
+      if(selectedNodeId === node.id){ setSelectedNode(null); }
       onDataChange();
       const el = nodeEls.get(node.id); if(el){ el.remove(); nodeEls.delete(node.id); }
       redraw();
@@ -1279,7 +1364,7 @@
 
     // Build nodes
     for(const n of graph.nodes){
-      const { el } = createNodeEl(n, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode);
+      const { el } = createNodeEl(n, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode, setSelectedNode);
       nodeEls.set(n.id, el); viewport.appendChild(el);
     }
     // Initial fit after nodes laid out
@@ -1304,10 +1389,12 @@
       // Rebuild UI
       for(const [,nodeEl] of nodeEls){ nodeEl.remove(); }
       nodeEls.clear();
+      clearFlowAnimations();
       for(const n of graph.nodes){
-        const { el } = createNodeEl(n, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode);
+        const { el } = createNodeEl(n, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode, setSelectedNode);
         nodeEls.set(n.id, el); viewport.appendChild(el);
       }
+      setSelectedNode(null);
       autoFit();
       persistGraph();
       redraw();
@@ -1326,10 +1413,12 @@
       graph = newGraph;
       for(const [,nodeEl] of nodeEls){ nodeEl.remove(); }
       nodeEls.clear();
+      clearFlowAnimations();
       for(const n of graph.nodes){
-        const { el } = createNodeEl(n, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode);
+        const { el } = createNodeEl(n, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode, setSelectedNode);
         nodeEls.set(n.id, el); viewport.appendChild(el);
       }
+      setSelectedNode(null);
       autoFit();
       persistGraph();
       redraw();
@@ -1354,19 +1443,35 @@
       // Rebuild UI
       for(const [,nodeEl] of nodeEls){ nodeEl.remove(); }
       nodeEls.clear();
+      clearFlowAnimations();
       for(const n of graph.nodes){
-        const { el } = createNodeEl(n, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode);
+        const { el } = createNodeEl(n, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode, setSelectedNode);
         nodeEls.set(n.id, el); viewport.appendChild(el);
       }
+      setSelectedNode(null);
       autoFit();
       persistGraph();
       redraw();
     });
 
+    const onFlowUpdate = (ev)=>{
+      const detail = ev && ev.detail ? ev.detail : {};
+      const nodeId = detail.nodeId;
+      if(nodeId == null) return;
+      const status = String(detail.status || '').toLowerCase();
+      if(status === 'running'){ activateFlowForNode(nodeId); }
+      else { deactivateFlowForNode(nodeId); }
+    };
+
+    const onFlowDone = ()=>{ clearFlowAnimations(); };
+
     btnClose.addEventListener('click', ()=>{ 
       overlay.remove(); 
       window.removeEventListener('resize', onResize); 
       window.removeEventListener('maid-chan:preview:update', onPreviewUpdate);
+      window.removeEventListener('maid-chan:logic:flow:update', onFlowUpdate);
+      window.removeEventListener('maid-chan:logic:run:done', onFlowDone);
+      clearFlowAnimations();
       document.body.classList.remove('mc-logic-lock-scroll'); 
     });
 
@@ -1400,6 +1505,8 @@
     };
     window.addEventListener('maid-chan:logic:node:start', onNodeStart);
     window.addEventListener('maid-chan:logic:node:end', onNodeEnd);
+    window.addEventListener('maid-chan:logic:flow:update', onFlowUpdate);
+    window.addEventListener('maid-chan:logic:run:done', onFlowDone);
 
     // Background palette: right-click or double-click
     function openPalette(x, y){
@@ -1477,7 +1584,7 @@
             const id = getNextId(graph.nodes);
             const node = { id, flow_id: 0, type:t, x: x-80, y: y-20, data: getDefaultNodeData(t) };
             graph.nodes.push(node); persistGraph();
-            const built = createNodeEl(node, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode);
+            const built = createNodeEl(node, canvas, onMove, onDataChange, resetNode, deleteNode, startConnect, runStageForNode, setSelectedNode);
             nodeEls.set(id, built.el); viewport.appendChild(built.el); redraw(); closePalette();
           });
           ul.appendChild(li);

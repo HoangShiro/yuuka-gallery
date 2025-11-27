@@ -336,6 +336,122 @@
       return null;
     }
 
+    // Build adjacency helpers for downstream pruning / branch tracking
+    const outgoingEdgesByNode = new Map();
+    const incomingEdgesByNode = new Map();
+    const branchSort = (a, b) => String(a.id).localeCompare(String(b.id));
+    const inputSort = (a, b) => {
+      const ia = Number.isFinite(a.index) ? a.index : Infinity;
+      const ib = Number.isFinite(b.index) ? b.index : Infinity;
+      if (ia !== ib) return ia - ib;
+      return String(a.id).localeCompare(String(b.id));
+    };
+    for(const edge of subGraph.edges){
+      if(!outgoingEdgesByNode.has(edge.fromNodeId)) outgoingEdgesByNode.set(edge.fromNodeId, []);
+      if(!incomingEdgesByNode.has(edge.toNodeId)) incomingEdgesByNode.set(edge.toNodeId, []);
+      outgoingEdgesByNode.get(edge.fromNodeId).push(edge);
+      incomingEdgesByNode.get(edge.toNodeId).push(edge);
+    }
+    for(const edges of outgoingEdgesByNode.values()){ edges.sort(branchSort); }
+    for(const edges of incomingEdgesByNode.values()){ edges.sort(inputSort); }
+
+    const prunedNodes = new Set();
+    const prunedEdges = new Set();
+    const flowState = new Map();
+
+    const dispatchFlowUpdate = (nodeId, status, extra = {}) => {
+      flowState.set(nodeId, { status, ...extra });
+      try{
+        window.dispatchEvent(new CustomEvent('maid-chan:logic:flow:update', { detail: { nodeId, status, runId, ...extra } }));
+      }catch(_e){/* no-op */}
+    };
+
+    const pruneCascade = (startNodeId, reason) => {
+      const stack = [startNodeId];
+      while(stack.length){
+        const current = stack.pop();
+        if(prunedNodes.has(current)) continue;
+        prunedNodes.add(current);
+        const existing = flowState.get(current);
+        if(!existing || (existing.status !== 'completed' && existing.status !== 'running')){
+          dispatchFlowUpdate(current, 'pruned', { reason });
+        }
+        const nextEdges = outgoingEdgesByNode.get(current) || [];
+        for(const nextEdge of nextEdges){
+          if(prunedEdges.has(nextEdge.id)) continue;
+          prunedEdges.add(nextEdge.id);
+          stack.push(nextEdge.toNodeId);
+        }
+      }
+    };
+
+    const pruneEdgeBranch = (edge, reason) => {
+      if(!edge || prunedEdges.has(edge.id)) return;
+      prunedEdges.add(edge.id);
+      if(edge.toNodeId !== undefined && edge.toNodeId !== null){
+        pruneCascade(edge.toNodeId, reason);
+      }
+    };
+
+    const pruneChildrenOfNode = (nodeId, reason) => {
+      const edges = outgoingEdgesByNode.get(nodeId) || [];
+      for(const edge of edges){ pruneEdgeBranch(edge, reason); }
+    };
+
+    const hasMeaningfulInput = (inputsObj) => {
+      if(!inputsObj) return false;
+      return Object.values(inputsObj).some(val => {
+        if(Array.isArray(val)){
+          return val.some(entry => entry !== undefined && entry !== null);
+        }
+        return val !== undefined && val !== null;
+      });
+    };
+
+    const resolveBranchIndexes = (payload) => {
+      if(payload == null) return [];
+      if(typeof payload === 'object'){
+        if(Number.isInteger(payload.__branchIndex)) return [payload.__branchIndex];
+        if(Array.isArray(payload.indexes)){
+          return payload.indexes.map(v => Number.parseInt(v, 10)).filter(Number.isInteger);
+        }
+        if(Array.isArray(payload.allowed)){
+          return payload.allowed.map(v => Number.parseInt(v, 10)).filter(Number.isInteger);
+        }
+      }
+      if(Array.isArray(payload)){
+        return payload.map(v => Number.parseInt(v, 10)).filter(Number.isInteger);
+      }
+      if(Number.isInteger(payload)) return [payload];
+      return [];
+    };
+
+    const handleBranchOutputs = (node, def, output) => {
+      if(!def || !def.ports || !Array.isArray(def.ports.outputs)) return;
+      const edgesFromNode = outgoingEdgesByNode.get(node.id) || [];
+      if(!edgesFromNode.length) return;
+
+      for(let portIndex = 0; portIndex < def.ports.outputs.length; portIndex += 1){
+        const portDef = def.ports.outputs[portIndex];
+        if(!portDef || !(portDef.branching === true || portDef.type === 'branching')) continue;
+        const branchEdges = edgesFromNode.filter(e => e.fromPort === portIndex);
+        if(branchEdges.length === 0) continue;
+        const outPortId = getPortId(node.type, portIndex, false);
+        const payload = outPortId && output ? output[outPortId] : undefined;
+        const allowedIndexes = resolveBranchIndexes(payload).filter(idx => idx >= 0 && idx < branchEdges.length);
+        if(allowedIndexes.length === 0){
+          for(const edge of branchEdges){ pruneEdgeBranch(edge, 'branch-inactive'); }
+          continue;
+        }
+        const allowSet = new Set(allowedIndexes);
+        branchEdges.forEach((edge, idx) => {
+          if(!allowSet.has(idx)){
+            pruneEdgeBranch(edge, 'branch-not-selected');
+          }
+        });
+      }
+    };
+
     // Helper to get port definition ID
     const getPortId = (nodeType, portIndex, isInput) => {
         const def = window.MaidChanNodeDefs && window.MaidChanNodeDefs[nodeType];
@@ -347,22 +463,15 @@
     let lastResponse = null;
 
     for (const nodeId of sortedIds) {
-        if (signal && signal.aborted) break;
-        const node = nodeById.get(nodeId);
+      if (signal && signal.aborted) break;
+      if(prunedNodes.has(nodeId)) continue;
+      const node = nodeById.get(nodeId);
         const def = window.MaidChanNodeDefs && window.MaidChanNodeDefs[node.type];
         if (!def) continue;
 
         // 1. Gather Inputs Generic
         const inputs = {};
-        const incomingEdges = (graph.edges || []).filter(e => e.toNodeId === nodeId);
-        
-        // Sort edges by index to ensure inputs are processed in visual order
-        incomingEdges.sort((a, b) => {
-            const ia = Number.isFinite(a.index) ? a.index : Infinity;
-            const ib = Number.isFinite(b.index) ? b.index : Infinity;
-            if (ia !== ib) return ia - ib;
-            return String(a.id).localeCompare(String(b.id));
-        });
+      const incomingEdges = (incomingEdgesByNode.get(nodeId) || []).filter(edge => !prunedEdges.has(edge.id));
 
         for (const edge of incomingEdges) {
             const sourceRes = results.get(edge.fromNodeId);
@@ -412,12 +521,29 @@
             signal
         };
 
-        try {
-            // Generic Gating
-            if (typeof def.shouldRun === 'function') {
-                if (!def.shouldRun(ctx)) continue;
-            }
+          const requiresInputs = !!(def && def.ports && Array.isArray(def.ports.inputs) && def.ports.inputs.length > 0);
+          const enforceInputData = requiresInputs && incomingEdges.length > 0;
+          if(enforceInputData && !hasMeaningfulInput(inputs)){
+            prunedNodes.add(nodeId);
+            dispatchFlowUpdate(nodeId, 'skipped', { reason: 'missing-input' });
+            pruneChildrenOfNode(nodeId, 'missing-input');
+            continue;
+          }
 
+          if (typeof def.shouldRun === 'function') {
+            let shouldRun = false;
+            try { shouldRun = !!def.shouldRun(ctx); }
+            catch(err){ console.error(`Node ${node.type} (${nodeId}) shouldRun failed:`, err); shouldRun = false; }
+            if (!shouldRun) {
+              prunedNodes.add(nodeId);
+              dispatchFlowUpdate(nodeId, 'skipped', { reason: 'should-run' });
+              pruneChildrenOfNode(nodeId, 'should-run');
+              continue;
+            }
+          }
+
+          dispatchFlowUpdate(nodeId, 'running', {});
+        try {
             // Dispatch node start event
             window.dispatchEvent(new CustomEvent('maid-chan:logic:node:start', { 
                 detail: { nodeId, runId } 
@@ -425,6 +551,8 @@
 
             const output = await def.execute(ctx);
             results.set(nodeId, output || {});
+
+            handleBranchOutputs(node, def, output || {});
 
             // Capture last response for legacy return
             if (output && output.response_message) {
@@ -441,12 +569,16 @@
                 detail: { nodeId, runId, output } 
             }));
 
+            dispatchFlowUpdate(nodeId, 'completed', {});
+
         } catch (err) {
             console.error(`Node ${node.type} (${nodeId}) execution failed:`, err);
             // Dispatch node end event even on error to clear glow
             window.dispatchEvent(new CustomEvent('maid-chan:logic:node:end', { 
                 detail: { nodeId, runId, error: err } 
             }));
+            dispatchFlowUpdate(nodeId, 'error', { reason: err && err.message ? err.message : 'execute-error' });
+            pruneChildrenOfNode(nodeId, 'error');
         }
     }
 
