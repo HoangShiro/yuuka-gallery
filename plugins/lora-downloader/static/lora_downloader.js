@@ -2,7 +2,8 @@ class LoraDownloaderService {
     constructor(container, api, activePlugins = []) {
         this.api = api;
         this.activePlugins = Array.isArray(activePlugins) ? activePlugins : [];
-        this._albumPluginEnabled = Boolean(this.api?.album && this.activePlugins.some(plugin => plugin.id === 'album'));
+        // Album interaction must go through capabilities (avoid direct cross-plugin API calls).
+        this._albumPluginEnabled = null;
         this.isOpen = false;
         this.overlay = null;
         this.form = null;
@@ -25,6 +26,19 @@ class LoraDownloaderService {
         this.handleBackdropClick = this.handleBackdropClick.bind(this);
         this.handleKeydown = this.handleKeydown.bind(this);
         this.handleActivityClick = this.handleActivityClick.bind(this);
+    }
+
+    _getAlbumCapabilities() {
+        return window.Yuuka?.services?.capabilities || null;
+    }
+
+    async _callAlbumCapability(id, payload) {
+        const caps = this._getAlbumCapabilities();
+        const def = caps?.get?.(id);
+        if (!def || typeof def.invoke !== 'function') {
+            throw new Error(`Album capability not available: ${id}`);
+        }
+        return await def.invoke(payload || {}, { source: 'lora-downloader' });
     }
 
     start() {
@@ -716,7 +730,7 @@ class LoraDownloaderService {
             entries = [
                 ...filteredModels.map((model) => ({ type: 'model', updated: model.updated_at || 0, payload: model })),
             ];
-            entries.push(...remote.slice(0, 9).map((rm) => ({ type: 'remote', updated: 0, payload: rm })));
+            entries.push(...remote.slice(0, 50).map((rm) => ({ type: 'remote', updated: 0, payload: rm })));
         } else {
             entries = [
                 ...tasks.map((task) => ({
@@ -747,7 +761,7 @@ class LoraDownloaderService {
         this.activityContainer.appendChild(fragment);
 
         // Update title counts
-        const displayedRemoteCount = isSearching ? Math.min(remote.length, 9) : 0;
+        const displayedRemoteCount = isSearching ? Math.min(remote.length, 50) : 0;
         const displayedLocalCount = isSearching ? filteredModels.length : models.length;
         const totalDisplayed = isSearching ? (displayedLocalCount + displayedRemoteCount) : displayedLocalCount;
         this._updateTitleCount(isSearching, totalDisplayed, models.length);
@@ -1209,7 +1223,7 @@ class LoraDownloaderService {
     }
 
     async _createAlbumFromModel(model, triggerElement) {
-        if (!this._hasAlbumPlugin() || !this.api?.album) {
+        if (!this._hasAlbumPlugin()) {
             showError('Plugin Album chưa sẵn sàng.');
             return;
         }
@@ -1221,6 +1235,38 @@ class LoraDownloaderService {
         const loraIdentifier = normalizedIdentifier || primaryTag || (model?.name || model?.filename || '').trim() || albumName;
         const albumHash = this._deriveAlbumHash(model);
         const tags = this._collectUniqueTags(model, primaryTag, albumName);
+
+        // --- Seed multi-LoRA tag groups (LoRA tags 1) so it's enabled by default.
+        // The Album modal treats multi_lora_prompt_groups as the initial selection state.
+        const parseFirstTrainedWordsGroup = () => {
+            try {
+                const modelData = this._getModelData(model);
+                // Prefer top-level trainedWords (many exports store it here)
+                const tw = modelData?.trainedWords;
+                let firstEntry = null;
+                if (Array.isArray(tw) && tw.length && typeof tw[0] === 'string') {
+                    firstEntry = tw[0];
+                } else if (typeof tw === 'string' && tw.trim()) {
+                    firstEntry = tw;
+                } else if (Array.isArray(modelData?.modelVersions) && modelData.modelVersions.length) {
+                    const vtw = modelData.modelVersions[0]?.trainedWords;
+                    if (Array.isArray(vtw) && vtw.length && typeof vtw[0] === 'string') firstEntry = vtw[0];
+                    else if (typeof vtw === 'string' && vtw.trim()) firstEntry = vtw;
+                }
+
+                if (!firstEntry || typeof firstEntry !== 'string') return { tags: [], text: '' };
+                const groupTags = firstEntry
+                    .split(',')
+                    .map(part => String(part || '').trim())
+                    .filter(Boolean);
+                const groupText = groupTags.join(', ');
+                return { tags: groupTags, text: groupText };
+            } catch {
+                return { tags: [], text: '' };
+            }
+        };
+        const firstGroup = parseFirstTrainedWordsGroup();
+        const seededCharacter = (firstGroup?.tags && firstGroup.tags.length) ? firstGroup.tags[0] : '';
 
         const button = triggerElement;
         if (button) {
@@ -1243,20 +1289,30 @@ class LoraDownloaderService {
             // Yuuka: New multi-LoRA mode — prefer lora_names/lora_chain; keep lora_prompt_tags for compatibility
             const payload = {
                 ...(baseConfig && typeof baseConfig === 'object' ? baseConfig : {}),
-                character: albumName,
-                lora_prompt_tags: tags,
+                // Correct logic: if LoRA tags 1 exists, use its first tag as Character.
+                character: (seededCharacter || albumName),
+                // Enable LoRA tags 1 by default (multi-LoRA preset format)
+                ...(firstGroup?.text ? {
+                    multi_lora_prompt_groups: [[firstGroup.text]],
+                    multi_lora_prompt_tags: `(${firstGroup.text})`,
+                } : {}),
+                // Legacy compatibility: include enabled groups as the flat lora_prompt_tags
+                lora_prompt_tags: (firstGroup?.tags && firstGroup.tags.length) ? firstGroup.tags : tags,
                 lora_names: [loraIdentifier].filter(Boolean),
                 // Let backend normalize strengths via defaults if chain omitted
                 civitai_url: model?.civitai_url || baseConfig?.civitai_url || '',
             };
 
-            await this.api.album.post(`/${albumHash}/config`, payload);
+            await this._callAlbumCapability('album.set_album_config', {
+                character_hash: albumHash,
+                config: payload,
+            });
 
             if (button) {
                 button.disabled = false;
                 button.classList.remove('is-busy');
             }
-            await this._navigateToAlbum(albumHash, albumName, true);
+            await this._navigateToAlbum(albumHash, payload.character || albumName, true);
         } catch (err) {
             console.error('[LoraDownloader] Tạo album thất bại:', err);
             showError(`Không thể tạo album: ${err.message}`);
@@ -1274,16 +1330,18 @@ class LoraDownloaderService {
         if (this._albumPluginEnabled === false) {
             return false;
         }
-        this._albumPluginEnabled = Boolean(this.api?.album && Array.isArray(this.activePlugins) && this.activePlugins.some(plugin => plugin.id === 'album'));
+        const caps = this._getAlbumCapabilities();
+        const hasCaps = !!(caps && typeof caps.get === 'function' && caps.get('album.set_album_config') && typeof caps.get('album.set_album_config').invoke === 'function');
+        this._albumPluginEnabled = Boolean(hasCaps && Array.isArray(this.activePlugins) && this.activePlugins.some(plugin => plugin.id === 'album'));
         return this._albumPluginEnabled;
     }
 
     async _fetchAlbumBaseConfig(characterHash) {
-        if (!this.api?.album) {
-            return {};
-        }
         try {
-            const response = await this.api.album.get(`/comfyui/info?character_hash=${encodeURIComponent(characterHash)}`);
+            const response = await this._callAlbumCapability('album.get_comfyui_info', {
+                character_hash: String(characterHash),
+                no_choices: false,
+            });
             // Prefer the actual config object from the API shape { last_config, global_choices, ... }
             if (response && typeof response === 'object') {
                 if (response.last_config && typeof response.last_config === 'object') {
@@ -1483,6 +1541,23 @@ class LoraDownloaderService {
 
     _getPrimaryModelTag(model) {
         const modelData = this._getModelData(model);
+
+        // Prefer top-level trainedWords (common in metadata exports)
+        try {
+            const tw = modelData?.trainedWords;
+            let firstEntry = null;
+            if (Array.isArray(tw) && tw.length && typeof tw[0] === 'string') {
+                firstEntry = tw[0];
+            } else if (typeof tw === 'string' && tw.trim()) {
+                firstEntry = tw;
+            }
+            if (typeof firstEntry === 'string' && firstEntry.trim()) {
+                const candidates = firstEntry.split(',').map(part => part.trim()).filter(Boolean);
+                if (candidates.length) return candidates[0];
+                return firstEntry.trim();
+            }
+        } catch {}
+
         const versions = modelData?.modelVersions;
         if (Array.isArray(versions) && versions.length) {
             const trainedWords = versions[0]?.trainedWords;
@@ -1497,6 +1572,12 @@ class LoraDownloaderService {
                 }
             }
         }
+
+        // Final fallback: any extracted tag
+        try {
+            const tags = this._extractModelTags(model);
+            if (Array.isArray(tags) && tags.length) return tags[0];
+        } catch {}
         return null;
     }
 
@@ -1537,7 +1618,7 @@ class LoraDownloaderService {
         const targetLora = this._normalizeLoraValue(loraIdentifier);
         const targetTag = primaryTag ? this._normalizeTagValue(primaryTag) : '';
         try {
-            const albums = await this.api.album.get('/albums');
+            const albums = await this._callAlbumCapability('album.list_albums', {});
             if (!Array.isArray(albums) || !albums.length) return null;
             for (const album of albums) {
                 const name = (album?.name || '').trim();
@@ -1579,21 +1660,50 @@ class LoraDownloaderService {
     }
 
     async _navigateToAlbum(characterHash, characterName, openSettings = false) {
+        const preferredViewMode = (() => {
+            try {
+                const v = localStorage.getItem('yuuka.album.grid_open_view_mode');
+                return v === 'character' ? 'character' : 'album';
+            } catch {
+                return 'album';
+            }
+        })();
+
+        // Close overlay first to avoid UI overlap.
+        this.close();
+
+        // Prefer capability-driven navigation so it works even when Album is already running.
+        try {
+            await this._callAlbumCapability('album.open_main_ui', {
+                character_hash: String(characterHash || '').trim(),
+                character_name: String(characterName || '').trim(),
+                viewMode: preferredViewMode,
+            });
+            if (openSettings) {
+                await this._callAlbumCapability('album.open_settings', {});
+            }
+            return;
+        } catch (err) {
+            console.warn('[LoraDownloader] Capability navigation to Album failed; falling back to initialPluginState:', err);
+        }
+
+        // Fallback: initialPluginState + switchTab (only applied when Album is initialized/reloaded)
+        const viewMode = preferredViewMode;
         window.Yuuka.initialPluginState.album = {
             character: { hash: characterHash, name: characterName },
+            viewMode,
         };
         if (openSettings) {
             window.Yuuka.initialPluginState.album.openSettings = true;
         }
-        this.close();
         try {
             if (window?.Yuuka?.ui?.switchTab) {
                 window.Yuuka.ui.switchTab('album');
             } else if (typeof window.switchTab === 'function') {
                 window.switchTab('album');
             }
-        } catch (err) {
-            console.error('[LoraDownloader] Không thể chuyển sang tab Album:', err);
+        } catch (err2) {
+            console.error('[LoraDownloader] Không thể chuyển sang tab Album:', err2);
             showError('Không thể chuyển sang tab Album.');
         }
     }

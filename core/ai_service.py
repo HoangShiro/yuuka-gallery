@@ -386,6 +386,8 @@ class AIService:
         # Register default providers.
         self.register_provider(OpenAIProvider("openai", core_api))
         self.register_provider(OpenAIProvider("openai-compatible", core_api))
+        # LM Studio speaks OpenAI-compatible API; register as alias
+        self.register_provider(OpenAIProvider("lmstudio", core_api))
         self.register_provider(GeminiProvider("gemini", core_api))
 
     def register_provider(self, provider: BaseAIProvider) -> None:

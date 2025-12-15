@@ -56,6 +56,16 @@ class CharacterListComponent {
         this.handleZoomEnd = this.handleZoomEnd.bind(this);
     }
 
+    _getPreferredAlbumOpenViewMode({ forceAlbum = false } = {}) {
+        if (forceAlbum) return 'album';
+        try {
+            const v = localStorage.getItem('yuuka.album.grid_open_view_mode');
+            return v === 'character' ? 'character' : 'album';
+        } catch {
+            return 'album';
+        }
+    }
+
     async init() {
         console.log("[Plugin:CharacterList] Initializing...");
 
@@ -476,8 +486,10 @@ class CharacterListComponent {
         
         if (e.target.closest('.card-album-btn')) {
             e.stopPropagation();
+            const viewMode = this._getPreferredAlbumOpenViewMode();
             window.Yuuka.initialPluginState.album = {
-                character: { hash: card.dataset.hash, name: card.dataset.name }
+                character: { hash: card.dataset.hash, name: card.dataset.name },
+                viewMode,
             };
             Yuuka.ui.switchTab('album');
             return;
@@ -533,7 +545,11 @@ class CharacterListComponent {
         this.modalActions.querySelector('[data-action="search"]')?.addEventListener('click', () => { window.open(`https://www.google.com/search?q=${encodeURIComponent(this.state.currentModalCharacter.name)}`, '_blank'); });
         
         this.modalActions.querySelector('[data-action="album"]')?.addEventListener('click', () => {
-            window.Yuuka.initialPluginState.album = { character: this.state.currentModalCharacter };
+            const viewMode = this._getPreferredAlbumOpenViewMode();
+            window.Yuuka.initialPluginState.album = {
+                character: this.state.currentModalCharacter,
+                viewMode,
+            };
             Yuuka.ui.switchTab('album');
             this.closeModal();
         });

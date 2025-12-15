@@ -168,9 +168,18 @@
     const provider = cfg.provider || 'openai';
     const model = cfg.model || '';
 
-    if(!cfg.api_key){
-      throw new Error('Maid-chan LLM API key is not configured.');
-    }
+    const endpoint = cfg.endpoint || cfg.base_url || null;
+
+    const normalizeLmBaseUrl = (raw)=>{
+      try{
+        let u = String(raw || '').trim();
+        if(!u) return '';
+        u = u.replace(/\/$/, '');
+        u = u.replace(/\/v1\/?$/i, '');
+        u = u.replace(/\/models\/?$/i, '');
+        return `${u}/v1`;
+      }catch(_e){ return raw; }
+    };
 
     const payload = {
       provider,
@@ -179,20 +188,58 @@
       messages: messages || [],
       temperature: typeof cfg.temperature === 'number' ? cfg.temperature : 0.7,
       top_p: typeof cfg.top_p === 'number' ? cfg.top_p : 1,
-      max_tokens: typeof cfg.max_tokens === 'number' ? cfg.max_tokens : 512
+      max_tokens: typeof cfg.max_tokens === 'number' ? cfg.max_tokens : 512,
+      overrides: {}
     };
+
+    if(!payload.model){
+      // Last-resort fallback: pick first cached model if available
+      try{
+        const raw = window.localStorage.getItem('maid-chan:llm-models');
+        const list = raw ? JSON.parse(raw) : [];
+        const first = Array.isArray(list) && list.length ? (typeof list[0]==='string'? list[0] : (list[0]&&(list[0].id||list[0].name))) : '';
+        if(first) payload.model = first;
+      }catch(_e){/* ignore */}
+    }
 
     // Apply per-node settings overrides (from LLM settings nodes)
     if(settings && typeof settings === 'object'){
       if(settings.model) payload.model = settings.model;
       if(settings.provider) payload.provider = settings.provider;
+      if(settings.api_key) payload.api_key = settings.api_key;
+      if(settings.endpoint) payload.overrides.base_url = settings.endpoint;
       if(Number.isFinite(settings.temperature)) payload.temperature = settings.temperature;
       if(Number.isFinite(settings.top_p)) payload.top_p = settings.top_p;
       if(Number.isFinite(settings.max_tokens)) payload.max_tokens = settings.max_tokens;
     }
 
+    // Prefer configured endpoint when available
+    if(!payload.overrides.base_url && endpoint){
+      payload.overrides.base_url = endpoint;
+    }
+
     const effectiveProvider = String(payload.provider || provider || '').trim().toLowerCase();
-    const wantsStructuredOutput = effectiveProvider === 'gemini'
+
+    if(!payload.model){
+      throw new Error('No LLM model selected. Please pick a model in Settings or LLM loader.');
+    }
+
+    if(effectiveProvider === 'lmstudio' && payload.overrides.base_url){
+      payload.overrides.base_url = normalizeLmBaseUrl(payload.overrides.base_url);
+    }
+
+    // LM Studio often omits API keys; provide a placeholder to satisfy OpenAI clients
+    if(!payload.api_key && effectiveProvider === 'lmstudio'){
+      payload.api_key = 'lm-studio';
+    }
+    if(!payload.api_key){
+      throw new Error('Maid-chan LLM API key is not configured.');
+    }
+
+    if(payload.overrides && Object.keys(payload.overrides).length === 0){
+      delete payload.overrides;
+    }
+    const wantsStructuredOutput = (effectiveProvider === 'gemini' || effectiveProvider === 'lmstudio')
       && structuredOutput
       && typeof structuredOutput === 'object'
       && structuredOutput.enabled !== false;

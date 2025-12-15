@@ -27,7 +27,8 @@
           const part = {
             text: String((p && p.text) || ''),
             tool_results_text: (p && typeof p.tool_results_text === 'string') ? p.tool_results_text : undefined,
-            timestamp: (p && Number.isFinite(p.timestamp)) ? p.timestamp : baseTs
+            timestamp: (p && Number.isFinite(p.timestamp)) ? p.timestamp : baseTs,
+            imgs: (p && Array.isArray(p.imgs)) ? p.imgs : []
           };
           if(p && Array.isArray(p.tool_info)){
             part.tool_info = p.tool_info.map(t=>{
@@ -160,7 +161,8 @@
           const part = {
             text: String((p && p.text) || ''),
             tool_results_text: (p && typeof p.tool_results_text === 'string') ? p.tool_results_text : undefined,
-            timestamp: (p && Number.isFinite(p.timestamp)) ? p.timestamp : now
+            timestamp: (p && Number.isFinite(p.timestamp)) ? p.timestamp : now,
+            imgs: (p && Array.isArray(p.imgs)) ? p.imgs : []
           };
           if(p && Array.isArray(p.tool_info)){
             part.tool_info = p.tool_info.map(t=>{
@@ -192,6 +194,7 @@
       }else{
         const toolText = (msg && msg.metadata && typeof msg.metadata.tool_results_text === 'string') ? msg.metadata.tool_results_text : (typeof msg.tool_results_text === 'string' ? msg.tool_results_text : undefined);
         const part = { text: String(msg.text || ''), timestamp: now };
+        if(msg && Array.isArray(msg.imgs)) part.imgs = msg.imgs;
         if(toolText) part.tool_results_text = toolText;
         const idx = clamp((msg && msg.metadata && msg.metadata.selected_snapshot_index) ?? 0, 0, 0);
         snapshots = { parts: [part], current_index: idx };

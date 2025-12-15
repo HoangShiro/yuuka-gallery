@@ -1,0 +1,16 @@
+{
+  "1": {
+    "inputs": {
+      "model": "BiRefNet-general",
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "invert_output": false,
+      "refine_foreground": true,
+      "background": "Alpha"
+    },
+    "class_type": "BiRefNetRMBG",
+    "_meta": {
+      "title": "BiRefNet (RMBG)"
+    }
+  }
+}

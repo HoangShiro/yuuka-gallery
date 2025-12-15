@@ -52,6 +52,13 @@ const api = (() => {
                 });
                 return promise;
             },
+            startAlpha: (character_hash, generation_config, context = {}) => {
+                const promise = _request('/api/core/generate/alpha', { method: 'POST', body: { character_hash, generation_config, context } });
+                promise.then(response => {
+                    Yuuka.events.emit('generation:task_created_locally', response);
+                });
+                return promise;
+            },
             getStatus: () => _request('/api/core/generate/status'),
             cancel: (task_id) => _request('/api/core/generate/cancel', { method: 'POST', body: { task_id } }),
         },

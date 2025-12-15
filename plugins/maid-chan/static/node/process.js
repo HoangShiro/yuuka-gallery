@@ -641,19 +641,24 @@
       bodyEl.appendChild(hint);
 
       const toggleRow = document.createElement('div');
-      toggleRow.className = 'mc-custom-msg-toggle-row';
+      toggleRow.className = 'mc-node-row';
+      toggleRow.style.justifyContent = 'space-between';
+
       const toggleLabel = document.createElement('span');
-      toggleLabel.className = 'mc-custom-msg-label';
-      toggleLabel.textContent = 'Structured outputs (Gemini)';
+      toggleLabel.className = 'mc-node-label';
+      toggleLabel.textContent = 'Structured outputs (Gemini / LM Studio)';
+
       const toggleSwitch = document.createElement('div');
-      toggleSwitch.className = 'mc-custom-msg-switch';
+      toggleSwitch.className = 'mc-switch';
+
       const toggleKnob = document.createElement('div');
-      toggleKnob.className = 'mc-custom-msg-knob';
+      toggleKnob.className = 'mc-switch-knob';
       toggleSwitch.appendChild(toggleKnob);
+
       const syncToggle = () => {
         const enabled = !!node.data.structured_output_enabled;
-        toggleSwitch.style.background = enabled ? '#ff6fa9' : '#3a3b44';
-        toggleKnob.style.left = enabled ? '18px' : '2px';
+        if(enabled) toggleSwitch.classList.add('active');
+        else toggleSwitch.classList.remove('active');
       };
       toggleSwitch.onclick = () => {
         node.data.structured_output_enabled = !node.data.structured_output_enabled;
@@ -666,14 +671,13 @@
 
       const toggleHint = document.createElement('div');
       toggleHint.className = 'mc-chip';
-      toggleHint.textContent = 'When on, Gemini returns JSON (text + optional fields from Tool Definitions).';
+      toggleHint.textContent = 'When on, providers return JSON (text + optional fields from Tool Definitions).';
       bodyEl.appendChild(toggleHint);
       
       const btn = document.createElement('button');
       btn.textContent = 'Inspect Inputs';
-      btn.className = 'mc-history-view-btn';
+      btn.className = 'mc-node-btn';
       btn.style.width = '100%';
-      btn.style.marginTop = '8px';
       btn.onclick = () => showInspector(node.id);
       bodyEl.appendChild(btn);
     },
@@ -751,8 +755,50 @@
       try {
         const res = await MaidCore.callLLMChat({ messages, settings, allowedTools, customTools, signal: ctx.signal, structuredOutput: structuredPayload });
         
+        let structuredData = null;
+        if(res && typeof res.structured_output === 'object'){
+            structuredData = res.structured_output;
+        }else if(res && res.structured_output_raw){
+            structuredData = {
+              raw: res.structured_output_raw,
+              error: res.structured_output_error || 'Structured output missing'
+            };
+        }else if(res && res.structured_output_error){
+            structuredData = { error: res.structured_output_error };
+        }
+
         // 6. Return outputs
-        const text = res.text || res.message || res.content || '';
+        let text = res.text || res.message || res.content || '';
+
+        // Fallback: if text is empty but we have choices (OpenAI format)
+        if (!text && res.choices && Array.isArray(res.choices) && res.choices.length > 0) {
+             const msg = res.choices[0].message;
+             if (msg && msg.content) {
+                 text = msg.content;
+             }
+        }
+        
+        // Try to parse text if it looks like JSON (e.g. from structured output)
+        if (typeof text === 'string' && text.trim().startsWith('{')) {
+             try {
+                 const parsed = JSON.parse(text);
+                 if (parsed && typeof parsed === 'object') {
+                     if (!structuredData) structuredData = parsed;
+                     if (typeof parsed.text === 'string') text = parsed.text;
+                 }
+             } catch (e) {
+                 // Regex fallback for truncated JSON
+                 const match = text.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)/);
+                 if (match && match[1]) {
+                     try {
+                         const extracted = JSON.parse('"' + match[1] + '"');
+                         if (extracted) text = extracted;
+                     } catch (err) {
+                         text = match[1];
+                     }
+                 }
+             }
+        }
         
         // Extract tool calls
         const calls = (function(r){
@@ -760,22 +806,13 @@
           if(r.type === 'tool_calls' && Array.isArray(r.calls)) return r.calls;
           if(r.type === 'tool_call' && r.name) return [r];
           if(Array.isArray(r.function_calls)) return r.function_calls;
+          // Fallback for raw OpenAI format
+          if (r.choices && Array.isArray(r.choices) && r.choices.length > 0) {
+              const msg = r.choices[0].message;
+              if (msg && Array.isArray(msg.tool_calls)) return msg.tool_calls;
+          }
           return [];
         })(res);
-
-        let structuredData = null;
-        if(structuredPayload){
-          if(res && typeof res.structured_output === 'object'){
-            structuredData = res.structured_output;
-          }else if(res && res.structured_output_raw){
-            structuredData = {
-              raw: res.structured_output_raw,
-              error: res.structured_output_error || 'Structured output missing'
-            };
-          }else if(res && res.structured_output_error){
-            structuredData = { error: res.structured_output_error };
-          }
-        }
 
         const responseMsg = { role: 'assistant', content: text };
         if(assistantMsgId){
@@ -785,9 +822,12 @@
         try{
           console.log('[MaidLogic][LLM]', { nodeId: ctx?.node?.id, assistantMessageId: responseMsg.id || null, hadControlId: !!assistantMsgId });
         }catch(_e){/* noop */}
-        if(!structuredPayload && calls.length) responseMsg.tool_calls = calls;
+        
+        // If we have tool calls but no structured data, attach calls to message (standard behavior)
+        if(!structuredData && calls.length) responseMsg.tool_calls = calls;
 
-        const toolOutput = structuredPayload ? (structuredData || null) : (calls.length ? calls : null);
+        // Tool output prioritizes structured data if available
+        const toolOutput = structuredData || (calls.length ? calls : null);
 
         return { 
             response_message: responseMsg,
@@ -926,30 +966,29 @@
       if(!Array.isArray(node.data.replacements)) node.data.replacements = [];
 
       const container = document.createElement('div');
-      container.className = 'mc-custom-msg-container';
+      container.className = 'mc-node-col';
 
       // Toggle Switch
       const toggleRow = document.createElement('div');
-      toggleRow.className = 'mc-custom-msg-toggle-row';
+      toggleRow.className = 'mc-node-row';
+      toggleRow.style.justifyContent = 'space-between';
       
       const label = document.createElement('span');
-      label.className = 'mc-custom-msg-label';
+      label.className = 'mc-node-label';
       label.textContent = node.data.mode === 'prompt' ? 'System Prompt Mode' : 'Replacer Mode';
 
       const toggleSwitch = document.createElement('div');
-      toggleSwitch.className = 'mc-custom-msg-switch';
-      toggleSwitch.style.background = node.data.mode === 'prompt' ? '#3a3b44' : '#ff6fa9';
+      toggleSwitch.className = 'mc-switch' + (node.data.mode === 'prompt' ? '' : ' active');
 
       const toggleKnob = document.createElement('div');
-      toggleKnob.className = 'mc-custom-msg-knob';
-      toggleKnob.style.left = node.data.mode === 'prompt' ? '2px' : '18px';
+      toggleKnob.className = 'mc-switch-knob';
 
       toggleSwitch.appendChild(toggleKnob);
       toggleSwitch.onclick = () => {
         node.data.mode = node.data.mode === 'prompt' ? 'replacer' : 'prompt';
         label.textContent = node.data.mode === 'prompt' ? 'System Prompt Mode' : 'Replacer Mode';
-        toggleSwitch.style.background = node.data.mode === 'prompt' ? '#3a3b44' : '#ff6fa9';
-        toggleKnob.style.left = node.data.mode === 'prompt' ? '2px' : '18px';
+        if(node.data.mode === 'prompt') toggleSwitch.classList.remove('active');
+        else toggleSwitch.classList.add('active');
         updateVisibility();
         onDataChange();
       };
@@ -966,15 +1005,16 @@
       promptContainer.appendChild(promptDesc);
 
       const fallbackWrap = document.createElement('div');
-      fallbackWrap.className = 'mc-custom-msg-fallback';
+      fallbackWrap.className = 'mc-node-col';
+      fallbackWrap.style.marginTop = '6px';
 
       const fallbackLabel = document.createElement('label');
-      fallbackLabel.className = 'mc-custom-msg-fallback-label';
+      fallbackLabel.className = 'mc-node-label';
       fallbackLabel.textContent = 'Custom words when {{key}} missing';
 
       const fallbackInput = document.createElement('input');
       fallbackInput.type = 'text';
-      fallbackInput.className = 'mc-custom-msg-fallback-input';
+      fallbackInput.className = 'mc-node-input';
       fallbackInput.value = node.data.customWords || '';
       fallbackInput.placeholder = 'Example: (unknown)';
       fallbackInput.oninput = () => {
@@ -983,7 +1023,7 @@
       };
 
       const fallbackHint = document.createElement('div');
-      fallbackHint.className = 'mc-custom-msg-fallback-hint';
+      fallbackHint.className = 'mc-node-hint';
       fallbackHint.textContent = 'Fallback text when a key is missing or empty.';
 
       fallbackWrap.appendChild(fallbackLabel);
@@ -992,7 +1032,7 @@
       promptContainer.appendChild(fallbackWrap);
 
       const textarea = document.createElement('textarea');
-      textarea.className = 'mc-custom-msg-textarea';
+      textarea.className = 'mc-node-textarea';
       textarea.value = node.data.template;
       textarea.placeholder = 'Example: Her name is {{char_name}}...';
       textarea.oninput = () => {
@@ -1003,18 +1043,20 @@
 
       // Replacer Mode UI
       const replacerContainer = document.createElement('div');
-      replacerContainer.className = 'mc-custom-msg-replacer-container';
+      replacerContainer.className = 'mc-node-col';
+      replacerContainer.style.gap = '8px';
 
       const replacerHeader = document.createElement('div');
-      replacerHeader.className = 'mc-custom-msg-replacer-header';
+      replacerHeader.className = 'mc-node-row';
+      replacerHeader.style.justifyContent = 'space-between';
       
       const replacerTitle = document.createElement('span');
-      replacerTitle.className = 'mc-custom-msg-replacer-title';
+      replacerTitle.className = 'mc-node-label';
       replacerTitle.textContent = 'Replacements';
 
       const addBtn = document.createElement('button');
-      addBtn.className = 'mc-custom-msg-add-btn';
-      addBtn.textContent = '+';
+      addBtn.className = 'mc-node-btn';
+      addBtn.textContent = '+ Add';
       addBtn.onclick = () => {
         node.data.replacements.push({ from: '', to: '' });
         renderReplacements();
@@ -1026,36 +1068,38 @@
       replacerContainer.appendChild(replacerHeader);
 
       const listContainer = document.createElement('div');
-      listContainer.className = 'mc-custom-msg-list';
+      listContainer.className = 'mc-node-col';
+      listContainer.style.gap = '4px';
       replacerContainer.appendChild(listContainer);
 
       function renderReplacements() {
         listContainer.innerHTML = '';
         node.data.replacements.forEach((rep, idx) => {
           const row = document.createElement('div');
-          row.className = 'mc-custom-msg-row';
+          row.className = 'mc-node-row';
 
           const fromInp = document.createElement('input');
           fromInp.type = 'text';
-          fromInp.className = 'mc-custom-msg-input';
+          fromInp.className = 'mc-node-input';
           fromInp.value = rep.from;
           fromInp.placeholder = 'To replace';
           fromInp.onchange = () => { rep.from = fromInp.value; onDataChange(); };
 
           const arrow = document.createElement('span');
-          arrow.className = 'mc-custom-msg-arrow';
+          arrow.style.color = 'var(--mc-text-dim)';
           arrow.textContent = '→';
 
           const toInp = document.createElement('input');
           toInp.type = 'text';
-          toInp.className = 'mc-custom-msg-input';
+          toInp.className = 'mc-node-input';
           toInp.value = rep.to;
           toInp.placeholder = 'Replacement';
           toInp.onchange = () => { rep.to = toInp.value; onDataChange(); };
 
           const delBtn = document.createElement('button');
-          delBtn.className = 'mc-custom-msg-del-btn';
+          delBtn.className = 'mc-node-btn danger';
           delBtn.textContent = '✕';
+          delBtn.style.width = '28px';
           delBtn.onclick = () => {
             node.data.replacements.splice(idx, 1);
             renderReplacements();
@@ -1915,3 +1959,4 @@
     }
   });
 })();
+

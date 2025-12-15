@@ -394,6 +394,9 @@ window.Yuuka.plugins.simpleViewer = (() => {
             if (buttonDef.disabled && buttonDef.disabled(item)) {
                 button.disabled = true;
             }
+            if (buttonDef.style) {
+                button.style.cssText = buttonDef.style;
+            }
             button.innerHTML = `<span class="material-symbols-outlined">${buttonDef.icon}</span>`;
             
             button.addEventListener('click', () => {
@@ -401,6 +404,7 @@ window.Yuuka.plugins.simpleViewer = (() => {
                     buttonDef.onClick(item, close, updateItemsAndRefresh);
                 }
             });
+            
             actionsContainer.appendChild(button);
         });
         

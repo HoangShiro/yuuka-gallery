@@ -58,6 +58,43 @@
 
   const DEFAULT_AVATAR = `data:image/svg+xml;charset=UTF-8,${DEFAULT_AVATAR_SVG}`;
 
+  // Helper for image rendering in bubbles
+  function mcRenderContentWithImages(container, text){
+    container.innerHTML = '';
+    if(!text) return;
+    const regex = /(\[IMG\]\([^)]+\))/gi;
+    const parts = text.split(regex);
+    parts.forEach(part => {
+      if(!part) return;
+      const match = part.match(/^\[IMG\]\(([^)]+)\)$/i);
+      if(match){
+        const url = match[1];
+        const img = document.createElement('img');
+        img.src = url;
+        img.className = 'maid-chat-inline-img';
+        img.style.maxWidth = '100%';
+        img.style.display = 'block';
+        img.style.margin = '1em 0';
+        img.style.borderRadius = '4px';
+        
+        img.addEventListener('click', (e)=>{
+          e.preventDefault();
+          e.stopPropagation();
+          if(window.Yuuka && window.Yuuka.plugins && window.Yuuka.plugins.simpleViewer){
+            window.Yuuka.plugins.simpleViewer.open({
+              items: [{ imageUrl: url }],
+              startIndex: 0
+            });
+          }
+        });
+
+        container.appendChild(img);
+      } else {
+        container.appendChild(document.createTextNode(part));
+      }
+    });
+  }
+
   function mcGetMaidStorage(){
     return (window.Yuuka && window.Yuuka.ai && window.Yuuka.ai.MaidStorage) || null;
   }
@@ -660,7 +697,7 @@
       item.setAttribute('aria-live', 'polite');
       const content = document.createElement('div');
       content.className = 'maid-chat-text';
-      content.textContent = String(text || '');
+      mcRenderContentWithImages(content, String(text || ''));
       item.appendChild(content);
 
       // enter animation

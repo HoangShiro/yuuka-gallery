@@ -584,14 +584,29 @@
     let resizing = null; // 'br' | 'bl' | null
     let rsx=0, rsy=0, startW=0, startH=0, startL=0; // start left for BL
     // Compute a dynamic minimum height based on inner content to prevent overflow
+    // Cache minimum height at resize start to avoid feedback loop
+    let cachedMinH = null;
     const computeMinNodeHeight = ()=>{
+      if(cachedMinH !== null) return cachedMinH;
       try{
         const headerEl = header; // already defined above
         const bodyEl = body;     // already defined above
         const portsEl = portsWrap; // already defined above
         const h = (headerEl && headerEl.offsetHeight) || 24;
-        const b = (bodyEl && bodyEl.scrollHeight) || 0;
-        const p = (portsEl && portsEl.scrollHeight) || 0;
+        // Use scrollHeight of children sum instead of body.scrollHeight
+        // to avoid feedback loop when body has flex: 1 1 auto
+        let b = 0;
+        if(bodyEl && bodyEl.children){
+          for(const child of bodyEl.children){
+            b += child.offsetHeight || 0;
+          }
+          // Add gap between children
+          const gap = 8; // matches CSS gap value
+          b += Math.max(0, bodyEl.children.length - 1) * gap;
+          // Add padding
+          b += 20; // 10px top + 10px bottom padding
+        }
+        const p = (portsEl && portsEl.offsetHeight) || 0;
         // Add small buffer for borders/padding
         const buffer = 6;
         // Ensure a reasonable absolute floor as well
@@ -626,14 +641,20 @@
       node.w = newW; node.h = newH;
       onMove();
     };
-    const onResizeUp = ()=>{ if(resizing){ resizing = null; onDataChange(); } };
+    const onResizeUp = ()=>{ if(resizing){ resizing = null; cachedMinH = null; onDataChange(); } };
     const startResize = (kind, ev)=>{
       ev.stopPropagation(); ev.preventDefault();
       resizing = kind;
       rsx = ev.clientX||0; rsy = ev.clientY||0;
-      startW = parseInt(el.style.width || el.getBoundingClientRect().width/ (window.__MaidLogicScale||1), 10) || 0;
-      startH = parseInt(el.style.height || el.getBoundingClientRect().height/ (window.__MaidLogicScale||1), 10) || 0;
+      const scale = window.__MaidLogicScale || 1;
+      // Get current dimensions - prefer style values, fallback to computed bounds
+      const styleW = parseInt(el.style.width, 10);
+      const styleH = parseInt(el.style.height, 10);
+      startW = !isNaN(styleW) && styleW > 0 ? styleW : (el.getBoundingClientRect().width / scale);
+      startH = !isNaN(styleH) && styleH > 0 ? styleH : (el.getBoundingClientRect().height / scale);
       startL = parseInt(el.style.left||'0',10) || 0;
+      // Cache minH at resize start to avoid feedback loop
+      cachedMinH = computeMinNodeHeight();
     };
     handleBR.addEventListener('mousedown', (e)=> startResize('br', e));
     handleBL.addEventListener('mousedown', (e)=> startResize('bl', e));
@@ -1252,6 +1273,10 @@
     }
 
     function deleteNode(node){
+      const def = getNodeDef(node.type);
+      if(def && typeof def.onDelete === 'function'){
+        try{ def.onDelete(node); }catch(e){ console.error(e); }
+      }
       graph.nodes = (graph.nodes||[]).filter(n => n.id !== node.id);
       graph.edges = (graph.edges||[]).filter(e => e.fromNodeId !== node.id && e.toNodeId !== node.id);
       if(selectedNodeId === node.id){ setSelectedNode(null); }
@@ -1384,6 +1409,17 @@
     presetsSelect.addEventListener('change', async ()=>{
       const sel = presetsSelect.value;
       if(!sel || sel === activePresetId) return;
+
+      // Cleanup old nodes runtime state
+      if(graph && Array.isArray(graph.nodes)){
+        for(const n of graph.nodes){
+           const def = getNodeDef(n.type);
+           if(def && typeof def.onDelete === 'function'){
+             try{ def.onDelete(n); }catch(e){}
+           }
+        }
+      }
+
       activePresetId = sel; setCurrentPreset(activePresetId);
       graph = loadPresetGraph(activePresetId) || await fetchDefaultGraph();
       // Rebuild UI

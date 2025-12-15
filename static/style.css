@@ -124,7 +124,7 @@ body.is-logged-in #auth-container { display: none; }
 .plugin-container { display: none; }
 
 /* 5. FLOATING COMPONENTS & FOOTER */
-#error-popup { position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background-color: var(--color-accent-hover); color: white; padding: var(--spacing-4) var(--spacing-6); border-radius: var(--rounded-md); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); z-index: 3000; font-size: var(--font-size-base); font-weight: var(--font-weight-medium); opacity: 0; pointer-events: none; transition: top 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.5s ease; }
+#error-popup { position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background-color: var(--color-accent-hover); color: white; padding: var(--spacing-4) var(--spacing-6); border-radius: var(--rounded-md); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); z-index: 99999; font-size: var(--font-size-base); font-weight: var(--font-weight-medium); opacity: 0; pointer-events: none; transition: top 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.5s ease; }
 #error-popup.show { top: 20px; opacity: 1; pointer-events: auto; }
 #result-footer { position: fixed; bottom: 85px; left: 50%; transform: translateX(-50%); z-index: 998; display: none; background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: var(--spacing-2) var(--spacing-4); border-radius: var(--rounded-full); border: 1px solid rgba(0, 0, 0, 0.05); box-shadow: 0 4px 12px var(--color-shadow); color: var(--color-primary-text); font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); }
 html.dark-mode #result-footer { background: rgba(42, 39, 38, 0.6); border: 1px solid rgba(255, 255, 255, 0.1); }
@@ -185,7 +185,7 @@ html.dark-mode #search-box::placeholder {
 
 
 /* --- 6. CORE MODAL & UTILITY STYLES --- */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 2500; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.3s; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 9999; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.3s; }
 .modal-dialog { background: var(--color-card-bg); color: var(--color-primary-text); padding: var(--spacing-5); border-radius: var(--rounded-lg); width: 90%; max-width: 500px; display: flex; flex-direction: column; position: relative; }
 .modal-dialog h3 { margin-top: 0; padding-bottom: var(--spacing-3); border-bottom: 1px solid var(--color-border); }
 .modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--spacing-3); margin-top: var(--spacing-5); padding-top: var(--spacing-4);}

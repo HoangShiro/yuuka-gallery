@@ -278,6 +278,36 @@ def start_generation():
     except Exception as e:
         return jsonify({"error": str(e)}), 401
 
+
+@app.route('/api/core/generate/alpha', methods=['POST'])
+def start_generation_alpha():
+    """Bắt đầu một tác vụ tạo ảnh alpha (lưu metadata với Alpha=True)."""
+    try:
+        user_hash = plugin_manager.core_api.verify_token_and_get_user_hash()
+        data = request.json
+        character_hash = data.get('character_hash')
+        gen_config = data.get('generation_config')
+        context = data.get('context', {})
+        if not isinstance(context, dict):
+            context = {}
+        context['Alpha'] = True
+
+        # Mark config so WorkflowBuilder can select Alpha templates.
+        if isinstance(gen_config, dict):
+            gen_config['Alpha'] = True
+
+        if not character_hash or not gen_config:
+            abort(400, "Missing character_hash or generation_config.")
+
+        task_id, message = plugin_manager.core_api.generation_service.start_generation_task(
+            user_hash, character_hash, gen_config, context
+        )
+        if task_id:
+            return jsonify({"status": "started", "task_id": task_id, "message": message})
+        return jsonify({"error": message}), 429
+    except Exception as e:
+        return jsonify({"error": str(e)}), 401
+
 @app.route('/api/core/generate/status', methods=['GET'])
 def get_generation_status():
     """Lấy trạng thái của tất cả các tác vụ đang chạy."""
@@ -389,7 +419,7 @@ def initialize_server():
     uptime_thread = threading.Thread(target=_uptime_tracking_thread, daemon=True)
     uptime_thread.start()
 
-    print("\n✅ Yuuka's Server V4.9 is ready!")
+    print("\n✅ Yuuka's Server V5.0 is ready!")
     print(f"   - Loaded {len(plugin_manager.get_active_plugins())} plugins.")
     print("   - Local access at: http://127.0.0.1:5000")
     print("   - To access from other devices on the same network, use this machine's IP address.")

@@ -32,7 +32,8 @@ class GenerationService:
                 "task_id": task_id, "is_running": True, "character_hash": character_hash,
                 "progress_message": "Đang khởi tạo...", "progress_percent": 0,
                 "cancel_requested": False, "prompt_id": None, "context": context,
-                "generation_config": gen_config # Yuuka: global cancel v1.0
+                "generation_config": gen_config, # Yuuka: global cancel v1.0
+                "is_alpha": bool(isinstance(context, dict) and (context.get('Alpha') or context.get('alpha') is True)),
             }
             thread = threading.Thread(target=self._run_task, args=(user_hash, task_id, character_hash, gen_config))
             thread.start()
@@ -338,8 +339,13 @@ class GenerationService:
                     cfg_data["lora_prompt_tags"] = original_lora_tags
                 elif "lora_prompt_tags" not in cfg_data:
                     cfg_data["lora_prompt_tags"] = []
+                try:
+                    alpha_flag = bool(task.get('is_alpha'))
+                except Exception:
+                    alpha_flag = False
+
                 new_metadata = self.image_service.save_image_metadata(
-                    user_hash, character_hash, image_b64, cfg_data, creation_duration
+                    user_hash, character_hash, image_b64, cfg_data, creation_duration, alpha=alpha_flag
                 )
                 if not new_metadata:
                     raise Exception("L\u01b0u \u1ea3nh th\u1ea5t b\u1ea1i.")

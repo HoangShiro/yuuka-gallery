@@ -245,8 +245,14 @@
                 <select class="maid-chan-llm-provider">
                   <option value="openai">OpenAI / compatible</option>
                   <option value="gemini">Gemini</option>
+                  <option value="lmstudio">Local (LM Studio)</option>
                 </select>
               </div>
+            </div>
+
+            <div class="maid-chan-llm-row maid-chan-llm-endpoint-row is-hidden">
+              <div class="maid-chan-llm-label">IP</div>
+              <input type="text" class="maid-chan-llm-endpoint" placeholder="http://127.0.0.1:1234" />
             </div>
 
             <div class="maid-chan-llm-row">

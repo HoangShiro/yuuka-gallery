@@ -1,78 +1,245 @@
-// --- MODIFIED FILE: plugins/album/static/album.js ---
+// Album plugin entry file: defines AlbumComponent base + event wiring.
+// UI/view logic is split into modules under static/modules/**.
+
 class AlbumComponent {
     constructor(container, api, activePlugins) {
         this.container = container;
         this.api = api;
         this.activePlugins = activePlugins;
+
+        // LocalStorage keys
+        this._LS_GRID_OPEN_MODE_KEY = 'yuuka.album.grid_open_view_mode';
+        this._LS_CHAR_SELECTION_KEY_PREFIX = 'yuuka.album.character.selection.'; // + character_hash
+        this._LS_CHAR_ACTIVE_PRESET_KEY_PREFIX = 'yuuka.album.character.active_preset.'; // + character_hash
+        this._LS_CHAR_MENU_BAR_MODE_KEY = 'yuuka.album.character.menu_bar_mode'; // 0..3
+        this._LS_CHAR_MAIN_MENU_MODE_KEY = 'yuuka.album.character.main_menu_mode'; // 'category' | 'state'
+        // Character view settings persisted locally as a fallback for UI-only options.
+        // Backend remains the source of truth when it supports a setting.
+        this._LS_CHAR_SETTINGS_KEY = 'yuuka.album.character.settings';
+
         this.state = {
             selectedCharacter: null,
             viewMode: 'grid',
+            gridOpenMode: 'album',
             allImageData: [],
             promptClipboard: null,
             isComfyUIAvaidable: false,
-            cachedComfyGlobalChoices: null, // Yuuka: comfyui fetch optimization v1.0
-            cachedComfySettings: null, // Yuuka: preloaded comfy settings (last_config + global_choices)
+            cachedComfyGlobalChoices: null,
+            cachedComfySettings: null,
+
+            // Character view state (viewMode = 'character')
+            character: {
+                tagGroups: { grouped: {}, flat: {} },
+                categories: [],
+                selections: { Outfits: null, Expression: null, Action: null, Context: null },
+                presets: [],
+                favourites: {},
+                autoSuggestPresets: [],
+                autoSuggestModel: null,
+                activePresetId: null,
+                activeMenu: null,
+                settings: { pregen_enabled: true, pregen_category_enabled: {}, pregen_group_enabled: {} },
+                pregen: {
+                    timer: null,
+                    lastRanAt: 0,
+                    isRunning: false,
+                    isScheduling: false,
+                    lastScheduleAt: 0,
+                    suspended: false,
+                    sessionId: 0,
+                    sessionAutoImagesStarted: 0,
+                },
+                ui: { backgroundUrl: null, characterUrl: null, menuBarMode: 0, menuMode: 'category' },
+            },
         };
-        this.viewer = window.Yuuka.plugins.simpleViewer;
+
+        // Auto task limits (character view)
+        this._CHAR_AUTO_MAX_IMAGES_PER_SESSION = 100;
+        this._CHAR_AUTO_SCHEDULE_THROTTLE_MS = 500;
+
+        // Character categories limit
+        this._CHAR_MAX_TOTAL_CATEGORIES = 10;
+
+        // Icon pool for category picker (Material Symbols names)
+        this._CHAR_CATEGORY_ICON_CHOICES = [
+            'apparel', 'mood', 'directions_run', 'landscape',
+
+            'face', 'tag_faces', 'face_right',
+            'visibility',
+            'hearing', 'earbuds',
+            'gesture', 'pan_tool', 'fingerprint',
+            'footprint',
+            'sentiment_satisfied', 'sentiment_neutral', 'sentiment_dissatisfied',
+            'mood', 'mood_bad',
+            'psychology', 'self_improvement',
+            'record_voice_over', 'campaign',
+
+            'person', 'people', 'groups', 'emoji_people',
+            'accessibility', 'accessibility_new',
+            'front_hand', 'back_hand', 'waving_hand',
+            'thumb_up', 'thumb_down', 'volunteer_activism',
+
+            'lips', 'girl', 'person_heart',
+
+            'face_retouching_natural', 'face_retouching_off',
+            'brush', 'spa', 'content_cut', 'dry_cleaning',
+            'checkroom',
+
+            'directions_walk', 'directions_run',
+            'sports', 'fitness_center',
+
+            'portrait', 'photo_camera', 'camera_alt', 'camera_front',
+            'visibility_off',
+
+            'partner_heart', 'cardiology', 'cardio_load', 'water_drop',
+
+            'favorite', 'favorite_border', 'stars', 'bookmark',
+            'palette', 'emoji_objects', 'auto_awesome', 'bolt',
+            'music_note', 'theaters', 'sports_esports',
+            'local_florist', 'forest', 'nightlight', 'travel_explore',
+        ];
+
+        // Bright color pool for category icon/preset tinting (stored per category as "#RRGGBB")
+        this._CHAR_CATEGORY_COLOR_CHOICES = [
+            '#FFFFFF',
+            '#FF1744', '#FF5252', '#FF4081', '#F50057',
+            '#D500F9', '#E040FB', '#651FFF', '#7C4DFF',
+            '#3D5AFE', '#536DFE', '#2979FF', '#448AFF',
+            '#00B0FF', '#40C4FF', '#00E5FF', '#18FFFF',
+            '#1DE9B6', '#64FFDA', '#00E676', '#69F0AE',
+            '#76FF03', '#B2FF59', '#C6FF00', '#EEFF41',
+            '#FFEA00', '#FFD740', '#FFC400', '#FFAB40',
+            '#FF9100',
+        ];
+
+        // Restore global Character menu-bar mode (not per-character)
+        try {
+            if (typeof this._characterLoadMenuBarMode === 'function') {
+                this.state.character.ui.menuBarMode = this._characterLoadMenuBarMode();
+            }
+        } catch { }
+
+        // Restore global Character menu mode (Category/State)
+        try {
+            if (typeof this._characterLoadMainMenuMode === 'function') {
+                this.state.character.ui.menuMode = this._characterLoadMainMenuMode();
+            }
+        } catch { }
+
+        // Load persisted grid open mode (if module is available)
+        try {
+            if (typeof this._getGridPreferredViewMode === 'function') {
+                this.state.gridOpenMode = this._getGridPreferredViewMode();
+            }
+        } catch { }
+
+        // Shared services
+        this.viewer = window.Yuuka?.plugins?.simpleViewer;
         this.clipboardService = this._ensureClipboardService();
         this.state.promptClipboard = this._getPromptClipboard();
-        
-        // Yuuka: Bind các event handler một lần duy nhất
+
+        // Bind event handlers (always present in this file)
         this.handleImageAdded = this.handleImageAdded.bind(this);
         this.handleTaskEnded = this.handleTaskEnded.bind(this);
         this.handleGenerationUpdate = this.handleGenerationUpdate.bind(this);
-        this.handleImageDeleted = this.handleImageDeleted.bind(this); // Yuuka: event bus v1.0
-    this.handleTaskCreatedLocally = this.handleTaskCreatedLocally.bind(this); // external start
-    this.handleExternalRefresh = this.handleExternalRefresh.bind(this); // external refresh
-        // Bind helpers
-        this._syncDOMSelection = this._syncDOMSelection.bind(this);
-        this._attachInstanceToCapability = this._attachInstanceToCapability.bind(this);
+        this.handleImageDeleted = this.handleImageDeleted.bind(this);
+        this.handleTaskCreatedLocally = this.handleTaskCreatedLocally.bind(this);
+        this.handleExternalRefresh = this.handleExternalRefresh.bind(this);
+
+        // Bind helpers if present (defined in modules)
+        this._syncDOMSelection = (typeof this._syncDOMSelection === 'function')
+            ? this._syncDOMSelection.bind(this)
+            : (() => { });
+        this._attachInstanceToCapability = (typeof this._attachInstanceToCapability === 'function')
+            ? this._attachInstanceToCapability.bind(this)
+            : (() => { });
+
+        this._handleCharacterMenuClick = (typeof this._handleCharacterMenuClick === 'function')
+            ? this._handleCharacterMenuClick.bind(this)
+            : (() => { });
+        this._handleCharacterGlobalPointerDown = (typeof this._handleCharacterGlobalPointerDown === 'function')
+            ? this._handleCharacterGlobalPointerDown.bind(this)
+            : (() => { });
+
+        // SortableJS (tag group ordering)
+        this._sortablePromise = null;
+        this._characterTagGroupSortable = null;
+        this._characterIsSortingTagGroups = false;
+
+        // Track generation tasks in character mode (auto vs manual)
+        this._characterTaskMeta = new Map(); // task_id -> { isAuto, presetId, characterHash }
+        this._characterAutoSuggestIngestedTaskIds = new Set();
+        this._lastAllTasksStatus = null;
     }
 
     async init() {
-        console.log("[Plugin:Album] Initializing...");
+        console.log('[Plugin:Album] Initializing...');
         this.container.classList.add('plugin-album');
-        this.checkComfyUIStatus();
+
+        try { await this.checkComfyUIStatus?.(); } catch { }
 
         this.container.innerHTML = `<div class="plugin-album__content-area"></div>`;
         this.contentArea = this.container.querySelector('.plugin-album__content-area');
 
-        // Yuuka: Lắng nghe các sự kiện toàn cục từ Lõi
+        // Global events
         Yuuka.events.on('image:added', this.handleImageAdded);
         Yuuka.events.on('generation:task_ended', this.handleTaskEnded);
         Yuuka.events.on('generation:update', this.handleGenerationUpdate);
-        Yuuka.events.on('image:deleted', this.handleImageDeleted); // Yuuka: event bus v1.0
-    // Listen to cross-plugin signals
-    Yuuka.events.on('generation:task_created_locally', this.handleTaskCreatedLocally);
-    Yuuka.events.on('album:request_refresh', this.handleExternalRefresh);
+        Yuuka.events.on('image:deleted', this.handleImageDeleted);
+        Yuuka.events.on('generation:task_created_locally', this.handleTaskCreatedLocally);
+        Yuuka.events.on('album:request_refresh', this.handleExternalRefresh);
 
-        // Yuuka: navibar v2.0 integration - Đăng ký button một lần
-        this._registerNavibarButtons();
-    // Prefetch global tag dataset early (non-blocking) so settings modal opens instantly.
-    this._prefetchTags();
+        // Navibar integration
+        try { this._registerNavibarButtons?.(); } catch { }
 
-    // Expose global instance for cross-plugin discovery
-    window.Yuuka = window.Yuuka || {}; window.Yuuka.instances = window.Yuuka.instances || {};
-    window.Yuuka.instances.AlbumComponent = this;
+        // Prefetch global tag dataset (non-blocking)
+        try { this._prefetchTags?.(); } catch { }
 
-    // Attach this instance to the previously registered capability (if any)
-    this._attachInstanceToCapability();
+        // Expose global instance for cross-plugin discovery
+        window.Yuuka = window.Yuuka || {};
+        window.Yuuka.instances = window.Yuuka.instances || {};
+        window.Yuuka.instances.AlbumComponent = this;
 
-    const initialState = window.Yuuka.initialPluginState.album;
+        // Attach this instance to the previously registered capability (if any)
+        try { this._attachInstanceToCapability(); } catch { }
+
+        const initialState = window.Yuuka?.initialPluginState?.album;
         if (initialState) {
             const initialCharacter = initialState.character;
             const shouldOpenSettings = Boolean(initialState.openSettings);
             const regenConfig = initialState.regenConfig;
 
-            this.state.selectedCharacter = initialCharacter;
+            const requestedViewMode = (() => {
+                if (regenConfig) return 'album';
+                const raw = String(initialState.viewMode || '').trim().toLowerCase();
+                if (raw === 'character') return 'character';
+                if (raw === 'album') return 'album';
+                try {
+                    if (typeof this._getGridPreferredViewMode === 'function') {
+                        return this._getGridPreferredViewMode();
+                    }
+                } catch { }
+                return 'album';
+            })();
+
             delete window.Yuuka.initialPluginState.album;
-            this.state.viewMode = 'album';
-            await this.loadAndDisplayCharacterAlbum();
-            this._syncDOMSelection();
-            if (regenConfig) this._startGeneration(regenConfig);
+
+            if (requestedViewMode === 'character') {
+                await this.openCharacterView?.(initialCharacter);
+            } else {
+                this.state.selectedCharacter = initialCharacter;
+                this.state.viewMode = 'album';
+                await this.loadAndDisplayCharacterAlbum?.();
+                this._syncDOMSelection();
+            }
+
+            if (regenConfig) {
+                try { await this._startGeneration?.(regenConfig); } catch { }
+            }
+
             if (shouldOpenSettings) {
                 try {
-                    await this.openSettings();
+                    await this.openSettings?.();
                 } catch (err) {
                     console.error('[Album] Failed to open settings modal:', err);
                     showError('Không thể mở cài đặt Album.');
@@ -80,58 +247,105 @@ class AlbumComponent {
             }
         } else {
             this.state.viewMode = 'grid';
-            await this.showCharacterSelectionGrid();
+            await this.showCharacterSelectionGrid?.();
         }
-        this._updateNav();
+
+        try { this._updateNav?.(); } catch { }
     }
 
     destroy() {
-        console.log("[Plugin:Album] Destroying...");
-        // Yuuka: Hủy lắng nghe sự kiện khi component bị hủy
+        console.log('[Plugin:Album] Destroying...');
+
+        try { this._characterTeardown?.(); } catch { }
+
         Yuuka.events.off('image:added', this.handleImageAdded);
         Yuuka.events.off('generation:task_ended', this.handleTaskEnded);
         Yuuka.events.off('generation:update', this.handleGenerationUpdate);
-        Yuuka.events.off('image:deleted', this.handleImageDeleted); // Yuuka: event bus v1.0
-    Yuuka.events.off('generation:task_created_locally', this.handleTaskCreatedLocally);
-    Yuuka.events.off('album:request_refresh', this.handleExternalRefresh);
-        
-        const navibar = window.Yuuka.services.navibar;
-        if (navibar) {
-            navibar.setActivePlugin(null);
-        }
+        Yuuka.events.off('image:deleted', this.handleImageDeleted);
+        Yuuka.events.off('generation:task_created_locally', this.handleTaskCreatedLocally);
+        Yuuka.events.off('album:request_refresh', this.handleExternalRefresh);
 
-        this.contentArea.innerHTML = '';
+        const navibar = window.Yuuka?.services?.navibar;
+        if (navibar) navibar.setActivePlugin(null);
+
+        if (this.contentArea) this.contentArea.innerHTML = '';
         this.container.classList.remove('plugin-album');
     }
 
-    // --- YUUKA: EVENT HANDLERS V4.0 (ROBUST REFRESH) ---
-    
+    // --- EVENT HANDLERS ---
+
     handleImageAdded(eventData) {
-        const { task_id, image_data } = eventData;
-        
-        if (this.state.viewMode === 'album' && this.state.selectedCharacter?.hash === image_data.character_hash) {
-            // Cập nhật state cục bộ ngay lập tức
-            const existingIndex = this.state.allImageData.findIndex(img => img.id === image_data.id);
-            if (existingIndex === -1) {
-                this.state.allImageData.unshift(image_data);
+        const taskId = eventData?.task_id ?? eventData?.taskId;
+        const imageData = eventData?.image_data ?? eventData?.imageData;
+
+        // Auto-suggest: incorporate tags from new non-auto images immediately.
+        try {
+            const tid = String(taskId || '').trim();
+            const meta = tid ? this._characterTaskMeta.get(tid) : null;
+            if (tid && meta && meta.isAuto === false) {
+                if (!this._characterAutoSuggestIngestedTaskIds.has(tid)) {
+                    this._characterAutoSuggestIngestedTaskIds.add(tid);
+                    if (typeof this._characterAutoSuggestIngestImage === 'function') {
+                        this._characterAutoSuggestIngestImage(imageData);
+                    }
+                }
+            }
+        } catch { }
+
+        try {
+            // Always update local cache for the currently selected character.
+            // Character view relies on state.allImageData for preset filtering.
+            if (this.state.selectedCharacter?.hash && this.state.selectedCharacter.hash === imageData?.character_hash) {
+                const existingIndex = this.state.allImageData.findIndex(img => img.id === imageData.id);
+                if (existingIndex === -1) {
+                    this.state.allImageData.unshift(imageData);
+                }
             }
 
-            // Cập nhật "lạc quan" trên UI
-            const placeholder = document.getElementById(task_id);
-            if (placeholder) {
-                const newCard = this._createImageCard(image_data);
-                placeholder.replaceWith(newCard);
+            if (this.state.viewMode === 'album' && this.state.selectedCharacter?.hash === imageData?.character_hash) {
+                const placeholder = document.getElementById(taskId);
+                if (placeholder) {
+                    const newCard = this._createImageCard?.(imageData);
+                    if (newCard) placeholder.replaceWith(newCard);
+                }
             }
-        }
-        this._updateNav();
+
+            if (this.state.viewMode === 'character') {
+                // VN mode: background images are stored into a dedicated per-user album
+                // ("Background"), so character_hash will NOT match selectedCharacter.hash.
+                // Still route these images through the character-view handler.
+                const cfg = imageData?.generationConfig || {};
+                const layer = String(cfg?.album_vn_layer || '').trim().toLowerCase();
+                const gid = String(cfg?.album_vn_bg_group_id || '').trim();
+                const isVnBg = (layer === 'bg' && !!gid);
+
+                if (isVnBg || (this.state.selectedCharacter?.hash === imageData?.character_hash)) {
+                    this._characterOnImageAdded?.(taskId, imageData);
+                    try { this._characterRefreshOpenSubmenuEmptyStates?.(); } catch { }
+                    try { this._characterUpdatePresetSubmenuBackgroundUI?.(); } catch { }
+                }
+            }
+        } catch { }
+
+        try { this._updateNav?.(); } catch { }
     }
-    
-    handleImageDeleted({ imageId }) { // Yuuka: event bus v1.0
+
+    handleImageDeleted(eventData) {
+        const imageId = eventData?.imageId;
+        if (!imageId) return;
+
         const index = this.state.allImageData.findIndex(img => img.id === imageId);
         if (index > -1) {
             this.state.allImageData.splice(index, 1);
+
             if (this.state.viewMode === 'album') {
-                this.contentArea.querySelector(`.plugin-album__image-card[data-id="${imageId}"]`)?.remove();
+                this.contentArea?.querySelector(`.plugin-album__image-card[data-id="${imageId}"]`)?.remove();
+            }
+
+            if (this.state.viewMode === 'character') {
+                try { this._characterRefreshDisplayedImage?.(); } catch { }
+                try { this._characterRefreshOpenSubmenuEmptyStates?.(); } catch { }
+                try { this._characterUpdatePresetSubmenuBackgroundUI?.(); } catch { }
             }
         }
     }
@@ -139,60 +353,59 @@ class AlbumComponent {
     handleTaskEnded(payload) {
         const taskId = payload?.taskId || payload?.task_id;
         if (!taskId) return;
-        
-        // Yuuka: image placeholder v2.0
-        // Kích hoạt cơ chế làm mới an toàn để đảm bảo đồng bộ
+
         if (this.state.viewMode === 'album' && this.state.selectedCharacter) {
-            this._refreshAlbumAndPlaceholders();
+            this._refreshAlbumAndPlaceholders?.();
+        } else if (this.state.viewMode === 'character' && this.state.selectedCharacter) {
+            try {
+                this.state.character.pregen.lastRanAt = Date.now();
+            } catch { }
+
+            try {
+                const meta = this._characterTaskMeta.get(String(taskId));
+
+                if (meta && meta.isAuto === false && !this._characterAutoSuggestIngestedTaskIds.has(String(taskId))) {
+                    try { setTimeout(() => { try { this._characterTaskMeta.delete(String(taskId)); } catch { } }, 30000); } catch { }
+                } else {
+                    this._characterTaskMeta.delete(taskId);
+                }
+
+                if (meta && String(meta.characterHash || '') === String(this.state.selectedCharacter.hash)) {
+                    if (meta.isAuto === false) {
+                        try { this.state.character.pregen.suspended = false; } catch { }
+                    }
+                }
+
+                this._characterAutoMaybeSchedule?.(null, { reason: meta?.isAuto ? 'auto-ended' : 'task-ended' });
+            } catch { }
+
+            try { this._characterUpdatePresetSubmenuTaskUI?.(this._lastAllTasksStatus || {}); } catch { }
+            try { this._characterUpdateTagGroupSubmenuTaskUI?.(this._lastAllTasksStatus || {}); } catch { }
         } else {
-            // Nếu không ở trong album, chỉ cần xóa placeholder (nếu có)
-             document.getElementById(taskId)?.remove();
+            document.getElementById(taskId)?.remove();
         }
-        this._updateNav();
+
+        try { this._updateNav?.(); } catch { }
     }
 
     handleGenerationUpdate(allTasksStatus) {
-        // Cập nhật overlay ở grid chọn nhân vật
-        const runningTasksByHash = new Map();
-        Object.values(allTasksStatus).forEach(task => {
-            if (!runningTasksByHash.has(task.character_hash)) {
-                runningTasksByHash.set(task.character_hash, task);
-            }
-        });
+        this._lastAllTasksStatus = allTasksStatus || {};
 
-        document.querySelectorAll('.plugin-album__grid .character-card').forEach(card => {
-            const charHash = card.dataset.hash;
-            const status = runningTasksByHash.get(charHash);
-            const existingOverlay = card.querySelector('.album-grid-progress-overlay');
+        try { this._gridUpdateTaskOverlays?.(this._lastAllTasksStatus); } catch { }
 
-            if (status) {
-                card.classList.add('is-generating');
-                let overlay = existingOverlay;
-                if (!overlay) {
-                    overlay = document.createElement('div');
-                    overlay.className = 'album-grid-progress-overlay';
-                    overlay.innerHTML = `<div class="plugin-album__progress-bar-container"><div class="plugin-album__progress-bar"></div></div><div class="plugin-album__progress-text"></div>`;
-                    card.querySelector('.image-container').appendChild(overlay);
-                }
-                overlay.querySelector('.plugin-album__progress-bar').style.width = `${status.progress_percent || 0}%`;
-                overlay.querySelector('.plugin-album__progress-text').textContent = status.progress_message;
-            } else if (existingOverlay) {
-                card.classList.remove('is-generating');
-                existingOverlay.remove();
-            }
-        });
-
-        // Chỉ cập nhật placeholder trong album hiện tại
         if (this.state.viewMode === 'album' && this.state.selectedCharacter) {
-            const grid = this.contentArea.querySelector('.plugin-album__grid');
-             Object.values(allTasksStatus).forEach(task => {
-                if (task.character_hash === this.state.selectedCharacter.hash) {
-                    const placeholder = document.getElementById(task.task_id);
-                    if (placeholder) {
-                        placeholder.querySelector('.plugin-album__progress-bar').style.width = `${task.progress_percent || 0}%`;
-                        placeholder.querySelector('.plugin-album__progress-text').textContent = task.progress_message || '...';
-                    } else if (grid) {
-                        const newPlaceholder = this._createPlaceholderCard(task.task_id);
+            const grid = this.contentArea?.querySelector('.plugin-album__grid');
+            Object.values(this._lastAllTasksStatus).forEach(task => {
+                if (!task) return;
+                if (task.character_hash !== this.state.selectedCharacter.hash) return;
+
+                const placeholder = document.getElementById(task.task_id);
+                if (placeholder) {
+                    placeholder.querySelector('.plugin-album__progress-bar').style.width = `${task.progress_percent || 0}%`;
+                    placeholder.querySelector('.plugin-album__progress-text').textContent = task.progress_message || '...';
+                } else if (grid) {
+                    const newPlaceholder = this._createPlaceholderCard?.(task.task_id);
+                    if (newPlaceholder) {
                         grid.prepend(newPlaceholder);
                         const emptyMsg = grid.querySelector('.plugin-album__empty-msg');
                         if (emptyMsg) emptyMsg.style.display = 'none';
@@ -200,107 +413,54 @@ class AlbumComponent {
                 }
             });
         }
-    }
 
-    // Triggered by other plugins when a generation task has just been created
-    handleTaskCreatedLocally(payload) {
-        try{
-            const taskId = payload?.task_id;
-            const charHash = payload?.character_hash;
-            if(!taskId || !charHash) return;
-            // If we're in album view of that character, add a placeholder immediately
-            if (this.state.viewMode === 'album' && this.state.selectedCharacter?.hash === charHash) {
-                const grid = this.contentArea.querySelector('.plugin-album__grid');
-                if (grid && !document.getElementById(taskId)) {
-                    const placeholder = this._createPlaceholderCard(taskId);
-                    grid.prepend(placeholder);
-                    const emptyMsg = grid.querySelector('.plugin-album__empty-msg');
-                    if (emptyMsg) emptyMsg.style.display = 'none';
-                }
-                this._updateNav();
-            }
-        }catch(err){ console.warn('[Album] handleTaskCreatedLocally error:', err); }
-    }
-
-    // Allow external plugins to request a UI refresh (placeholders + image list)
-    async handleExternalRefresh() {
-        try{
-            if (this.state.viewMode === 'album' && this.state.selectedCharacter) {
-                await this._refreshAlbumAndPlaceholders();
-            }
-        }catch(err){ console.warn('[Album] handleExternalRefresh error:', err); }
-    }
-
-    // --- END OF REFACTORED HANDLERS ---
-    
-    // Yuuka: navibar v2.0 integration
-    _registerNavibarButtons() {
-        const navibar = window.Yuuka.services.navibar;
-        if (!navibar) return;
-
-        // Yuuka: navibar auto-init v1.0 - Gỡ bỏ việc đăng ký nút chính 'album-main'
-        // Navibar sẽ tự động đăng ký nút này từ manifest.
-
-        // 2. Tool buttons (only visible when active)
-        navibar.registerButton({
-            id: 'album-settings',
-            type: 'tools',
-            pluginId: 'album',
-            order: 1,
-            icon: 'tune',
-            title: 'Cấu hình',
-            onClick: () => this.openSettings()
-        });
-
-        navibar.registerButton({
-            id: 'album-generate',
-            type: 'tools',
-            pluginId: 'album',
-            order: 2,
-            icon: 'auto_awesome',
-            title: 'Tạo ảnh mới',
-            onClick: () => {
-                // Logic kiểm tra điều kiện được chuyển vào đây
-                const tasksForThisChar = this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length;
-                if (tasksForThisChar >= 5) {
-                    showError("Đã đạt giới hạn 5 tác vụ đồng thời.");
-                    return;
-                }
-                if (!this.state.isComfyUIAvaidable) {
-                    showError("ComfyUI chưa kết nối.");
-                    return;
-                }
-                this._startGeneration();
-            }
-        });
-    }
-
-    _updateNav() {
-        const navibar = window.Yuuka.services.navibar;
-        if (!navibar) return;
-        // Chỉ cần báo cho navibar biết plugin nào đang hoạt động
-        navibar.setActivePlugin(this.state.viewMode === 'album' ? 'album' : null);
-        // Sync DOM data attributes for external detection
-        this._syncDOMSelection();
-    }
-    
-    async checkComfyUIStatus() { try{const s=await this.api.album.get('/comfyui/info').catch(()=>({}));const t=s?.last_config?.server_address||'127.0.0.1:8888';await this.api.server.checkComfyUIStatus(t);this.state.isComfyUIAvaidable=true;}catch(e){this.state.isComfyUIAvaidable=false;showError("Album: Không thể kết nối ComfyUI.");}}
-    
-    async loadAndDisplayCharacterAlbum() { 
-        try {
-            this.updateUI('loading', `Đang tải album của ${this.state.selectedCharacter.name}...`);
-            await this._refreshAlbumAndPlaceholders(); // Yuuka: Sử dụng hàm làm mới an toàn
-            // Yuuka: Preload Comfy settings for instant settings modal
-            this._preloadComfySettings();
-            this._syncDOMSelection();
-        } catch(e) {
-            this.updateUI('error', `Lỗi tải album: ${e.message}`);
+        if (this.state.viewMode === 'character' && this.state.selectedCharacter) {
+            try { this._characterMaybeStartPreGen?.(this._lastAllTasksStatus); } catch { }
+            try { this._characterUpdateMenuProgressBorder?.(this._lastAllTasksStatus); } catch { }
+            try { this._characterUpdatePresetSubmenuTaskUI?.(this._lastAllTasksStatus); } catch { }
+            try { this._characterUpdateTagGroupSubmenuTaskUI?.(this._lastAllTasksStatus); } catch { }
         }
     }
+
+    handleTaskCreatedLocally(payload) {
+        try {
+            const taskId = payload?.task_id;
+            const charHash = payload?.character_hash;
+            if (!taskId || !charHash) return;
+
+            if (this.state.viewMode === 'album' && this.state.selectedCharacter?.hash === charHash) {
+                const grid = this.contentArea?.querySelector('.plugin-album__grid');
+                if (grid && !document.getElementById(taskId)) {
+                    const placeholder = this._createPlaceholderCard?.(taskId);
+                    if (placeholder) {
+                        grid.prepend(placeholder);
+                        const emptyMsg = grid.querySelector('.plugin-album__empty-msg');
+                        if (emptyMsg) emptyMsg.style.display = 'none';
+                    }
+                }
+                this._updateNav?.();
+            }
+        } catch (err) {
+            console.warn('[Album] handleTaskCreatedLocally error:', err);
+        }
+    }
+
+    async handleExternalRefresh() {
+        try {
+            if (this.state.viewMode === 'album' && this.state.selectedCharacter) {
+                await this._refreshAlbumAndPlaceholders?.();
+            }
+        } catch (err) {
+            console.warn('[Album] handleExternalRefresh error:', err);
+        }
+    }
+
+    // --- CLIPBOARD SERVICE ---
 
     _ensureClipboardService() {
         window.Yuuka = window.Yuuka || {};
         window.Yuuka.services = window.Yuuka.services || {};
+
         if (!window.Yuuka.services.albumPromptClipboard) {
             const store = { data: null };
             window.Yuuka.services.albumPromptClipboard = {
@@ -324,46 +484,8 @@ class AlbumComponent {
                 }
             };
         }
+
         return window.Yuuka.services.albumPromptClipboard;
-    }
-
-    // Bind the current AlbumComponent instance into the capability's invoke handler
-    _attachInstanceToCapability() {
-            const caps = window.Yuuka?.services?.capabilities;
-            if (!caps) return;
-            try {
-                // Attach this AlbumComponent instance to all relevant Album capabilities
-                const self = this;
-                const NEEDS_INSTANCE = new Set([
-                    'image.generate',
-                    'image.hires_upscale',
-                    'album.open_or_create',
-                    'album.open_settings',
-                    'album.open_image',
-                    'album.apply_lora',
-                    'album.clear_lora',
-                    'album.refresh',
-                    'album.get_context',
-                    'album.find_context_by_name',
-                    'album.set_lora_tag_groups',
-                    'album.save_settings',
-                ]);
-
-                NEEDS_INSTANCE.forEach(id => {
-                    const def = caps.get(id);
-                    if (!def || typeof def.invoke !== 'function') return;
-
-                    const originalInvoke = def.invoke;
-                    def.invoke = async (args = {}, ctx = {}) => {
-                        if (!self) {
-                            throw new Error(`Album capability '${id}' requires an active Album tab. Please open the Album plugin first.`);
-                        }
-                        return originalInvoke.call(self, args, ctx);
-                    };
-                });
-            } catch (err) {
-                console.warn('[Album] Failed to attach instance to capabilities:', err);
-            }
     }
 
     _getPromptClipboard() {
@@ -381,6 +503,7 @@ class AlbumComponent {
         } else if (value && typeof value === 'object') {
             map = new Map(Object.entries(value));
         }
+
         if (map) {
             const normalized = new Map();
             map.forEach((rawValue, rawKey) => {
@@ -391,982 +514,14 @@ class AlbumComponent {
             });
             map = normalized;
         }
+
         const stored = this.clipboardService?.set?.(map) || null;
         this.state.promptClipboard = stored ? new Map(stored) : null;
         return this.state.promptClipboard;
     }
-
-    _analyzeWorkflowConfig(cfg = {}) {
-        const normalizeStr = (value) => typeof value === 'string' ? value.trim() : '';
-        const toBool = (value) => {
-            if (typeof value === 'boolean') return value;
-            if (typeof value === 'number') return value !== 0;
-            if (typeof value === 'string') {
-                const lowered = value.trim().toLowerCase();
-                return ['1', 'true', 'yes', 'on'].includes(lowered);
-            }
-            return false;
-        };
-        const toNumber = (value) => {
-            const num = Number(value);
-            return Number.isFinite(num) ? num : null;
-        };
-
-        const workflowTemplate = normalizeStr(cfg.workflow_template || cfg._workflow_template || '');
-        const workflowTypeRaw = normalizeStr(cfg.workflow_type || cfg._workflow_type || '');
-        let workflowType = workflowTypeRaw.toLowerCase();
-        const templateLower = workflowTemplate.toLowerCase();
-
-        const loraName = normalizeStr(cfg.lora_name);
-        const hasLoRA = Boolean(loraName) && loraName.toLowerCase() !== 'none';
-
-        let hiresEnabled = toBool(cfg.hires_enabled);
-
-        const width = toNumber(cfg.width);
-        const height = toNumber(cfg.height);
-        let baseWidth = toNumber(cfg.hires_base_width);
-        let baseHeight = toNumber(cfg.hires_base_height);
-
-        const widthExceedsBase = Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth + 4;
-        const heightExceedsBase = Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight + 4;
-
-        if (!hiresEnabled) {
-            if (workflowType.includes('hires') || templateLower.includes('hiresfix')) {
-                hiresEnabled = true;
-            } else if (widthExceedsBase || heightExceedsBase) {
-                hiresEnabled = true;
-            }
-        }
-
-        const bigDimensionDetected = (
-            (Number.isFinite(width) && width >= 1536) ||
-            (Number.isFinite(height) && height >= 1536)
-        );
-        if (!hiresEnabled && bigDimensionDetected && (!Number.isFinite(baseWidth) || baseWidth === null || baseWidth <= 0)) {
-            hiresEnabled = true;
-        }
-
-        if (hiresEnabled) {
-            if (!Number.isFinite(baseWidth) || baseWidth <= 0) {
-                if (Number.isFinite(width) && width > 0) {
-                    baseWidth = Math.max(64, Math.round(width / 2));
-                }
-            }
-            if (!Number.isFinite(baseHeight) || baseHeight <= 0) {
-                if (Number.isFinite(height) && height > 0) {
-                    baseHeight = Math.max(64, Math.round(height / 2));
-                }
-            }
-        }
-
-        if (!workflowType) {
-            if (hiresEnabled) {
-                workflowType = hasLoRA ? 'hires_lora' : 'hires';
-            } else if (hasLoRA) {
-                workflowType = 'sdxl_lora';
-            } else {
-                workflowType = 'standard';
-            }
-        }
-
-        return {
-            isHires: Boolean(hiresEnabled),
-            hasLoRA,
-            workflowTemplate,
-            workflowType,
-            baseWidth: Number.isFinite(baseWidth) && baseWidth > 0 ? Math.round(baseWidth) : null,
-            baseHeight: Number.isFinite(baseHeight) && baseHeight > 0 ? Math.round(baseHeight) : null
-        };
-    }
-
-    async _startGeneration(configOverrides={}) {
-        if (this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length >= 5) { showError("Đã đạt giới hạn 5 tác vụ đồng thời."); return; }
-        if (!this.state.isComfyUIAvaidable) { showError("ComfyUI chưa kết nối."); return; }
-        let tempTaskId = `temp_${Date.now()}`;
-        try {
-            const grid = this.contentArea.querySelector('.plugin-album__grid');
-            if (grid) {
-                const placeholder = this._createPlaceholderCard(tempTaskId);
-                grid.prepend(placeholder);
-                const emptyMsg = grid.querySelector('.plugin-album__empty-msg');
-                if (emptyMsg) emptyMsg.style.display = 'none';
-            }
-            this._updateNav();
-            
-            const { last_config } = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}`);
-            const payload = { ...last_config, ...configOverrides, character: this.state.selectedCharacter.name };
-            // --- Multi-LoRA payload normalization v1.0 ---
-            // Prefer lora_chain if present, otherwise accept lora_names; keep single lora_name for backward-compat.
-            const incomingChain = Array.isArray(configOverrides?.lora_chain)
-                ? configOverrides.lora_chain
-                : (Array.isArray(payload.lora_chain) ? payload.lora_chain : null);
-            if (incomingChain && incomingChain.length) {
-                const cleanedChain = incomingChain
-                    .map(entry => {
-                        if (!entry) return null;
-                        const name = String(entry.lora_name || entry.name || '').trim();
-                        if (!name || name.toLowerCase() === 'none') return null;
-                        const toNum = (v, d) => {
-                            const n = Number(v);
-                            return Number.isFinite(n) ? n : d;
-                        };
-                        const sm = toNum(entry.strength_model ?? entry.lora_strength_model ?? payload.lora_strength_model, 1.0);
-                        const sc = toNum(entry.strength_clip ?? entry.lora_strength_clip ?? payload.lora_strength_clip, 1.0);
-                        return { lora_name: name, strength_model: sm, strength_clip: sc };
-                    })
-                    .filter(Boolean);
-                if (cleanedChain.length) {
-                    payload.lora_chain = cleanedChain;
-                    payload.lora_names = cleanedChain.map(c => c.lora_name);
-                    if (cleanedChain.length === 1) {
-                        payload.lora_name = cleanedChain[0].lora_name;
-                        payload.lora_strength_model = cleanedChain[0].strength_model;
-                        payload.lora_strength_clip = cleanedChain[0].strength_clip;
-                    } else {
-                        payload.lora_name = 'None';
-                    }
-                }
-            } else if (Array.isArray(configOverrides?.lora_names) && configOverrides.lora_names.length) {
-                const names = configOverrides.lora_names.map(n => String(n).trim()).filter(n => n && n.toLowerCase() !== 'none');
-                if (names.length) {
-                    payload.lora_names = names;
-                    payload.lora_name = names.length === 1 ? names[0] : 'None';
-                }
-            }
-            // --- End Multi-LoRA normalization ---
-            if (configOverrides.seed === undefined) payload.seed = 0;
-            if (Array.isArray(payload.lora_prompt_tags)) {
-                payload.lora_prompt_tags = payload.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean);
-            } else if (payload.lora_prompt_tags) {
-                const tagText = String(payload.lora_prompt_tags).trim();
-                payload.lora_prompt_tags = tagText ? [tagText] : [];
-            } else {
-                payload.lora_prompt_tags = [];
-            }
-            const analysis = this._analyzeWorkflowConfig(payload);
-            payload.hires_enabled = analysis.isHires;
-            if (analysis.baseWidth) {
-                const currentBaseWidth = Number(payload.hires_base_width);
-                if (!Number.isFinite(currentBaseWidth) || currentBaseWidth <= 0) {
-                    payload.hires_base_width = analysis.baseWidth;
-                }
-            }
-            if (analysis.baseHeight) {
-                const currentBaseHeight = Number(payload.hires_base_height);
-                if (!Number.isFinite(currentBaseHeight) || currentBaseHeight <= 0) {
-                    payload.hires_base_height = analysis.baseHeight;
-                }
-            }
-            // Always (re)compute workflow_type to avoid stale *_lora after removing LoRA
-            if (analysis.workflowType) {
-                payload.workflow_type = analysis.workflowType;
-            }
-            if (analysis.workflowTemplate && !payload.workflow_template) {
-                payload.workflow_template = analysis.workflowTemplate;
-            }
-
-            if (payload.hires_enabled) {
-                delete payload._workflow_type;
-            } else if (analysis.hasLoRA) {
-                payload._workflow_type = 'sdxl_lora';
-            } else {
-                delete payload._workflow_type;
-                if (typeof payload.workflow_type === 'string' && /_lora$/.test(payload.workflow_type) && !analysis.hasLoRA) {
-                    payload.workflow_type = 'standard';
-                }
-            }
-            const response = await this.api.generation.start(this.state.selectedCharacter.hash, payload);
-            
-            const tempPlaceholder = document.getElementById(tempTaskId);
-            if (tempPlaceholder) {
-                tempPlaceholder.id = response.task_id;
-                // Yuuka: cancel task fix v1.0
-                const cancelButton = tempPlaceholder.querySelector('.plugin-album__cancel-btn');
-                if (cancelButton) {
-                    cancelButton.dataset.taskId = response.task_id;
-                }
-            }
-
-        } catch(err) {
-            document.getElementById(tempTaskId)?.remove();
-            showError(`Bắt đầu thất bại: ${err.message}`);
-            this._updateNav();
-        }
-    }
-    
-    /**
-     * Yuuka: image placeholder v2.0 - Hàm làm mới an toàn
-     * Lấy trạng thái mới nhất của ảnh và các tác vụ đang chạy, sau đó render lại toàn bộ.
-     */
-
-    async _startHiresUpscale(item) {
-        const viewerHelpers = window.Yuuka?.viewerHelpers;
-        let isHires;
-        if (viewerHelpers?.isImageHires) {
-            try {
-                isHires = viewerHelpers.isImageHires(item);
-            } catch (err) {
-                console.warn('[Album] viewerHelpers.isImageHires error:', err);
-            }
-        }
-        if (isHires === undefined) {
-            const cfg = item?.generationConfig || {};
-            if (!cfg || Object.keys(cfg).length === 0) {
-                isHires = true;
-            } else {
-                let hiresFlag = cfg.hires_enabled;
-                if (typeof hiresFlag === 'string') {
-                    hiresFlag = hiresFlag.trim().toLowerCase() === 'true';
-                }
-                if (hiresFlag) {
-                    isHires = true;
-                } else {
-                    const width = Number(cfg.width);
-                    const baseWidth = Number(cfg.hires_base_width || cfg.width);
-                    const height = Number(cfg.height);
-                    const baseHeight = Number(cfg.hires_base_height || cfg.height);
-                    isHires = (
-                        (Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth) ||
-                        (Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight)
-                    );
-                }
-            }
-        }
-
-        if (isHires) {
-            showError("Đã là ảnh hires rồi.");
-            return;
-        }
-        if (this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length >= 5) {
-            showError("Đã đạt giới hạn 5 tác vụ đồng thời.");
-            return;
-        }
-        if (!this.state.isComfyUIAvaidable) {
-            showError("ComfyUI chưa kết nối.");
-            return;
-        }
-        if (!item?.id) {
-            showError("Không thể xác định ảnh để hires.");
-            return;
-        }
-
-        const grid = this.contentArea.querySelector('.plugin-album__grid');
-        const tempTaskId = `temp_hires_${Date.now()}`;
-        let placeholder = null;
-
-        try {
-            if (grid) {
-                placeholder = this._createPlaceholderCard(tempTaskId);
-                grid.prepend(placeholder);
-                const emptyMsg = grid.querySelector('.plugin-album__empty-msg');
-                if (emptyMsg) emptyMsg.style.display = 'none';
-            }
-            this._updateNav();
-
-            const payload = {
-                character_hash: this.state.selectedCharacter?.hash || item.character_hash
-            };
-            const response = await this.api.album.post(`/images/${item.id}/hires`, payload);
-            if (!response || !response.task_id) {
-                throw new Error(response?.error || 'Không thể bắt đầu hires.');
-            }
-
-            Yuuka.events.emit('generation:task_created_locally', response);
-
-            if (placeholder) {
-                placeholder.id = response.task_id;
-                const cancelButton = placeholder.querySelector('.plugin-album__cancel-btn');
-                if (cancelButton) {
-                    cancelButton.dataset.taskId = response.task_id;
-                }
-            }
-        } catch (err) {
-            if (placeholder) {
-                placeholder.remove();
-            }
-            const message = err?.message || String(err);
-            showError(`Hires thất bại: ${message}`);
-        } finally {
-            this._updateNav();
-        }
-    }
-
-    async _refreshAlbumAndPlaceholders() {
-        if (!this.state.selectedCharacter) return;
-    
-        try {
-            const [images, status] = await Promise.all([
-                this.api.images.getByCharacter(this.state.selectedCharacter.hash),
-                this.api.generation.getStatus()
-            ]);
-    
-            this.state.allImageData = images;
-            this.renderCharacterAlbumView(); // Render layout cơ bản
-    
-            const grid = this.contentArea.querySelector('.plugin-album__grid');
-            if (!grid) return;
-    
-            // Lọc các tác vụ đang chạy chỉ cho nhân vật hiện tại
-            const runningTasksForChar = Object.values(status.tasks || {})
-                .filter(task => task.character_hash === this.state.selectedCharacter.hash);
-    
-            // Thêm lại các placeholder cho các tác vụ còn đang chạy
-            if (runningTasksForChar.length > 0) {
-                const emptyMsg = grid.querySelector('.plugin-album__empty-msg');
-                if (emptyMsg) emptyMsg.style.display = 'none';
-    
-                runningTasksForChar.forEach(task => {
-                    const placeholder = this._createPlaceholderCard(task.task_id);
-                    grid.prepend(placeholder); // Luôn thêm vào đầu
-                    // Cập nhật ngay trạng thái cho placeholder vừa tạo
-                    placeholder.querySelector('.plugin-album__progress-bar').style.width = `${task.progress_percent || 0}%`;
-                    placeholder.querySelector('.plugin-album__progress-text').textContent = task.progress_message || '...';
-                });
-            }
-        } catch(e) {
-            console.error("[Album] Lỗi khi làm mới album và placeholders:", e);
-            this.updateUI('error', `Lỗi đồng bộ: ${e.message}`);
-        } finally {
-            this._updateNav();
-        }
-    }
-
-    updateUI(state, text='') {
-        if (state === 'error') {
-            this.contentArea.innerHTML = `<div class="error-msg">${text}</div>`;
-        } else if (state === 'loading') {
-            this.contentArea.innerHTML = `<div class="loader visible">${text}</div>`;
-        }
-    }
-    
-    async showCharacterSelectionGrid() {
-        this.state.viewMode = 'grid';
-        this._updateNav();
-        this.state.selectedCharacter = null;
-        this.state.cachedComfyGlobalChoices = null; // Yuuka: comfyui fetch optimization v1.0
-        this.state.cachedComfySettings = null; // Yuuka: reset preloaded comfy settings
-        this.updateUI('loading', 'Đang tải danh sách album...');
-        this._syncDOMSelection();
-        try {
-            const albums = await this.api.album.get('/albums');
-            this.contentArea.innerHTML = `<div class="plugin-album__grid"></div>`;
-            const grid = this.contentArea.querySelector('.plugin-album__grid');
-            if (!grid) return;
-
-            grid.appendChild(this._createAddAlbumCard());
-
-            if (!albums || albums.length === 0) {
-                const emptyMsg = document.createElement('p');
-                emptyMsg.className = 'plugin-album__empty-msg';
-                emptyMsg.textContent = 'Chưa có album nào, hãy ấn "+" để tạo album mới.';
-                grid.appendChild(emptyMsg);
-            } else {
-                albums.forEach(album => {
-                    grid.appendChild(this._createAlbumGridCard(album));
-                });
-            }
-
-            const currentStatus = await this.api.generation.getStatus();
-            this.handleGenerationUpdate(currentStatus.tasks || {});
-        } catch (e) {
-            showError(`Lỗi tải danh sách album: ${e.message}`);
-            this.updateUI('error', `Loi: ${e.message}`);
-        }
-    }
-
-    _createAlbumGridCard(album) {
-        const card = document.createElement('div');
-        card.className = 'character-card album-character-card';
-        card.dataset.hash = album.hash;
-        if (album.is_custom) {
-            card.dataset.isCustom = '1';
-        }
-        const displayName = (album.name && album.name.trim()) ? album.name : 'Album chưa đặt tên';
-        const imageContainer = document.createElement('div');
-        imageContainer.className = 'image-container';
-        if (album.cover_url) {
-            const img = document.createElement('img');
-            img.src = album.cover_url;
-            img.alt = displayName;
-            img.loading = 'lazy';
-            imageContainer.appendChild(img);
-        } else {
-            imageContainer.classList.add('no-cover');
-            imageContainer.innerHTML = `<span class="material-symbols-outlined">image</span>`;
-        }
-        const nameEl = document.createElement('div');
-        nameEl.className = 'name';
-        nameEl.textContent = displayName;
-        card.appendChild(imageContainer);
-        card.appendChild(nameEl);
-        card.addEventListener('click', async () => {
-            this.state.selectedCharacter = { hash: album.hash, name: displayName, isCustom: !!album.is_custom };
-            this.state.cachedComfyGlobalChoices = null;
-            this.state.cachedComfySettings = null;
-            this.state.allImageData = [];
-            this.state.viewMode = 'album';
-            this._syncDOMSelection();
-            await this.loadAndDisplayCharacterAlbum();
-            this._updateNav();
-        });
-        return card;
-    }
-
-    _createAddAlbumCard() {
-        const card = document.createElement('div');
-        card.className = 'character-card album-add-card';
-        card.dataset.hash = '';
-        const imageContainer = document.createElement('div');
-        imageContainer.className = 'image-container no-cover';
-        imageContainer.innerHTML = `<span class="material-symbols-outlined">add</span>`;
-        const nameEl = document.createElement('div');
-        nameEl.className = 'name';
-        nameEl.textContent = 'Add new';
-        card.appendChild(imageContainer);
-        card.appendChild(nameEl);
-        card.addEventListener('click', () => {
-            this._handleCreateNewAlbum();
-        });
-        return card;
-    }
-
-    _generateAlbumHash() {
-        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-            return `album-custom-${window.crypto.randomUUID()}`;
-        }
-        const fallback = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-        return `album-custom-${fallback}`;
-    }
-
-    async _handleCreateNewAlbum() {
-        const newHash = this._generateAlbumHash();
-        this.state.selectedCharacter = {
-            hash: newHash,
-            name: 'empty',
-            isCustom: true
-        };
-        this.state.allImageData = [];
-        this.state.cachedComfyGlobalChoices = null;
-        this.state.cachedComfySettings = null;
-        this.state.viewMode = 'album';
-        this._syncDOMSelection();
-        await this.loadAndDisplayCharacterAlbum();
-        this._updateNav();
-    }
-
-    renderCharacterAlbumView() { 
-        this.contentArea.innerHTML = `<div class="plugin-album__grid image-grid"></div>`;
-        this._renderImageGrid();
-    }
-
-    // --- Global tag dataset prefetch (runs once per app load) ---
-    _prefetchTags() {
-        try {
-            window.Yuuka = window.Yuuka || {}; window.Yuuka.services = window.Yuuka.services || {};
-            const svc = window.Yuuka.services.tagDataset;
-            if (!svc || typeof svc.prefetch !== 'function') return;
-            const apiObj = (typeof api !== 'undefined') ? api : this.api; // prefer global api if defined
-            if (apiObj && typeof apiObj.getTags === 'function') {
-                svc.prefetch(apiObj); // fire & forget
-            }
-        } catch (err) {
-            console.warn('[Album] Tag prefetch skipped:', err);
-        }
-    }
-    
-    // --- Yuuka: Preload comfy settings (last_config + global_choices) so modal opens instantly ---
-    async _preloadComfySettings(force = false) {
-        if (!this.state?.selectedCharacter?.hash) return;
-        if (!force && this.state.cachedComfySettings) return; // Already loaded
-        try {
-            const data = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}`);
-            if (data && (data.last_config || data.global_choices)) {
-                this.state.cachedComfySettings = {
-                    last_config: data.last_config || {},
-                    global_choices: data.global_choices || null
-                };
-                if (data.global_choices) {
-                    this.state.cachedComfyGlobalChoices = data.global_choices;
-                }
-            }
-        } catch (err) {
-            console.warn('[Album] Preload comfy settings failed:', err);
-        }
-    }
-    
-    _renderImageGrid() {
-        const grid = this.contentArea.querySelector('.plugin-album__grid');
-        if (!grid) return;
-        grid.innerHTML = '';
-
-        if (this.state.selectedCharacter) {
-            grid.appendChild(this._createAlbumSettingsCard());
-        }
-
-        if (this.state.allImageData.length === 0) {
-            const emptyMsg = document.createElement('p');
-            emptyMsg.className = 'plugin-album__empty-msg';
-            emptyMsg.textContent = 'Album này chưa có ảnh nào, hãy ấn "+" để tạo ảnh mới.';
-            grid.appendChild(emptyMsg);
-            return;
-        }
-
-        this.state.allImageData.forEach(imgData => grid.appendChild(this._createImageCard(imgData)));
-    }
-
-    
-    _createAlbumSettingsCard() {
-        const card = document.createElement('div');
-        card.className = 'character-card album-add-card plugin-album__settings-card';
-        card.dataset.role = 'album-settings';
-
-        const imageContainer = document.createElement('div');
-        imageContainer.className = 'image-container no-cover';
-        imageContainer.innerHTML = `<span class="material-symbols-outlined">add</span>`;
-
-        card.appendChild(imageContainer);
-        card.setAttribute('role', 'button');
-        card.setAttribute('title', 'Album settings');
-        card.tabIndex = 0;
-
-        const triggerSettings = () => this.openSettings();
-        card.addEventListener('click', triggerSettings);
-        card.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                triggerSettings();
-            }
-        });
-
-        return card;
-    }
-
-    _createImageCard(imgData) { const c=document.createElement('div');c.className='plugin-album__album-card plugin-album__image-card';c.dataset.id=imgData.id;c.innerHTML=`<img src="${imgData.pv_url}" alt="Art" loading="lazy">`;c.addEventListener('click',()=>this.renderImageViewer(imgData));return c;} // Yuuka: preview image fix v1.0
-
-    _createPlaceholderCard(taskId) {
-        const placeholder = document.createElement('div');
-        placeholder.className = 'plugin-album__album-card placeholder-card';
-        placeholder.id = taskId;
-        // Yuuka: global cancel v1.0
-        placeholder.innerHTML = `
-            <div class="plugin-album__progress-bar-container"><div class="plugin-album__progress-bar"></div></div>
-            <div class="plugin-album__progress-text">Đang khởi tạo...</div>
-            <button class="plugin-album__cancel-btn" data-task-id="${taskId}"><span class="material-symbols-outlined">stop</span> Hủy</button>
-        `;
-        placeholder.querySelector('.plugin-album__cancel-btn').addEventListener('click', (e) => {
-            e.stopPropagation();
-            // Yuuka: cancel task fix v1.0 - Đọc ID từ data attribute
-            const currentTaskId = e.currentTarget.dataset.taskId;
-            this.api.generation.cancel(currentTaskId).catch(err => showError(`Lỗi hủy: ${err.message}`));
-        });
-        return placeholder;
-    }
-    
-
-    renderImageViewer(imgData) {
-        const startIndex = this.state.allImageData.findIndex(img => img.id === imgData.id);
-        const tasksForThisChar = this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length;
-        const isGenDisabled = tasksForThisChar >= 5 || !this.state.isComfyUIAvaidable;
-        const viewerHelpers = window.Yuuka?.viewerHelpers;
-
-        const fallbackInfoPanel = (item) => {
-            const cfg = item?.generationConfig;
-            if (!cfg) return "Không có thông tin.";
-            const buildRow = (label, value) => {
-                if (!value || (typeof value === 'string' && value.trim() === '')) return '';
-                const span = document.createElement('span');
-                span.textContent = value;
-                return `<div class="info-row"><strong>${label}:</strong> <span>${span.innerHTML}</span></div>`;
-            };
-            const resolveWorkflowDisplay = () => {
-                const normalize = (value) => String(value || '').trim().toLowerCase();
-                const workflowTemplate = String(cfg.workflow_template || '').trim();
-                let workflowType = normalize(cfg.workflow_type);
-                const hasLoRAName = typeof cfg.lora_name === 'string' && cfg.lora_name.trim() && cfg.lora_name.trim().toLowerCase() !== 'none';
-                const hasLoRAChain = Array.isArray(cfg.lora_chain) && cfg.lora_chain.length > 0;
-                const hasLoRANames = Array.isArray(cfg.lora_names) && cfg.lora_names.filter(n => String(n).trim().toLowerCase() !== 'none').length > 0;
-                const hasAnyLoRA = hasLoRAName || hasLoRAChain || hasLoRANames;
-                // If stale *_lora type but no LoRA now, strip suffix
-                if (workflowType.endsWith('_lora') && !hasAnyLoRA) {
-                    workflowType = workflowType.replace(/_lora$/, '');
-                }
-                const labelMap = {
-                    'hires_lora': 'Hires Fix + LoRA',
-                    'hires': 'Hires Fix',
-                    'hires_input_image_lora': 'Hires Input Image + LoRA',
-                    'hires_input_image': 'Hires Input Image',
-                    'sdxl_lora': 'SDXL + LoRA',
-                    'lora': 'SDXL + LoRA',
-                    'standard': 'Standard'
-                };
-                let label = labelMap[workflowType];
-                if (!label && workflowType.endsWith('_lora')) {
-                    const baseType = workflowType.replace(/_lora$/, '');
-                    if (labelMap[baseType]) {
-                        label = hasAnyLoRA ? `${labelMap[baseType]} + LoRA` : labelMap[baseType];
-                    }
-                }
-                if (!label) {
-                    const templateLower = workflowTemplate.toLowerCase();
-                    if (templateLower.includes('hiresfix') && templateLower.includes('input_image')) {
-                        label = (templateLower.includes('lora') && hasAnyLoRA) ? 'Hires Input Image + LoRA' : 'Hires Input Image';
-                    } else if (templateLower.includes('hiresfix')) {
-                        label = (templateLower.includes('lora') && hasAnyLoRA) ? 'Hires Fix + LoRA' : 'Hires Fix';
-                    } else if (templateLower.includes('lora') && hasAnyLoRA) {
-                        label = 'SDXL + LoRA';
-                    }
-                }
-                if (!label) {
-                    const width = Number(cfg.width);
-                    const height = Number(cfg.height);
-                    const baseWidth = Number(cfg.hires_base_width);
-                    const baseHeight = Number(cfg.hires_base_height);
-                    const widthHires = Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth + 4;
-                    const heightHires = Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight + 4;
-                    const noBaseData = (!Number.isFinite(baseWidth) || baseWidth <= 0) && (!Number.isFinite(baseHeight) || baseHeight <= 0);
-                    const bigDimension = (Number.isFinite(width) && width >= 1536) || (Number.isFinite(height) && height >= 1536);
-                    if (widthHires || heightHires || (noBaseData && bigDimension)) {
-                        label = hasAnyLoRA ? 'Hires Fix + LoRA' : 'Hires Fix';
-                    }
-                }
-                if (!label) {
-                    label = hasAnyLoRA ? 'SDXL + LoRA' : 'Standard';
-                }
-                if (workflowTemplate && workflowTemplate.toLowerCase() !== 'standard') {
-                    return label ? `${label} (${workflowTemplate})` : workflowTemplate;
-                }
-                return label;
-            };
-            const promptRows = ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative']
-                .map(key => buildRow(key.charAt(0).toUpperCase() + key.slice(1), cfg[key]))
-                .filter(Boolean)
-                .join('');
-            const createdText = item.createdAt ? new Date(item.createdAt * 1000).toLocaleString('vi-VN') : '';
-            const renderTime = item.creationTime ? `${Number(item.creationTime).toFixed(2)} giây` : '';
-            const infoGrid = `<div class="info-grid">${
-                buildRow('Model', cfg.ckpt_name?.split('.')[0])
-            }${
-                buildRow('Sampler', `${cfg.sampler_name} (${cfg.scheduler})`)
-            }${
-                buildRow('Image Size', `${cfg.width}x${cfg.height}`)
-            }${
-                buildRow('Steps', cfg.steps)
-            }${
-                buildRow('CFG', cfg.cfg)
-            }${
-                (() => {
-                    const displayLoRA = () => {
-                        if (Array.isArray(cfg.lora_chain) && cfg.lora_chain.length) {
-                            return cfg.lora_chain.map(item => {
-                                const n = String(item.lora_name || item.name || '').trim();
-                                if (!n) return null;
-                                const sm = item.strength_model ?? item.lora_strength_model;
-                                const sc = item.strength_clip ?? item.lora_strength_clip;
-                                if (sm != null && sc != null && Number.isFinite(Number(sm)) && Number.isFinite(Number(sc))) {
-                                    return `${n}(${Number(sm).toFixed(2)}/${Number(sc).toFixed(2)})`;
-                                }
-                                return n;
-                            }).filter(Boolean).join(', ');
-                        }
-                        if (Array.isArray(cfg.lora_names) && cfg.lora_names.length) {
-                            return cfg.lora_names.join(', ');
-                        }
-                        return cfg.lora_name;
-                    };
-                    return buildRow('LoRA', displayLoRA());
-                })()
-            }${
-                buildRow('Workflow', resolveWorkflowDisplay())
-            }</div>`;
-            const loraTags = (() => {
-                // Prefer structured multi-LoRA groups if present
-                if (Array.isArray(cfg.multi_lora_prompt_groups)) {
-                    const parts = cfg.multi_lora_prompt_groups
-                        .map(arr => Array.isArray(arr) ? arr.map(s => String(s).trim()).filter(Boolean) : [])
-                        .map(groupList => groupList.length ? `(${groupList.join(', ')})` : '')
-                        .filter(Boolean);
-                    if (parts.length) return parts.join(', ');
-                }
-                // Then accept legacy combined string if available
-                if (typeof cfg.multi_lora_prompt_tags === 'string' && cfg.multi_lora_prompt_tags.trim()) {
-                    return cfg.multi_lora_prompt_tags.trim();
-                }
-                // Fallback to legacy single-LoRA array
-                if (Array.isArray(cfg.lora_prompt_tags)) {
-                    return cfg.lora_prompt_tags.map(tag => String(tag).trim()).filter(Boolean).join(', ');
-                }
-                return '';
-            })();
-            const loraTagsBlock = loraTags ? buildRow('LoRA Tags', loraTags) : '';
-            const sections = [];
-            if (promptRows) sections.push(promptRows, '<hr>');
-            sections.push(infoGrid);
-            if (loraTagsBlock) sections.push(loraTagsBlock);
-            if (createdText || renderTime) sections.push('<hr>');
-            if (createdText) sections.push(buildRow('Created', createdText));
-            if (renderTime) sections.push(buildRow('Render time', renderTime));
-            return sections.filter(Boolean).join('').trim();
-        };
-
-        const renderInfoPanel = (item) => {
-            if (viewerHelpers?.buildInfoPanel) {
-                try {
-                    return viewerHelpers.buildInfoPanel(item);
-                } catch (err) {
-                    console.warn('[Album] viewerHelpers.buildInfoPanel error:', err);
-                }
-            }
-            return fallbackInfoPanel(item);
-        };
-
-        const isImageHiresFn = (item) => {
-            if (viewerHelpers?.isImageHires) {
-                try {
-                    return viewerHelpers.isImageHires(item);
-                } catch (err) {
-                    console.warn('[Album] viewerHelpers.isImageHires error:', err);
-                }
-            }
-            const cfg = item?.generationConfig || {};
-            if (!cfg || Object.keys(cfg).length === 0) return true;
-            let hiresFlag = cfg.hires_enabled;
-            if (typeof hiresFlag === 'string') {
-                hiresFlag = hiresFlag.trim().toLowerCase() === 'true';
-            }
-            if (hiresFlag) return true;
-
-            const width = Number(cfg.width);
-            const baseWidth = Number(cfg.hires_base_width || cfg.width);
-            if (Number.isFinite(width) && Number.isFinite(baseWidth) && baseWidth > 0 && width > baseWidth) {
-                return true;
-            }
-
-            const height = Number(cfg.height);
-            const baseHeight = Number(cfg.hires_base_height || cfg.height);
-            if (Number.isFinite(height) && Number.isFinite(baseHeight) && baseHeight > 0 && height > baseHeight) {
-                return true;
-            }
-
-            return false;
-        };
-
-        const copyPromptHandler = (item) => {
-            const cfg = item.generationConfig;
-            const keys = ['outfits', 'expression', 'action', 'context', 'quality', 'negative'];
-            const clipboardData = keys.map(key => [key, cfg[key] ? String(cfg[key]).trim() : '']);
-            this._setPromptClipboard(clipboardData);
-            showError("Prompt đã sao chép.");
-        };
-
-        const deleteHandler = async (item, close, updateItems) => {
-            if (await Yuuka.ui.confirm('Có chắc chắn muốn xóa ảnh này?')) {
-                try {
-                    await this.api.images.delete(item.id);
-                    Yuuka.events.emit('image:deleted', { imageId: item.id });
-
-                    const updatedItems = this.state.allImageData
-                        .filter(img => img.id !== item.id)
-                        .map(d => ({ ...d, imageUrl: d.url }));
-                    updateItems(updatedItems);
-                } catch (err) {
-                    showError(`Lỗi xóa: ${err.message}`);
-                }
-            }
-        };
-
-        let actionButtons;
-        if (viewerHelpers?.createActionButtons) {
-            actionButtons = viewerHelpers.createActionButtons({
-                regen: {
-                    disabled: () => isGenDisabled,
-                    onClick: (item, close) => {
-                        close();
-                        this._startGeneration(item.generationConfig);
-                    }
-                },
-                hires: {
-                    disabled: (item) => isGenDisabled || isImageHiresFn(item),
-                    onClick: (item) => this._startHiresUpscale(item)
-                },
-                copy: {
-                    onClick: copyPromptHandler
-                },
-                delete: {
-                    onClick: deleteHandler
-                }
-            });
-        } else {
-            actionButtons = [
-                {
-                    id: 'regen',
-                    icon: 'auto_awesome',
-                    title: 'Re-generate',
-                    disabled: () => isGenDisabled,
-                    onClick: (item, close) => {
-                        close();
-                        this._startGeneration(item.generationConfig);
-                    }
-                },
-                {
-                    id: 'hires',
-                    icon: 'wand_stars',
-                    title: 'Hires x2',
-                    disabled: (item) => isGenDisabled || isImageHiresFn(item),
-                    onClick: (item) => this._startHiresUpscale(item)
-                },
-                {
-                    id: 'copy',
-                    icon: 'content_copy',
-                    title: 'Copy Prompt',
-                    onClick: copyPromptHandler
-                },
-                {
-                    id: 'delete',
-                    icon: 'delete',
-                    title: 'Remove Image',
-                    onClick: deleteHandler
-                }
-            ];
-        }
-
-        this.viewer.open({
-            items: this.state.allImageData.map(d => ({ ...d, imageUrl: d.url })),
-            startIndex,
-            renderInfoPanel,
-            actionButtons
-        });
-    }
-
-    async openSettings() {
-        if (!this.state.isComfyUIAvaidable) {
-            try {
-                await this.checkComfyUIStatus();
-            } catch (err) {
-                console.warn('[Album] Failed to refresh ComfyUI status before opening settings:', err);
-            }
-        }
-        if (!this.state.isComfyUIAvaidable) { showError("ComfyUI chưa kết nối."); return; }
-        const modalApi = window.Yuuka?.plugins?.albumModal;
-        if (!modalApi || typeof modalApi.openSettingsModal !== 'function') {
-            showError('Album settings UI is not ready.');
-            return;
-        }
-        const currentClipboard = this._getPromptClipboard();
-        // Ensure settings are preloaded; if not, this will fetch once here
-        await this._preloadComfySettings();
-        await modalApi.openSettingsModal({
-            title: `Cấu hình cho ${this.state.selectedCharacter.name}`,
-            modalClass: 'plugin-album__settings-modal',
-            // Yuuka: comfyui fetch optimization v1.0
-            fetchInfo: async () => {
-                // Prefer fully preloaded settings (no network call)
-                if (this.state.cachedComfySettings) {
-                    const info = { ...this.state.cachedComfySettings };
-                    if (info.last_config && this.state.selectedCharacter) {
-                        info.last_config.character = this.state.selectedCharacter.name;
-                    }
-                    return info;
-                }
-                let finalInfo = {};
-                if (this.state.cachedComfyGlobalChoices) {
-                    const configData = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}&no_choices=true`);
-                    finalInfo = {
-                        last_config: configData.last_config,
-                        global_choices: this.state.cachedComfyGlobalChoices
-                    };
-                } else {
-                    const fullData = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}`);
-                    if (fullData.global_choices) {
-                        this.state.cachedComfyGlobalChoices = fullData.global_choices;
-                    }
-                    finalInfo = fullData;
-                }
-                // Store to preload cache for subsequent opens
-                if (finalInfo && (finalInfo.last_config || finalInfo.global_choices)) {
-                    this.state.cachedComfySettings = {
-                        last_config: finalInfo.last_config || {},
-                        global_choices: finalInfo.global_choices || this.state.cachedComfyGlobalChoices || null
-                    };
-                }
-                if (finalInfo.last_config && this.state.selectedCharacter) {
-                    finalInfo.last_config.character = this.state.selectedCharacter.name;
-                }
-                return finalInfo;
-            },
-            onSave: async (updatedConfig) => {
-                await this.api.album.post(`/${this.state.selectedCharacter.hash}/config`, updatedConfig);
-                const trimmedName = (updatedConfig.character || '').trim();
-                if (trimmedName) {
-                    updatedConfig.character = trimmedName;
-                    this.state.selectedCharacter.name = trimmedName;
-                } else if (this.state.selectedCharacter && this.state.selectedCharacter.isCustom) {
-                    this.state.selectedCharacter.name = 'Album mới';
-                    updatedConfig.character = this.state.selectedCharacter.name;
-                } else {
-                    updatedConfig.character = this.state.selectedCharacter?.name || '';
-                }
-                // Update preload cache after saving so next open is instant and up to date
-                this.state.cachedComfySettings = {
-                    last_config: { ...(this.state.cachedComfySettings?.last_config || {}), ...updatedConfig },
-                    global_choices: this.state.cachedComfyGlobalChoices || this.state.cachedComfySettings?.global_choices || null
-                };
-            },
-            onGenerate: async (updatedConfig) => {
-                await this._startGeneration(updatedConfig);
-            },
-            promptClipboard: currentClipboard,
-            getPromptClipboard: () => this._getPromptClipboard(),
-            setPromptClipboard: (value) => this._setPromptClipboard(value),
-            // Yuuka: comfyui fetch optimization v1.0
-            onConnect: async (address, btn, close) => {
-                btn.textContent = '...';
-                btn.disabled = true;
-                try {
-                    await this.api.server.checkComfyUIStatus(address);
-                    // Xóa toàn bộ cache để nạp lại từ server mới
-                    this.state.cachedComfyGlobalChoices = null;
-                    this.state.cachedComfySettings = null;
-                    close(); // Đóng modal hiện tại
-                    await this.openSettings(); // Mở lại để tải lại dữ liệu mới
-                } catch (e) {
-                    showError(`Lỗi kết nối hoặc làm mới: ${e.message}`);
-                    // Nút sẽ tự reset khi người dùng mở lại modal
-                }
-            },
-            onDelete: async () => {
-                const current = this.state.selectedCharacter;
-                if (!current?.hash) {
-                    throw new Error('Không xác định được album đang mở.');
-                }
-                await this.api.album.delete(`/${current.hash}`);
-                showError('Album đã được xóa.');
-                this.state.selectedCharacter = null;
-                this.state.allImageData = [];
-                this.state.cachedComfyGlobalChoices = null;
-                this.state.cachedComfySettings = null;
-                this.state.viewMode = 'grid';
-                await this.showCharacterSelectionGrid();
-                this._updateNav();
-            }
-        });
-    }
-
-    // Publish current selection to DOM for cross-plugin discovery
-    _syncDOMSelection() {
-        try {
-            if (!this.container) return;
-            if (this.state.viewMode === 'album' && this.state.selectedCharacter?.hash) {
-                this.container.setAttribute('data-character-hash', this.state.selectedCharacter.hash);
-                this.container.setAttribute('data-character-name', this.state.selectedCharacter.name || '');
-            } else {
-                this.container.removeAttribute('data-character-hash');
-                this.container.removeAttribute('data-character-name');
-            }
-        } catch (e) {
-            console.warn('[Album] _syncDOMSelection failed:', e);
-        }
-    }
 }
 
+window.Yuuka = window.Yuuka || {};
+window.Yuuka.components = window.Yuuka.components || {};
 window.Yuuka.components['AlbumComponent'] = AlbumComponent;
 

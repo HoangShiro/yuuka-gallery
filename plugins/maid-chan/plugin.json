@@ -29,7 +29,7 @@
       "maid_chan.js",
       "maid_chan-bootstrap.js"
     ],
-    "css": ["maid_chan.css"]
+    "css": ["maid_chan.css", "nodes.css"]
   },
   "dependencies": {
     "python": []

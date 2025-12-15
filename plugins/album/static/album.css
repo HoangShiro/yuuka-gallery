@@ -1,4 +1,43 @@
 /* --- MODIFIED FILE: plugins/album/static/album.css --- */
+.plugin-album {
+    /* Prevent accidental horizontal overflow in character mode */
+    overflow-x: hidden;
+}
+
+.plugin-album__content-area {
+    overflow-x: hidden;
+}
+
+/* Character view: make [hidden] authoritative for layer images.
+   Global CSS sets img { display: block; } (author origin) which overrides the UA [hidden] rule.
+   Without this, empty/error images can show a broken-image icon + default border. */
+.plugin-album__character-layer[hidden] {
+    display: none !important;
+}
+
+/* In character view: render as an overlay to avoid page-level vertical scrolling.
+   Body uses padding-bottom: 100px for bottom nav, so keep that space. */
+.plugin-album.plugin-album--character {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 100px;
+    z-index: 50;
+}
+
+.plugin-album.plugin-album--character .plugin-album__content-area {
+    height: 100%;
+    overflow: hidden;
+}
+
+@media (max-width: 600px) {
+    /* On narrow screens, reclaim ~one button height so the menu sits closer to the bottom.
+       Default is bottom: 100px (space for bottom nav); 100 - 44 = 56px. */
+    .plugin-album.plugin-album--character {
+        bottom: 56px;
+    }
+}
 .plugin-album__grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -210,13 +249,13 @@
     color: var(--color-primary-text);
     padding: var(--spacing-5);
     border-radius: var(--rounded-lg);
+    overflow: hidden;
     max-width: 1920px;
     width: 100%;
     height: 100%;
     position: relative;
     padding-bottom: 90px; /* Thêm không gian cho thanh action nổi */
 }
-
 .plugin-album__settings-modal .modal-dialog h3 {
     margin-top: 0;
     padding-bottom: var(--spacing-3);
@@ -232,6 +271,30 @@
 
 .plugin-album__settings-modal .form-group { margin-bottom: 15px; }
 .plugin-album__settings-modal .form-group label { display: block; font-weight: 500; margin-bottom: 5px; }
+
+/* Keep the android-like toggle row horizontal inside settings modal */
+.plugin-album__settings-modal .form-group label.plugin-album__android-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 0;
+}
+
+/* Character-view configs: dedicated block without card-like chrome */
+.plugin-album__settings-modal .plugin-album__character-mode-block {
+    margin-top: var(--spacing-3);
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+}
+
+.plugin-album__settings-modal .plugin-album__character-mode-title {
+    margin-bottom: var(--spacing-2);
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-primary-text);
+}
 .plugin-album__settings-modal .form-group input[type="text"], 
 .plugin-album__settings-modal .form-group input[type="number"], 
 .plugin-album__settings-modal .form-group select, 
@@ -257,6 +320,944 @@
 }
 .plugin-album__settings-modal .input-with-button button:hover {
     background-color: var(--color-border);
+}
+
+/* ------------------------------ */
+/* Character view (viewMode=character) */
+/* ------------------------------ */
+.plugin-album__character-view {
+    position: relative;
+    width: 100%;
+    /* Fill available plugin area without forcing viewport scroll */
+    height: 100%;
+    min-height: 0;
+    background: var(--color-primary-bg);
+    overflow: hidden;
+    border-radius: var(--rounded-md);
+}
+
+.plugin-album__character-layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    /* Default: layers should not block clicks unless explicitly enabled */
+    pointer-events: none;
+}
+
+.plugin-album__character-layer--bg {
+    z-index: 1;
+    /* Background should never capture clicks */
+    pointer-events: none;
+}
+
+.plugin-album__character-layer--char {
+    z-index: 2;
+    cursor: pointer;
+    /* Do NOT span full width/height hitbox; center and size to the image */
+    inset: auto;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: auto;
+    height: 100%;
+    max-width: 100%;
+    object-fit: contain;
+    object-position: center;
+    transform: translateX(-50%);
+    pointer-events: auto;
+}
+
+/* VN mode: on narrow screens, allow overflow width (crop) but do not allow horizontal scrolling. */
+@media (max-width: 600px) {
+    .plugin-album__character-view--vn {
+        overflow-x: hidden;
+        overflow-y: hidden;
+        overscroll-behavior-x: none;
+        touch-action: pan-y;
+    }
+    .plugin-album__character-view--vn .plugin-album__character-layer--char {
+        max-width: none;
+    }
+}
+
+/* VN mode: on wide screens, fade character layer near left/right edges.
+   Keep a large solid center region to avoid over-fading the image. */
+@media (min-width: 601px) {
+    .plugin-album__character-view--vn .plugin-album__character-layer--char {
+        /* 0% opacity at edges, full opacity in center band */
+        -webkit-mask-image: linear-gradient(to right,
+            transparent 0%,
+            #000 12%,
+            #000 88%,
+            transparent 100%
+        );
+        mask-image: linear-gradient(to right,
+            transparent 0%,
+            #000 12%,
+            #000 88%,
+            transparent 100%
+        );
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-size: 100% 100%;
+        mask-size: 100% 100%;
+    }
+}
+
+.plugin-album__character-empty {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-secondary-text);
+    text-align: center;
+    padding: var(--spacing-6);
+    background: color-mix(in srgb, var(--color-primary-bg) 80%, transparent);
+}
+
+.plugin-album__character-empty[hidden] {
+    display: none !important;
+}
+
+/* VN mode: optional background blur (toggled via Settings → Character mode) */
+.plugin-album__character-view--vn.plugin-album__character-view--vn-blur-bg .plugin-album__character-layer--bg {
+    filter: blur(4px);
+}
+
+.plugin-album__character-menu {
+    position: absolute;
+    right: var(--spacing-4);
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    /* Keep Preset + mode button aligned to the right edge */
+    align-items: flex-end;
+}
+
+/* Category buttons must be 1-column vertical stack */
+.plugin-album__character-menu-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    /* Right align so labeled buttons expand left without shifting the stack */
+    align-items: flex-end;
+}
+
+/* Ensure the HTML `hidden` attribute reliably hides menu items */
+.plugin-album__character-menu-buttons[hidden] {
+    display: none !important;
+}
+
+.plugin-album__character-menu-btn[hidden] {
+    display: none !important;
+}
+
+.plugin-album__character-menu-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--rounded-full);
+    border: none;
+    /* More transparent background */
+    background: color-mix(in srgb, var(--color-card-bg) 35%, transparent);
+    color: var(--color-primary-text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Labeled category buttons (mode 2/3): text + icon (icon on the right) */
+.plugin-album__character-menu-btn--labeled {
+    width: auto;
+    min-width: 44px;
+    padding: 0 var(--spacing-3);
+    justify-content: space-between;
+    gap: var(--spacing-2);
+}
+
+.plugin-album__character-menu-btn-label {
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.plugin-album__character-menu-btn-label:empty {
+    display: none;
+}
+
+.plugin-album__character-menu-btn:hover {
+    background: color-mix(in srgb, var(--color-card-bg) 55%, transparent);
+}
+
+.plugin-album__character-menu-btn.is-active {
+    background: var(--color-accent);
+    color: white;
+}
+
+/* Menu-bar mode 4 (counter_4 / menuBarMode === 3):
+   Keep the category button stack in-flow to avoid menu recentring on wide screens,
+   but make category buttons visually disappear.
+   Interactions are disabled in JS via `disabled` to avoid accidental clicks. */
+.plugin-album__character-menu.is-menubar-mode-3 .plugin-album__character-menu-buttons .plugin-album__character-menu-btn {
+    opacity: 0 !important;
+}
+
+/* Make the category column click-through in mode 4.
+   This prevents hover cursor changes and lets clicks reach the image layer behind. */
+.plugin-album__character-menu.is-menubar-mode-3 .plugin-album__character-menu-buttons {
+    pointer-events: none;
+}
+
+/* Character view: main-menu generation progress indicator
+   A thin right-edge bar (like a scrollbar), independent from the menu buttons. */
+.plugin-album__character-progressbar {
+    position: absolute;
+    top: var(--album-mainmenu-top, var(--spacing-3));
+    height: var(--album-mainmenu-height, calc(100% - (var(--spacing-3) * 2)));
+    right: var(--spacing-1);
+    width: 6px;
+    pointer-events: none;
+    z-index: 12;
+
+    border-radius: var(--rounded-full);
+    overflow: hidden;
+    background: color-mix(in srgb, var(--color-border) 55%, transparent);
+}
+
+.plugin-album__character-progressbar-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(var(--album-menu-progress, 0) * 1%);
+
+    /* Smooth progress like preset/category items */
+    transition: height 220ms ease;
+    will-change: height;
+
+    background-image: linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--color-accent) 60%, transparent),
+        color-mix(in srgb, var(--color-accent) 35%, transparent),
+        color-mix(in srgb, var(--color-accent) 60%, transparent)
+    );
+    background-size: 100% 200%;
+    animation: plugin-album__menu-fill-shimmer 2.4s linear infinite;
+}
+
+@keyframes plugin-album__menu-fill-shimmer {
+    0% { background-position: 50% 100%; }
+    100% { background-position: 50% -100%; }
+}
+
+/* When auto tasks are running, use a muted gray shimmer instead of accent */
+.plugin-album__character-progressbar.is-auto-generating .plugin-album__character-progressbar-fill {
+    background-image: linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--color-secondary-text) 45%, transparent),
+        color-mix(in srgb, var(--color-secondary-text) 25%, transparent),
+        color-mix(in srgb, var(--color-secondary-text) 45%, transparent)
+    );
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .plugin-album__character-progressbar-fill {
+        animation: none;
+    }
+}
+
+.plugin-album__character-submenu {
+    z-index: 3;
+}
+
+.plugin-album__character-submenu {
+    position: absolute;
+    right: calc(var(--album-char-menu-offset, 44px) + var(--spacing-3));
+    top: 50%;
+    transform: translateY(-50%);
+    width: min(320px, 70vw);
+    max-height: min(520px, 70vh);
+    overflow: hidden;
+    /* Remove background/card look */
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    display: flex;
+    flex-direction: column;
+
+    /* Shared selected background for submenu items (preset + category) */
+    --album-submenu-selected-bg: color-mix(in srgb, var(--color-accent) 55%, black);
+}
+
+/* Submenu: fixed toolbar + scrollable list area */
+.plugin-album__character-submenu-toolbar {
+    flex: none;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-1);
+}
+
+.plugin-album__character-submenu-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* IMPORTANT: ensure submenu is truly hidden by default, and only shown when JS removes [hidden] */
+.plugin-album__character-submenu[hidden] {
+    display: none !important;
+}
+
+/* Mobile: keep menu near bottom-right for easier reach */
+@media (max-width: 600px) {
+    .plugin-album__character-menu {
+        top: auto;
+        bottom: var(--spacing-2);
+        right: var(--spacing-2);
+        transform: none;
+    }
+
+    .plugin-album__character-submenu {
+        /* On narrow screens, anchor submenu to the icon position (do not shift by labeled modes) */
+        right: calc(44px + var(--spacing-3));
+        top: auto;
+        bottom: var(--spacing-2);
+        transform: none;
+        /* Compact height: list area shows at most ~5 items */
+        max-height: none;
+        width: min(320px, 78vw);
+    }
+
+    .plugin-album__character-submenu-scroll {
+        /* 5 rows + 4 gaps + a bit of padding; keep toolbar outside of this limit */
+        max-height: calc((44px * 5) + (var(--spacing-1) * 4) + var(--spacing-2));
+    }
+}
+
+.plugin-album__character-submenu-list {
+    padding: 0 0 var(--spacing-2) 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-1);
+}
+
+/* Submenu toolbar row (add group + edit category icon) */
+.plugin-album__character-submenu-row--toolbar {
+    justify-content: flex-start;
+    gap: var(--spacing-1);
+    background: color-mix(in srgb, var(--color-card-bg) 22%, transparent);
+}
+
+.plugin-album__character-submenu-row--toolbar:hover {
+    background: color-mix(in srgb, var(--color-card-bg) 34%, transparent);
+}
+
+/* Spacer for categories without the left "edit" button (keeps columns aligned) */
+.plugin-album__character-submenu-toolbar-spacer {
+    width: 28px;
+    height: 28px;
+    display: inline-block;
+}
+
+/* Toolbar "None" selection button */
+.plugin-album__character-submenu-nonebtn {
+    border-radius: var(--rounded-md);
+    margin-left: var(--spacing-1);
+}
+
+.plugin-album__character-submenu-nonebtn:hover {
+    background: color-mix(in srgb, var(--color-card-bg) 55%, transparent);
+}
+
+.plugin-album__character-submenu-nonebtn.is-selected {
+    background: var(--album-submenu-selected-bg);
+    color: white;
+}
+
+/* Tag-group row (drag handle + edit + name) */
+.plugin-album__character-submenu-row {
+    border: transparent;
+    background: color-mix(in srgb, var(--color-primary-bg) 55%, transparent);
+    color: var(--color-primary-text);
+    border-radius: var(--rounded-md);
+    padding: var(--spacing-1) var(--spacing-2);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    position: relative;
+    overflow: hidden;
+}
+
+/* Category submenu: show generation progress fill like preset items */
+.plugin-album__character-submenu-row.is-generating::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: calc(var(--album-preset-progress, 0) * 1%);
+    background: color-mix(in srgb, var(--color-accent) 26%, transparent);
+    transition: width 0.25s ease;
+    pointer-events: none;
+    border-radius: inherit;
+    z-index: 0;
+}
+
+.plugin-album__character-submenu-row.is-generating > * {
+    position: relative;
+    z-index: 1;
+}
+
+.plugin-album__character-submenu-row:hover {
+    background: color-mix(in srgb, var(--color-border) 55%, transparent);
+}
+
+.plugin-album__character-submenu-row.is-selected {
+    border-color: transparent;
+    background: var(--album-submenu-selected-bg);
+    color: white;
+}
+
+.plugin-album__character-submenu-row.is-external {
+    opacity: 0.9;
+}
+
+/* "None" option row */
+.plugin-album__character-submenu-row--none {
+    opacity: 0.95;
+}
+
+.plugin-album__character-submenu-iconbtn {
+    border: none;
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--rounded-md);
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+.plugin-album__character-submenu-row:hover .plugin-album__character-submenu-iconbtn,
+.plugin-album__character-submenu-row.is-selected .plugin-album__character-submenu-iconbtn {
+    opacity: 1;
+}
+
+.plugin-album__character-submenu-iconbtn .material-symbols-outlined {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.plugin-album__character-submenu-drag {
+    cursor: grab;
+}
+
+.plugin-album__character-submenu-name {
+    border: none;
+    background: transparent;
+    color: inherit;
+    padding: 0 var(--spacing-1);
+    margin-left: var(--spacing-1);
+    text-align: left;
+    flex: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    font-size: 0.95em;
+}
+
+/* Fade group name when no images exist yet for that selection */
+.plugin-album__character-submenu-row.is-empty .plugin-album__character-submenu-name {
+    opacity: 0.6;
+}
+
+.plugin-album__character-submenu-row.is-empty.is-selected .plugin-album__character-submenu-name {
+    opacity: 1;
+}
+
+.plugin-album__character-submenu-row--add {
+    justify-content: center;
+}
+
+.plugin-album__character-submenu-addbtn {
+    border: none;
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.plugin-album__character-submenu-item {
+    border: 1px solid var(--color-border);
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    border-radius: var(--rounded-md);
+    padding: var(--spacing-2) var(--spacing-3);
+    cursor: grab;
+    text-align: left;
+    opacity: 0.9;
+    position: relative;
+    min-height: 44px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Preset submenu: blurred thumbnail background for presets that already have images */
+.plugin-album__character-submenu-item.has-bg {
+    overflow: hidden;
+    isolation: isolate;
+}
+
+/* Keep normal background for selected state; otherwise let the thumbnail show through */
+.plugin-album__character-submenu-item.has-bg:not(.is-selected) {
+    background: transparent;
+}
+
+.plugin-album__character-submenu-item.has-bg:not(.is-selected):hover::after {
+    background: color-mix(in srgb, var(--color-primary-bg) 40%, transparent);
+}
+
+.plugin-album__character-submenu-item.has-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--album-preset-bg);
+    background-size: cover;
+    background-position: center;
+    filter: blur(3px);
+    transform: scale(1.08);
+    opacity: 0.40;
+    z-index: -2;
+    pointer-events: none;
+}
+
+.plugin-album__character-submenu-item.has-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--color-primary-bg) 60%, transparent);
+    z-index: -1;
+    pointer-events: none;
+}
+
+/* Preset submenu items: no border color (remove borders entirely) */
+.plugin-album__character-submenu[data-menu="Preset"] .plugin-album__character-submenu-item {
+    border: none;
+}
+
+.plugin-album__character-submenu[data-menu="Preset"] .plugin-album__character-submenu-item.is-selected {
+    border-color: transparent;
+}
+
+/* Preset submenu: saved preset rows are intentionally more compact than auto-suggest */
+.plugin-album__character-submenu-item--saved {
+    padding: var(--spacing-1) var(--spacing-3);
+    min-height: 36px;
+}
+
+/* Auto-suggest preset: use an inner wrapper to avoid clipping the pill layout */
+.plugin-album__character-submenu-item--autosuggest {
+    padding: 0;
+    min-height: auto;
+}
+
+.plugin-album__character-preset-item-inner {
+    position: relative;
+    border-radius: inherit;
+    padding: var(--spacing-2) var(--spacing-3);
+    min-height: 44px;
+}
+
+/* Preset submenu: show per-preset task progress as a left->right fill (on the inner wrapper) */
+.plugin-album__character-submenu-item.is-generating .plugin-album__character-preset-item-inner::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: calc(var(--album-preset-progress, 0) * 1%);
+    background: color-mix(in srgb, var(--color-accent) 26%, transparent);
+    transition: width 0.25s ease;
+    pointer-events: none;
+    border-radius: inherit;
+    z-index: 0;
+}
+.plugin-album__character-submenu-item.sortable-ghost {
+    opacity: 0.35;
+}
+
+.plugin-album__character-submenu-item.sortable-chosen {
+    opacity: 0.8;
+}
+
+.plugin-album__character-submenu-row.sortable-ghost {
+    opacity: 0.35;
+}
+
+.plugin-album__character-submenu-row.sortable-chosen {
+    opacity: 0.8;
+}
+
+.plugin-album__character-submenu-item:hover {
+    background: var(--color-border);
+}
+
+.plugin-album__character-submenu-item.is-selected {
+    background: var(--album-submenu-selected-bg);
+    color: white;
+    border-color: transparent;
+}
+
+/* Keep selected background stable on hover */
+.plugin-album__character-submenu-item.is-selected:hover {
+    background: var(--album-submenu-selected-bg);
+}
+
+/* Character preset (auto-suggest) tag-group pills */
+.plugin-album__character-preset-pillwrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-1);
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    position: relative;
+    z-index: 1;
+}
+
+.plugin-album__character-preset-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--spacing-1) var(--spacing-2);
+    border: none;
+    border-radius: var(--rounded-md);
+    background: color-mix(in srgb, var(--color-border) 70%, var(--color-primary-bg));
+    color: var(--color-primary-text);
+    opacity: 0.95;
+    white-space: nowrap;
+}
+
+/* When JS applies a category tint, keep text readable */
+.plugin-album__character-preset-pill.is-tinted {
+    color: white;
+}
+
+.plugin-album__character-submenu-item--add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+/* Character modals (tag group / preset) */
+.plugin-album__character-modal.modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1750;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.2s;
+}
+
+/* Character modal: Main menu mode edit (auto-save) */
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-3);
+    margin-top: var(--spacing-3);
+}
+
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-3);
+    padding: var(--spacing-2) 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-row:last-child {
+    border-bottom: none;
+}
+
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-row-title {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-primary-text);
+    white-space: nowrap;
+}
+
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-row-buttons {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    flex-wrap: nowrap;
+}
+
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-iconbtn {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--rounded-md);
+    border: none;
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-iconbtn:hover {
+    background: var(--color-border);
+}
+
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-iconbtn.is-selected {
+    background: color-mix(in srgb, var(--color-accent) 18%, var(--color-primary-bg));
+}
+
+/* Icon picker grid (category icon selection) */
+.plugin-album__icon-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    gap: var(--spacing-2);
+}
+
+.plugin-album__icon-choice {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.plugin-album__icon-choice:hover {
+    background: var(--color-border);
+}
+
+.plugin-album__icon-choice.is-selected {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 18%, var(--color-primary-bg));
+}
+
+/* Color picker grid (category icon color selection) */
+.plugin-album__color-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+    gap: var(--spacing-2);
+}
+
+.plugin-album__color-choice {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-primary-bg);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.plugin-album__color-choice:hover {
+    background: var(--color-border);
+}
+
+.plugin-album__color-choice.is-selected {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 18%, var(--color-primary-bg));
+}
+
+.plugin-album__color-icon-preview {
+    font-size: 24px;
+    line-height: 1;
+}
+
+.plugin-album__color-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--rounded-full);
+    border: 1px solid color-mix(in srgb, var(--color-primary-text) 12%, transparent);
+}
+
+/* Category reorder modal */
+.plugin-album__category-reorder-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-1);
+    margin-top: var(--spacing-3);
+    max-height: min(520px, 60vh);
+    overflow: auto;
+}
+
+.plugin-album__category-reorder-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-3);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    border: 1px solid var(--color-border);
+}
+
+.plugin-album__category-reorder-handle {
+    border: none;
+    background: transparent;
+    color: var(--color-secondary-text);
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    border-radius: var(--rounded-md);
+}
+
+.plugin-album__category-reorder-handle:hover {
+    background: var(--color-border);
+    color: var(--color-primary-text);
+}
+
+.plugin-album__category-reorder-icon {
+    font-size: 20px;
+    color: var(--color-primary-text);
+}
+
+.plugin-album__category-reorder-name {
+    color: var(--color-primary-text);
+    font-weight: var(--font-weight-medium);
+}
+
+.plugin-album__character-modal .modal-dialog {
+    background: var(--color-card-bg);
+    color: var(--color-primary-text);
+    padding: var(--spacing-5);
+    border-radius: var(--rounded-lg);
+    width: min(720px, 92vw);
+    max-height: 90vh;
+    overflow: auto;
+}
+
+.plugin-album__character-modal .modal-dialog h3 {
+    margin-top: 0;
+    padding-bottom: var(--spacing-3);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.plugin-album__character-modal .form-group {
+    margin-bottom: var(--spacing-3);
+}
+
+.plugin-album__character-modal .form-group label {
+    display: block;
+    font-weight: var(--font-weight-medium);
+    margin-bottom: var(--spacing-2);
+}
+
+.plugin-album__character-modal input[type="text"],
+.plugin-album__character-modal textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 1em;
+    background-color: var(--color-primary-bg);
+    color: var(--color-primary-text);
+}
+
+.plugin-album__character-modal textarea {
+    resize: none;
+    overflow-y: hidden;
+}
+
+/* Character modal actions (tag group / category / preset editors) */
+.plugin-album__character-modal .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--spacing-3);
+    margin-top: var(--spacing-4);
+}
+
+.plugin-album__character-modal .modal-actions button {
+    border-radius: var(--rounded-md);
+    border: none;
+    cursor: pointer;
+    font-weight: var(--font-weight-medium);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-2);
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    background: var(--color-border);
+    color: var(--color-primary-text);
+}
+
+.plugin-album__character-modal .modal-actions button:hover {
+    filter: brightness(1.05);
+}
+
+.plugin-album__character-modal .modal-actions #btn-save {
+    background: var(--color-accent);
+    color: white;
+}
+
+.plugin-album__character-modal .modal-actions #btn-cancel {
+    background: var(--color-border);
+    color: var(--color-primary-text);
+}
+
+.plugin-album__character-modal .modal-actions .btn-secondary {
+    background: transparent;
+    color: var(--color-secondary-text);
+}
+
+.plugin-album__character-modal .modal-actions .btn-secondary:hover {
+    background-color: var(--color-border);
+    filter: none;
+}
+
+.plugin-album__character-modal .modal-actions .btn-danger {
+    background: transparent;
+    color: #d14343;
+}
+
+.plugin-album__character-modal .modal-actions .btn-danger:hover {
+    background: #d14343;
+    color: #fff;
+    filter: none;
 }
 
 
@@ -489,6 +1490,103 @@
 .plugin-album__settings-modal .lora-tag-toggle:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
+}
+
+/* Android-like toggle for character auto task setting */
+.plugin-album__settings-modal .plugin-album__android-toggle-row {
+    margin-top: var(--spacing-2);
+}
+
+.plugin-album__android-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--color-primary-text);
+}
+
+.plugin-album__android-toggle input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    pointer-events: none;
+}
+
+.plugin-album__android-toggle__track {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    border-radius: var(--rounded-full);
+    background: var(--color-border);
+    transition: background 0.2s ease;
+    flex: 0 0 auto;
+}
+
+.plugin-album__android-toggle__track::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--color-primary-bg);
+    box-shadow: 0 6px 14px -10px var(--color-shadow);
+    transition: transform 0.2s ease;
+}
+
+.plugin-album__android-toggle input[type="checkbox"]:checked + .plugin-album__android-toggle__track {
+    background: var(--color-accent);
+}
+
+.plugin-album__android-toggle input[type="checkbox"]:checked + .plugin-album__android-toggle__track::after {
+    transform: translateX(20px);
+}
+
+.plugin-album__android-toggle input[type="checkbox"]:focus-visible + .plugin-album__android-toggle__track {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+.plugin-album__android-toggle__text {
+    font-size: var(--font-size-sm);
+    color: var(--color-primary-text);
+}
+
+/* Compact variant (used in character submenu) */
+.plugin-album__android-toggle.plugin-album__android-toggle--compact .plugin-album__android-toggle__track {
+    width: 40px;
+    height: 22px;
+}
+
+.plugin-album__android-toggle.plugin-album__android-toggle--compact .plugin-album__android-toggle__track::after {
+    width: 16px;
+    height: 16px;
+    top: 3px;
+    left: 3px;
+}
+
+.plugin-album__android-toggle.plugin-album__android-toggle--compact input[type="checkbox"]:checked + .plugin-album__android-toggle__track::after {
+    transform: translateX(18px);
+}
+
+/* Character submenu: category auto toggle row */
+.plugin-album__character-submenu-row--auto-toggle {
+    justify-content: space-between;
+    background: color-mix(in srgb, var(--color-card-bg) 35%, transparent);
+}
+
+.plugin-album__character-submenu-row--auto-toggle:hover {
+    background: color-mix(in srgb, var(--color-card-bg) 55%, transparent);
+}
+
+.plugin-album__character-submenu-auto-label {
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    padding-left: var(--spacing-1);
 }
 
 .plugin-album__settings-modal.is-mobile .modal-dialog > h3 {

@@ -26,7 +26,7 @@ class ImageService:
             sanitized[key] = value.strip() if isinstance(value, str) else value
         return sanitized
 
-    def save_image_metadata(self, user_hash, character_hash, image_base64, generation_config, creation_time=None):
+    def save_image_metadata(self, user_hash, character_hash, image_base64, generation_config, creation_time=None, alpha: bool = False):
         """Lưu metadata ảnh, tự tạo preview và trả về object metadata mới."""
         all_images = self.data_manager.read_json(self.IMAGE_DATA_FILENAME, obfuscated=True)
         user_images = all_images.setdefault(user_hash, {})
@@ -140,7 +140,8 @@ class ImageService:
                 "pv_url": f"/user_image/pv_imgs/{filename}", # Yuuka: new image paths v1.0
                 "generationConfig": sanitized_config,
                 "createdAt": int(time.time()),
-                "character_hash": character_hash
+                "character_hash": character_hash,
+                "Alpha": _to_bool(alpha),
             }
             if creation_time is not None:
                 new_metadata["creationTime"] = round(creation_time, 2)
@@ -167,6 +168,10 @@ class ImageService:
                 if 'pv_url' not in img:
                     img['pv_url'] = img['url']
                     data_was_modified = True
+                # Yuuka: Alpha images v1.0 - Ảnh cũ không có key này mặc định False
+                if 'Alpha' not in img:
+                    img['Alpha'] = False
+                    data_was_modified = True
         
         if data_was_modified:
             self.data_manager.save_json(all_images_data, self.IMAGE_DATA_FILENAME, obfuscated=True)
@@ -188,6 +193,10 @@ class ImageService:
                 # Yuuka: new image paths v1.0 - Thêm pv_url fallback cho ảnh cũ
                 if 'pv_url' not in img:
                     img['pv_url'] = img['url']
+                    data_was_modified = True
+                # Yuuka: Alpha images v1.0 - Ảnh cũ không có key này mặc định False
+                if 'Alpha' not in img:
+                    img['Alpha'] = False
                     data_was_modified = True
 
         if data_was_modified:

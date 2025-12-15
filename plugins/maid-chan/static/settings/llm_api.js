@@ -38,6 +38,8 @@
 
     const providerSelect = root.querySelector('.maid-chan-llm-provider');
     const apiKeyInput = root.querySelector('.maid-chan-llm-apikey');
+    const endpointRow = root.querySelector('.maid-chan-llm-endpoint-row');
+    const endpointInput = root.querySelector('.maid-chan-llm-endpoint');
     const connectBtn = root.querySelector('.maid-chan-llm-connect');
     const statusEl = root.querySelector('.maid-chan-llm-status');
     const modelsSelect = root.querySelector('.maid-chan-llm-models');
@@ -57,9 +59,49 @@
     };
 
     const setLoading = (isLoading)=>{
-      if(connectBtn){ connectBtn.disabled = !!isLoading; }
+      if(connectBtn){
+        if(isLoading){ connectBtn.disabled = true; }
+        else { syncConnectState(); }
+      }
       if(modelsSelect){ modelsSelect.disabled = !!isLoading || !modelsSelect.options.length; }
       root.classList.toggle('maid-chan-llm-loading', !!isLoading);
+    };
+
+    const providerRequiresKey = (p)=> String(p||'').toLowerCase() !== 'lmstudio';
+
+    const syncEndpointVisibility = ()=>{
+      const provider = providerSelect ? providerSelect.value : 'openai';
+      const isLM = provider === 'lmstudio';
+      if(endpointRow){ endpointRow.classList.toggle('is-hidden', !isLM); }
+      if(isLM && endpointInput && !endpointInput.value.trim()){
+        const saved = loadConfig();
+        endpointInput.value = saved.endpoint || 'http://127.0.0.1:1234';
+      }
+    };
+
+    const normalizeLmBaseUrl = (raw)=>{
+      try{
+        let u = String(raw || '').trim();
+        if(!u) return '';
+        // Strip trailing slashes
+        u = u.replace(/\/$/, '');
+        // Remove accidental /v1 or /models suffixes; we will add /v1
+        u = u.replace(/\/v1\/?$/i, '');
+        u = u.replace(/\/models\/?$/i, '');
+        return `${u}/v1`;
+      }catch(_e){ return raw; }
+    };
+
+    const syncConnectState = ()=>{
+      const provider = providerSelect ? providerSelect.value : 'openai';
+      const needsKey = providerRequiresKey(provider);
+      if(connectBtn){
+        if(needsKey){
+          connectBtn.disabled = !(apiKeyInput && apiKeyInput.value.trim());
+        }else{
+          connectBtn.disabled = false;
+        }
+      }
     };
 
     const syncSlidersToConfig = ()=>{
@@ -86,8 +128,11 @@
       const c = loadConfig();
       if(providerSelect && c.provider){ providerSelect.value = c.provider; }
       if(apiKeyInput && c.api_key){ apiKeyInput.value = c.api_key; }
+      if(endpointInput && c.endpoint){ endpointInput.value = c.endpoint; }
       if(modelsSelect && c.model){ modelsSelect.dataset.selectedModel = c.model; }
       syncSlidersToConfig();
+      syncEndpointVisibility();
+      syncConnectState();
     };
 
     if(apiKeyInput){
@@ -95,15 +140,26 @@
         const cfg = loadConfig();
         cfg.api_key = apiKeyInput.value.trim();
         saveConfig(cfg);
-        if(connectBtn){ connectBtn.disabled = !apiKeyInput.value.trim(); }
+        syncConnectState();
       });
-      if(connectBtn){ connectBtn.disabled = !apiKeyInput.value.trim(); }
+      syncConnectState();
     }
 
     if(providerSelect){
       providerSelect.addEventListener('change', ()=>{
         const cfg = loadConfig();
         cfg.provider = providerSelect.value;
+        saveConfig(cfg);
+        syncEndpointVisibility();
+        syncConnectState();
+      });
+    }
+
+    if(endpointInput){
+      endpointInput.addEventListener('input', ()=>{
+        const cfg = loadConfig();
+        const val = endpointInput.value.trim();
+        cfg.endpoint = (providerSelect && providerSelect.value === 'lmstudio') ? normalizeLmBaseUrl(val) : val;
         saveConfig(cfg);
       });
     }
@@ -114,6 +170,20 @@
 
     async function fetchModels(provider, apiKey){
       const payload = { provider, api_key: apiKey || null };
+
+      // Allow LM Studio to operate without an API key by sending a placeholder
+      if(provider === 'lmstudio' && !payload.api_key){
+        payload.api_key = 'lm-studio';
+      }
+
+      const overrides = {};
+      if(provider === 'lmstudio' && endpointInput){
+        const ep = endpointInput.value.trim();
+        if(ep){ overrides.base_url = normalizeLmBaseUrl(ep); }
+      }
+      if(Object.keys(overrides).length){
+        payload.overrides = overrides;
+      }
 
       try{
         // Ưu tiên dùng coreApi từ namespace plugin, fallback sang window.api / global api
@@ -187,7 +257,11 @@
       connectBtn.addEventListener('click', async ()=>{
         const provider = providerSelect ? providerSelect.value : 'openai';
         const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
-        if(!apiKey){ setStatus('Please enter an API key first.', true); return; }
+        if(providerRequiresKey(provider) && !apiKey){ setStatus('Please enter an API key first.', true); return; }
+        if(provider === 'lmstudio' && endpointInput && !endpointInput.value.trim()){
+          setStatus('Please enter LM Studio IP / Base URL.', true);
+          return;
+        }
         setStatus('Connecting…');
         setLoading(true);
         try{
@@ -196,6 +270,7 @@
           const cfg = loadConfig();
           cfg.provider = provider;
           cfg.api_key = apiKey;
+          if(endpointInput){ cfg.endpoint = endpointInput.value.trim(); }
           if(modelsSelect && modelsSelect.value){
             cfg.model = modelsSelect.value; // auto-save currently selected model
           }

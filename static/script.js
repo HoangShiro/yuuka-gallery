@@ -319,6 +319,16 @@ function showError(message) {
 // Expose for plugins
 window.showError = showError;
 
+// Success notifier for plugins (kept intentionally simple: reuses the same popup)
+function showSuccess(message) {
+    try {
+        showError(message);
+    } catch (e) {
+        try { alert(message); } catch { }
+    }
+}
+window.showSuccess = showSuccess;
+
 // Auth UI removed; managed by AuthPluginComponent
 
 async function switchTab(tabName) {

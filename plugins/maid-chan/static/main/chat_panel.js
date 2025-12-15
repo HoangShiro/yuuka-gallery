@@ -141,6 +141,74 @@
       loadingAssistant: null // { el, startedAt, timerId, timeoutId }
     };
 
+    // --- Helpers for image rendering in chat ---
+    const renderContentWithImages = (container, text) => {
+      container.innerHTML = '';
+      if(!text) return;
+      const regex = /(\[IMG\]\([^)]+\))/gi;
+      const parts = text.split(regex);
+      parts.forEach(part => {
+        if(!part) return;
+        const match = part.match(/^\[IMG\]\(([^)]+)\)$/i);
+        if(match){
+          const url = match[1];
+          const img = document.createElement('img');
+          img.src = url;
+          img.dataset.originalUrl = url;
+          img.className = 'maid-chat-inline-img';
+          img.style.maxWidth = '100%';
+          img.style.display = 'block';
+          img.style.margin = '1em 0';
+          img.style.borderRadius = '4px';
+          img.contentEditable = 'false';
+          
+          img.addEventListener('mousedown', (e)=>{
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            if(window.Yuuka && window.Yuuka.plugins && window.Yuuka.plugins.simpleViewer){
+              window.Yuuka.plugins.simpleViewer.open({
+                items: [{ imageUrl: url }],
+                startIndex: 0
+              });
+            }
+          });
+
+          container.appendChild(img);
+        } else {
+          container.appendChild(document.createTextNode(part));
+        }
+      });
+    };
+
+    const serializeContentWithImages = (container) => {
+      let text = '';
+      container.childNodes.forEach(node => {
+        if(node.nodeType === Node.TEXT_NODE){
+          text += node.textContent;
+        } else if(node.nodeType === Node.ELEMENT_NODE){
+          if(node.tagName === 'IMG' && node.dataset.originalUrl){
+            text += `[IMG](${node.dataset.originalUrl})`;
+          } else if(node.tagName === 'BR'){
+            text += '\n';
+          } else {
+            // Recurse for other elements
+            const inner = serializeContentWithImages(node);
+            // If block element, prepend newline
+            if(['DIV','P','LI','H1','H2','H3','H4','H5','H6','BLOCKQUOTE'].includes(node.tagName)){
+              text += '\n' + inner;
+            } else {
+              text += inner;
+            }
+          }
+        } else {
+          text += node.textContent;
+        }
+      });
+      return text;
+    };
+    // -------------------------------------------
+
     const getMaidTitle = ()=>{
       let title = 'Maid-chan';
       try{
@@ -946,13 +1014,22 @@
         ? snap.entries[snap.activeIndex]
         : (msg.text || '')) || '';
 
-      body.textContent = displayText;
+      renderContentWithImages(body, displayText);
       body.contentEditable = (msg.role === 'assistant' || msg.role === 'user') ? 'true' : 'false';
       body.spellcheck = false;
+      body.style.whiteSpace = 'pre-wrap';
+
+      // Switch to raw text on focus for editing
+      body.addEventListener('focus', ()=>{
+        const rawText = serializeContentWithImages(body);
+        body.textContent = rawText;
+      });
 
       // Auto-save on blur (edit logic)
       body.addEventListener('blur', ()=>{
-        const newText = (body.textContent || '').trim();
+        const newText = serializeContentWithImages(body).trim();
+        renderContentWithImages(body, newText);
+
         const target = state.messages.find(m => m.id === msg.id);
         if(!target) return;
 
@@ -997,7 +1074,7 @@
             const displayTextState = (snapState && Array.isArray(snapState.entries) && typeof snapState.activeIndex === 'number'
               ? snapState.entries[snapState.activeIndex]
               : msg.text) || '';
-            body.textContent = displayTextState;
+            renderContentWithImages(body, displayTextState);
 
             if(snapState && typeof snapState.activeIndex === 'number'){
               const idxNow = snapState.activeIndex + 1;

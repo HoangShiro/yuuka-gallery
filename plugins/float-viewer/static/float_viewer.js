@@ -375,7 +375,17 @@ class FloatViewerComponent {
             return false;
         };
 
-        const canHires = !!(this.api && this.api.album);
+        const getCaps = () => window.Yuuka?.services?.capabilities || null;
+        const callCap = async (id, payload) => {
+            const caps = getCaps();
+            const def = caps?.get?.(id);
+            if (!def || typeof def.invoke !== 'function') {
+                throw new Error(`Album capability not available: ${id}`);
+            }
+            return await def.invoke(payload || {}, { source: 'float-viewer' });
+        };
+
+        const canHires = !!(getCaps()?.get?.('image.hires_upscale') && typeof getCaps().get('image.hires_upscale').invoke === 'function');
 
         const analyzeWorkflowConfig = (cfg = {}) => {
             const normalizeStr = (value) => typeof value === 'string' ? value.trim() : '';
@@ -466,10 +476,11 @@ class FloatViewerComponent {
             let lastConfig = {};
             if (canHires && characterHash) {
                 try {
-                    const info = await this.api.album.get(`/comfyui/info?character_hash=${characterHash}&no_choices=true`);
-                    if (info?.last_config) {
-                        lastConfig = info.last_config;
-                    }
+                    const info = await callCap('album.get_comfyui_info', {
+                        character_hash: String(characterHash),
+                        no_choices: true,
+                    });
+                    if (info?.last_config) lastConfig = info.last_config;
                 } catch (err) {
                     console.warn('[FloatViewer] Failed to fetch last_config for character:', characterHash, err);
                 }
@@ -636,19 +647,15 @@ class FloatViewerComponent {
             return;
         }
 
-        if (!this.api?.album) {
-            showError("Album API chưa sẵn sàng.");
-            return;
-        }
-
         try {
-            const response = await this.api.album.post(`/images/${item.id}/hires`, {
-                character_hash: item.character_hash
+            const responseWrap = await callCap('image.hires_upscale', {
+                image_id: String(item.id),
+                character_hash: String(item.character_hash || ''),
             });
+            const response = responseWrap?.response || responseWrap;
             if (!response || !response.task_id) {
                 throw new Error(response?.error || 'Không thể bắt đầu hires.');
             }
-            Yuuka.events.emit('generation:task_created_locally', response);
         } catch (err) {
             showError(`Hires thất bại: ${err.message || err}`);
         }

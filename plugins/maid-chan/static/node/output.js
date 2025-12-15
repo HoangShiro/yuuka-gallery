@@ -57,16 +57,18 @@
   add({
     type: 'Save history',
     category: 'output',
-    ports: { inputs: [ { id:'response_message', label:'Response Message' }, { id:'tool_results', label:'Tool Results' } ], outputs: [] },
+    ports: { inputs: [ { id:'response_message', label:'Response Message' }, { id:'tool_results', label:'Tool Results' }, { id:'img_urls', label:'IMG urls' } ], outputs: [] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl){ const hint = document.createElement('div'); hint.className='mc-chip'; hint.textContent='No settings'; bodyEl.appendChild(hint); },
     execute(ctx){
       const now = Date.now();
       const msgInputs = (ctx && ctx.inputs && ctx.inputs.response_message) ? ctx.inputs.response_message : [];
       const toolInputs = (ctx && ctx.inputs && ctx.inputs.tool_results) ? ctx.inputs.tool_results : [];
+      const imgInputs = (ctx && ctx.inputs && ctx.inputs.img_urls) ? ctx.inputs.img_urls : [];
       
       const msgs = msgInputs.flat();
       const tools = toolInputs.flat();
+      const imgUrls = imgInputs.flat().filter(url => typeof url === 'string' && url);
 
       if (msgs.length === 0) return {};
 
@@ -182,6 +184,7 @@
               const msgId = m.id || m.assistant_message_id || m.user_message_id || ctxAssistantId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : ('msg_'+Date.now()+'_'+Math.random().toString(36).slice(2)));
               const part = { text:String(text), timestamp: now };
               if(toolResultsText != null) part.tool_results_text = toolResultsText;
+              if(imgUrls.length > 0) part.imgs = imgUrls;
               if(toolInfo.length) part.tool_info = toolInfo;
               else if(m.tool_calls && Array.isArray(m.tool_calls)) part.tool_info = m.tool_calls;
               const assistantMessage = { id: msgId, role:'assistant', kind:'chat', snapshots:{ parts:[part], current_index:0 } };
@@ -197,6 +200,7 @@
             for(const m of incomingAssistant){
               const text = (m.content || m.text || '');
               const part = { text:String(text), timestamp: now };
+              if(imgUrls.length > 0) part.imgs = imgUrls;
               if(toolResultsText != null) part.tool_results_text = toolResultsText;
               if(toolInfo.length) part.tool_info = toolInfo;
               else if(m.tool_calls && Array.isArray(m.tool_calls)) part.tool_info = m.tool_calls;
@@ -421,30 +425,23 @@
     buildConfigUI(bodyEl, node, { onDataChange }){
       node.data = node.data || {};
       const wrap = document.createElement('div');
-      wrap.className = 'mc-dispatch-config';
-      wrap.style.display = 'flex';
-      wrap.style.flexDirection = 'column';
-      wrap.style.gap = '8px';
+      wrap.className = 'mc-node-col-loose';
 
       const label = document.createElement('label');
-      label.className = 'mc-dispatch-label';
+      label.className = 'mc-node-label';
       label.textContent = 'Node ID đích';
 
       const input = document.createElement('input');
       input.type = 'text';
       input.placeholder = 'vd: 12 hoặc n_12';
       input.value = node.data.targetNodeId || '';
-      input.className = 'mc-dispatch-input';
+      input.className = 'mc-node-input';
 
       const helper = document.createElement('div');
-      helper.className = 'mc-dispatch-helper';
-      helper.style.fontSize = '12px';
-      helper.style.opacity = '0.9';
+      helper.className = 'mc-node-hint';
 
       const status = document.createElement('div');
-      status.className = 'mc-dispatch-status';
-      status.style.fontSize = '13px';
-      status.style.fontWeight = '600';
+      status.className = 'mc-node-status';
 
       const formatTargetLabel = (target) => {
         if(!target) return '';
@@ -551,6 +548,17 @@
           if(typeof updater === 'function') updater(det);
         }catch(_e){}
       });
+      // Listen for Dispatch events to update Preview nodes directly
+      window.addEventListener('maid-chan:logic:dispatch', (ev) => {
+        try {
+          const { targetNodeId, payload } = ev.detail || {};
+          if (!targetNodeId) return;
+          const updater = window.__MaidChanPreviewRegistry && window.__MaidChanPreviewRegistry.get(targetNodeId);
+          if (updater) {
+            updater({ message: payload });
+          }
+        } catch (e) { console.error(e); }
+      });
     }
     return window.__MaidChanPreviewRegistry;
   })();
@@ -561,7 +569,7 @@
     ports: { inputs: [ { id:'response_message', label:'Response Message' }, { id:'tool_results', label:'Raw Results' } ], outputs: [] },
     defaultData(){ return {}; },
     buildConfigUI(bodyEl, node){
-      const wrap = document.createElement('div'); wrap.className = 'mc-preview';
+      const wrap = document.createElement('div'); wrap.className = 'mc-node-col-loose';
       const msg = document.createElement('div'); msg.className = 'mc-preview-message'; msg.textContent = '(no message)';
       const tools = document.createElement('div'); tools.className = 'mc-preview-tools'; tools.textContent = '';
       wrap.appendChild(msg); wrap.appendChild(tools); bodyEl.appendChild(wrap);
@@ -605,9 +613,25 @@
             window.localStorage.setItem(key, JSON.stringify(payload));
         }catch(_e){}
       };
-      PreviewRegistry.set(node.id, set);
+      PreviewRegistry.set(String(node.id), set);
       try{
-        const raw = window.localStorage.getItem('maid-chan:preview:'+node.id);
+        let raw = window.localStorage.getItem('maid-chan:preview:'+node.id);
+        if(!raw){
+             try {
+                 const dRaw = window.localStorage.getItem('maid-chan:dispatch:last:'+node.id);
+                 if(dRaw){
+                     const d = JSON.parse(dRaw);
+                     if(d && d.payload){
+                         const p = d.payload;
+                         let content = '';
+                         if(typeof p === 'string') content = p;
+                         else if(typeof p === 'object') content = p.content || p.text || JSON.stringify(p);
+                         else content = String(p);
+                         raw = JSON.stringify({ content, tools: null });
+                     }
+                 }
+             } catch(e){}
+        }
         if(raw){
           const saved = JSON.parse(raw);
           if(saved && typeof saved === 'object'){
@@ -627,7 +651,7 @@
     },
     execute(ctx){ 
       try{
-        const updater = PreviewRegistry.get(ctx.node.id);
+        const updater = PreviewRegistry.get(String(ctx.node.id));
         if(updater){
           const msgObj = (ctx.inputs && ctx.inputs.response_message) ? ctx.inputs.response_message : null;
           const toolsInput = ctx.inputs ? ctx.inputs.tool_results : null;

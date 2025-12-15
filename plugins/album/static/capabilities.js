@@ -276,18 +276,26 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                             type: 'string',
                             description: 'Optional character name to search and open.',
                         },
+                        viewMode: {
+                            type: 'string',
+                            description: 'Optional view mode to open: grid, album, or character. Default: album (or grid when no character).',
+                        },
                     },
                 },
                 async invoke(args = {}, ctx = {}) {
                     const { character_hash, character_name } = args || {};
+                    const requestedViewMode = String((args || {}).viewMode || '').trim().toLowerCase();
+                    const targetViewMode = (requestedViewMode === 'character' || requestedViewMode === 'album' || requestedViewMode === 'grid')
+                        ? requestedViewMode
+                        : '';
                     // Yuuka: always try to open the real Album tab so UI actually changes
                     try {
-                        // Prefer the core tab switcher if exposed on window
-                        const coreSwitchTab = windowObj.switchTab || (windowObj.Yuuka && windowObj.Yuuka.coreApi && windowObj.Yuuka.coreApi.switchTab);
-                        if (typeof coreSwitchTab === 'function') {
-                            // Album tab id is usually "album" in the main UI
-                            await coreSwitchTab('album');
-                        }
+                        // Prefer the real app tab switcher first.
+                        const coreSwitchTab =
+                            (windowObj.Yuuka && windowObj.Yuuka.ui && windowObj.Yuuka.ui.switchTab)
+                            || windowObj.switchTab
+                            || (windowObj.Yuuka && windowObj.Yuuka.coreApi && windowObj.Yuuka.coreApi.switchTab);
+                        if (typeof coreSwitchTab === 'function') await coreSwitchTab('album');
                     } catch (e) {
                         console.warn('[Album] Failed to switch main tab to album from capability:', e);
                     }
@@ -306,9 +314,14 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                         throw new Error('Album capability is not attached to an active AlbumComponent instance. Try opening the Album tab once.');
                     }
 
-                    // If no character filter is provided, just open the grid as before
+                    // If no character filter is provided, open grid (or requested mode if explicitly set)
                     if (!character_hash && !character_name) {
-                        self.state.viewMode = 'grid';
+                        if (targetViewMode === 'album' || targetViewMode === 'character') {
+                            // Without a character, album/character views can't render meaningfully -> fallback to grid.
+                            self.state.viewMode = 'grid';
+                        } else {
+                            self.state.viewMode = 'grid';
+                        }
                         self.state.selectedCharacter = null;
                         await self.showCharacterSelectionGrid();
                         return { status: 'opened', viewMode: self.state.viewMode };
@@ -317,14 +330,56 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                     // If character_hash is provided, try to open that album directly
                     if (character_hash && typeof character_hash === 'string') {
                         try {
+                            const safeName = (v) => {
+                                const s = String(v || '').trim();
+                                if (!s) return '';
+                                if (s.toLowerCase() === 'unknown') return '';
+                                return s;
+                            };
+
+                            // Resolve name/is_custom from API when possible so UI doesn't show "Unknown"
+                            let resolvedName = safeName(self.state.selectedCharacter?.hash === character_hash ? self.state.selectedCharacter?.name : '');
+                            let resolvedIsCustom = undefined;
+                            if (!resolvedName) {
+                                try {
+                                    const albums = await self.api.album.get('/albums');
+                                    if (Array.isArray(albums)) {
+                                        const matched = albums.find(a => a && a.hash === character_hash) || null;
+                                        if (matched) {
+                                            resolvedName = safeName(matched.name);
+                                            resolvedIsCustom = !!matched.is_custom;
+                                        }
+                                    }
+                                } catch (e) {
+                                    // ignore
+                                }
+                            }
+                            if (!resolvedName) {
+                                try {
+                                    const info = await self.api.album.get(`/comfyui/info?character_hash=${encodeURIComponent(character_hash)}&no_choices=true`);
+                                    resolvedName = safeName(info?.last_config?.character);
+                                } catch (e) {
+                                    // ignore
+                                }
+                            }
+
                             if (!self.state.selectedCharacter || self.state.selectedCharacter.hash !== character_hash) {
                                 self.state.selectedCharacter = {
                                     hash: character_hash,
-                                    name: self.state.selectedCharacter?.name || 'Unknown',
+                                    name: resolvedName || self.state.selectedCharacter?.name || 'Unknown',
+                                    ...(typeof resolvedIsCustom === 'boolean' ? { isCustom: resolvedIsCustom } : {}),
                                 };
+                            } else if (resolvedName && self.state.selectedCharacter && (!safeName(self.state.selectedCharacter.name))) {
+                                self.state.selectedCharacter.name = resolvedName;
                             }
-                            self.state.viewMode = 'album';
-                            await self.loadAndDisplayCharacterAlbum();
+                            if (targetViewMode === 'character') {
+                                await self.openCharacterView(self.state.selectedCharacter);
+                            } else if (typeof self.openAlbumView === 'function') {
+                                await self.openAlbumView(self.state.selectedCharacter);
+                            } else {
+                                self.state.viewMode = 'album';
+                                await self.loadAndDisplayCharacterAlbum();
+                            }
                             return { status: 'opened', viewMode: self.state.viewMode, character_hash };
                         } catch (err) {
                             console.warn('[Album] Failed to open album by character_hash in open_main_ui capability:', err);
@@ -351,8 +406,14 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                                     hash: matched.hash,
                                     name: matched.name || character_name,
                                 };
-                                self.state.viewMode = 'album';
-                                await self.loadAndDisplayCharacterAlbum();
+                                if (targetViewMode === 'character') {
+                                    await self.openCharacterView(self.state.selectedCharacter);
+                                } else if (typeof self.openAlbumView === 'function') {
+                                    await self.openAlbumView(self.state.selectedCharacter);
+                                } else {
+                                    self.state.viewMode = 'album';
+                                    await self.loadAndDisplayCharacterAlbum();
+                                }
                                 return {
                                     status: 'opened',
                                     viewMode: self.state.viewMode,
@@ -401,11 +462,15 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                             type: 'string',
                             description: 'ID of the image to upscale.',
                         },
+                        character_hash: {
+                            type: 'string',
+                            description: 'Optional character hash to run hires without needing Album UI focused on that album.',
+                        },
                     },
                     required: ['image_id'],
                 },
                 async invoke(args = {}, ctx = {}) {
-                    const { image_id } = args;
+                    const { image_id, character_hash } = args;
                     if (!image_id || typeof image_id !== 'string') {
                         throw new Error('Missing or invalid image_id for image.hires_upscale');
                     }
@@ -413,17 +478,118 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                     const self = (this && this.state && this._startHiresUpscale)
                         ? this
                         : resolveAlbumInstance();
-                    if (!self || !self.state || !Array.isArray(self.state.allImageData) || !self._startHiresUpscale) {
-                        throw new Error('Album capability is not attached to an active AlbumComponent instance.');
+
+                    // Preferred path: use live Album UI instance when possible (keeps placeholder UI synced)
+                    if (self && self.state && Array.isArray(self.state.allImageData) && typeof self._startHiresUpscale === 'function') {
+                        const item = self.state.allImageData.find(img => String(img.id) === String(image_id));
+                        if (item) {
+                            await self._startHiresUpscale(item);
+                            return { status: 'started', image_id, via: 'ui' };
+                        }
                     }
 
-                    const item = self.state.allImageData.find(img => String(img.id) === String(image_id));
-                    if (!item) {
-                        throw new Error(`Image with id ${image_id} not found in current album.`);
+                    // Fallback: direct backend call (no UI required)
+                    const apiRef = (typeof api !== 'undefined') ? api : windowObj.api;
+                    if (!apiRef || !apiRef.album || typeof apiRef.album.post !== 'function') {
+                        throw new Error('Album API is not available for hires upscale.');
                     }
+                    const ch = (typeof character_hash === 'string' && character_hash.trim()) ? character_hash.trim() : null;
+                    if (!ch) {
+                        throw new Error('image.hires_upscale requires character_hash when Album UI is not focused on that image.');
+                    }
+                    const response = await apiRef.album.post(`/images/${encodeURIComponent(image_id)}/hires`, {
+                        character_hash: ch,
+                    });
+                    try {
+                        windowObj?.Yuuka?.events?.emit?.('generation:task_created_locally', response);
+                    } catch (_e) {}
+                    return { status: 'started', image_id, via: 'api', response };
+                },
+            });
 
-                    await self._startHiresUpscale(item);
-                    return { status: 'started', image_id };
+            // ------------------------------
+            // Backend-facing capabilities (no UI dependency)
+            // ------------------------------
+
+            safeRegister({
+                id: 'album.list_albums',
+                pluginId: 'album',
+                title: 'List albums',
+                description: 'Return the full list of albums (character hash + name + optional metadata).',
+                type: 'query',
+                tags: ['album', 'list'],
+                llmCallable: false,
+                paramsSchema: { type: 'object', properties: {} },
+                async invoke(args = {}, ctx = {}) {
+                    const apiRef = (typeof api !== 'undefined') ? api : windowObj.api;
+                    if (!apiRef || !apiRef.album || typeof apiRef.album.get !== 'function') {
+                        throw new Error('Album API không khả dụng.');
+                    }
+                    const albums = await apiRef.album.get('/albums').catch(() => []);
+                    return Array.isArray(albums) ? albums : [];
+                },
+            });
+
+            safeRegister({
+                id: 'album.get_comfyui_info',
+                pluginId: 'album',
+                title: 'Get ComfyUI info for album',
+                description: 'Fetch album comfyui info (last_config + global_choices) by character_hash.',
+                type: 'query',
+                tags: ['album', 'comfyui', 'config'],
+                llmCallable: false,
+                paramsSchema: {
+                    type: 'object',
+                    properties: {
+                        character_hash: { type: 'string', description: 'Album character hash.' },
+                        no_choices: { type: 'boolean', description: 'If true, skip global_choices payload (faster).' },
+                    },
+                    required: ['character_hash'],
+                },
+                async invoke(args = {}, ctx = {}) {
+                    const character_hash = String(args.character_hash || '').trim();
+                    if (!character_hash) throw new Error('Missing character_hash for album.get_comfyui_info');
+                    const noChoices = !!args.no_choices;
+
+                    const apiRef = (typeof api !== 'undefined') ? api : windowObj.api;
+                    if (!apiRef || !apiRef.album || typeof apiRef.album.get !== 'function') {
+                        throw new Error('Album API không khả dụng.');
+                    }
+                    const q = noChoices ? '&no_choices=true' : '';
+                    const info = await apiRef.album.get(`/comfyui/info?character_hash=${encodeURIComponent(character_hash)}${q}`);
+                    return info || {};
+                },
+            });
+
+            safeRegister({
+                id: 'album.set_album_config',
+                pluginId: 'album',
+                title: 'Set album config',
+                description: 'Save config for a given album character_hash (backend write).',
+                type: 'action',
+                tags: ['album', 'config', 'save'],
+                llmCallable: false,
+                paramsSchema: {
+                    type: 'object',
+                    properties: {
+                        character_hash: { type: 'string', description: 'Album character hash.' },
+                        config: { type: 'object', description: 'Config object to save.' },
+                    },
+                    required: ['character_hash', 'config'],
+                },
+                async invoke(args = {}, ctx = {}) {
+                    const character_hash = String(args.character_hash || '').trim();
+                    const config = args.config;
+                    if (!character_hash) throw new Error('Missing character_hash for album.set_album_config');
+                    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+                        throw new Error('Missing or invalid config for album.set_album_config');
+                    }
+                    const apiRef = (typeof api !== 'undefined') ? api : windowObj.api;
+                    if (!apiRef || !apiRef.album || typeof apiRef.album.post !== 'function') {
+                        throw new Error('Album API không khả dụng.');
+                    }
+                    const res = await apiRef.album.post(`/${encodeURIComponent(character_hash)}/config`, config);
+                    return res || { status: 'ok', character_hash };
                 },
             });
 
@@ -1328,7 +1494,7 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                     },
                 },
                 async invoke(args = {}, ctx = {}) {
-                    const limit = Number.isFinite(args.limit) ? Math.max(1, Math.min(100, Math.floor(args.limit))) : 10;
+                    const limit = Number.isFinite(args.limit) ? Math.max(1, Math.min(1000, Math.floor(args.limit))) : 10;
 
                     // Try to reuse album API if available; otherwise fall back to core images API.
                     const inst = resolveAlbumInstance();

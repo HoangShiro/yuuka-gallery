@@ -9,6 +9,10 @@ from typing import Any, Dict, Tuple, List
 # Đường dẫn được xây dựng tương đối với vị trí của file này.
 _SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 _WORKFLOWS_DIR = os.path.join(_SERVICE_DIR, "workflows")
+_ALPHA_WORKFLOWS_DIR = os.path.join(_WORKFLOWS_DIR, "Alpha")
+
+# Yuuka: RMBG node template (used to generate alpha/transparent images)
+RMBG_NODE_TEMPLATE_PATH = os.path.join(_ALPHA_WORKFLOWS_DIR, "BiRefNet (RMBG).json")
 
 SDXL_LORA_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "SDXL_with_LoRA.json")
 # Yuuka: Sếp cần tạo các file json tương ứng nếu muốn dùng các workflow này.
@@ -131,7 +135,9 @@ class WorkflowBuilderService:
     """
     def __init__(self):
         self.workflow_templates: Dict[str, Any] = {}
+        self.rmbg_node_template: Dict[str, Any] = {}
         self._load_all_templates()
+        self._load_rmbg_node_template()
         print("✅ WorkflowBuilderService Initialized and templates loaded.")
 
     def _load_all_templates(self):
@@ -155,6 +161,122 @@ class WorkflowBuilderService:
             except Exception as e:
                 self.workflow_templates[name] = None
                 print(f"💥 [WorkflowBuilder] CRITICAL: Failed to load template '{name}' from {path}: {e}")
+
+    def _load_rmbg_node_template(self):
+        """Load RMBG node template used to generate transparent alpha output.
+        This replaces the old LayeredDiffusion alpha workflows.
+        """
+        self.rmbg_node_template = {}
+        try:
+            if not os.path.exists(RMBG_NODE_TEMPLATE_PATH):
+                print(f"⚠️ [WorkflowBuilder] RMBG template not found: {RMBG_NODE_TEMPLATE_PATH}")
+                return
+            with open(RMBG_NODE_TEMPLATE_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                # Prefer node id "1" if present, otherwise first node dict.
+                if isinstance(data.get("1"), dict):
+                    self.rmbg_node_template = deepcopy(data["1"])
+                    return
+                for _, node in data.items():
+                    if isinstance(node, dict) and node.get('class_type') == 'BiRefNetRMBG':
+                        self.rmbg_node_template = deepcopy(node)
+                        return
+                # Fallback: first dict entry
+                for _, node in data.items():
+                    if isinstance(node, dict):
+                        self.rmbg_node_template = deepcopy(node)
+                        return
+        except Exception as e:
+            print(f"⚠️ [WorkflowBuilder] Failed to load RMBG node template: {e}")
+
+    def _is_alpha_requested(self, cfg_data: Dict[str, Any]) -> bool:
+        """Detect whether this request wants alpha/RGBA workflow."""
+        if not isinstance(cfg_data, dict):
+            return False
+        v = cfg_data.get('Alpha')
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.strip().lower() in ('1', 'true', 'yes', 'on')
+        # common fallbacks
+        v2 = cfg_data.get('alpha')
+        if isinstance(v2, bool):
+            return v2
+        if isinstance(v2, str):
+            return v2.strip().lower() in ('1', 'true', 'yes', 'on')
+        return False
+
+    def _inject_rmbg_before_base64_output(self, workflow: Dict[str, Any], output_node_id: str) -> Dict[str, Any]:
+        """Inject BiRefNet RMBG node before ImageToBase64_Yuuka output node.
+        Used when cfg requests Alpha/transparent output.
+        """
+        if not isinstance(workflow, dict) or not workflow:
+            return workflow
+
+        # Only supports API-style workflows (id->node dict). Ignore graph-format workflows.
+        if 'nodes' in workflow and isinstance(workflow.get('nodes'), list):
+            return workflow
+
+        # Resolve output node
+        out_id = output_node_id if output_node_id in workflow else None
+        if out_id is None:
+            for nid, nd in workflow.items():
+                if isinstance(nd, dict) and nd.get('class_type') == 'ImageToBase64_Yuuka':
+                    out_id = nid
+                    break
+        if out_id is None:
+            return workflow
+
+        out_node = workflow.get(out_id)
+        if not isinstance(out_node, dict):
+            return workflow
+        out_inputs = out_node.setdefault('inputs', {})
+        source = out_inputs.get('images')
+        if not (isinstance(source, list) and len(source) == 2):
+            return workflow
+
+        # Guard: already wired through RMBG
+        try:
+            src_id = source[0]
+            if isinstance(src_id, str) and isinstance(workflow.get(src_id), dict) and workflow[src_id].get('class_type') == 'BiRefNetRMBG':
+                return workflow
+        except Exception:
+            pass
+
+        # Allocate new node id
+        max_id = 0
+        for k in workflow.keys():
+            try:
+                max_id = max(max_id, int(k))
+            except Exception:
+                continue
+        rmbg_id = str(max_id + 1)
+
+        # Build RMBG node
+        node = deepcopy(self.rmbg_node_template) if isinstance(self.rmbg_node_template, dict) and self.rmbg_node_template else {
+            "class_type": "BiRefNetRMBG",
+            "inputs": {
+                "model": "BiRefNet-general",
+                "mask_blur": 0,
+                "mask_offset": 0,
+                "invert_output": False,
+                "refine_foreground": True,
+                "background": "Alpha",
+            },
+        }
+
+        node_inputs = node.setdefault('inputs', {})
+        # Ensure alpha background output
+        node_inputs.setdefault('background', 'Alpha')
+        # Wire input image; keep both keys for compatibility across RMBG node variants.
+        node_inputs['image'] = source
+        node_inputs.setdefault('images', source)
+
+        workflow[rmbg_id] = node
+        # Rewire base64 output to consume RMBG result
+        out_inputs['images'] = [rmbg_id, 0]
+        return workflow
 
     # ===========================
     # LoRA helpers (multi-chain)
@@ -330,6 +452,9 @@ class WorkflowBuilderService:
                 node_data.setdefault('inputs', {})['model'] = [last_id, 0]
             elif cls == 'CLIPTextEncode':
                 node_data.setdefault('inputs', {})['clip'] = [last_id, 1]
+            elif cls == 'LayeredDiffusionApply':
+                # Alpha workflows: LayeredDiffusionApply consumes MODEL as well
+                node_data.setdefault('inputs', {})['model'] = [last_id, 0]
 
         return workflow, last_id
 
@@ -340,21 +465,42 @@ class WorkflowBuilderService:
         if isinstance(cfg_data, dict):
             cfg_data["_workflow_template"] = None
 
+        alpha_requested = self._is_alpha_requested(cfg_data)
+
         workflow_type = cfg_data.get('_workflow_type')
         if workflow_type == 'hires_input_image':
-            return self._build_hiresfix_input_image_workflow(cfg_data, seed)
-
-        if workflow_type in ('sdxl_lora', 'lora'):
-            return self._build_lora_workflow(cfg_data, seed)
-
-        if cfg_data.get('hires_enabled'):
-            return self._build_hiresfix_workflow(cfg_data, seed)
+            workflow, output_node_id = self._build_hiresfix_input_image_workflow(cfg_data, seed)
+            if alpha_requested:
+                workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
+            return workflow, output_node_id
 
         lora_name = cfg_data.get('lora_name')
         lora_chain = self._parse_lora_chain(cfg_data)
-        if (lora_name and lora_name != "None" and str(lora_name).strip() != "") or lora_chain:
-            return self._build_lora_workflow(cfg_data, seed)
-        return self._build_standard_workflow(cfg_data, seed)
+        has_lora = ((lora_name and lora_name != "None" and str(lora_name).strip() != "") or bool(lora_chain))
+
+        # Non-alpha builders (alpha is applied as RMBG post-process below)
+        if workflow_type in ('sdxl_lora', 'lora'):
+            workflow, output_node_id = self._build_lora_workflow(cfg_data, seed)
+            if alpha_requested:
+                workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
+            return workflow, output_node_id
+
+        if cfg_data.get('hires_enabled'):
+            workflow, output_node_id = self._build_hiresfix_workflow(cfg_data, seed)
+            if alpha_requested:
+                workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
+            return workflow, output_node_id
+
+        if has_lora:
+            workflow, output_node_id = self._build_lora_workflow(cfg_data, seed)
+            if alpha_requested:
+                workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
+            return workflow, output_node_id
+
+        workflow, output_node_id = self._build_standard_workflow(cfg_data, seed)
+        if alpha_requested:
+            workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
+        return workflow, output_node_id
 
     def _build_standard_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
         """
@@ -416,7 +562,7 @@ class WorkflowBuilderService:
         # Yuuka: Trả về workflow và ID của node output base64
         return workflow, "15"
 
-    def _build_hiresfix_input_image_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
+    def _build_hiresfix_input_image_workflow(self, cfg_data: Dict[str, Any], seed: int, use_alpha: bool = False) -> Tuple[Dict[str, Any], str]:
         """Build hires-fix ESRGAN workflow that starts from an uploaded image."""
         uploaded_name = cfg_data.get("_input_image_name")
         if not uploaded_name:
@@ -508,7 +654,7 @@ class WorkflowBuilderService:
 
 
 
-    def _build_hiresfix_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
+    def _build_hiresfix_workflow(self, cfg_data: Dict[str, Any], seed: int, use_alpha: bool = False) -> Tuple[Dict[str, Any], str]:
         """Build hires-fix ESRGAN workflow with custom base64 output."""
         lora_specs = self._parse_lora_chain(cfg_data)
         use_lora = len(lora_specs) > 0
@@ -611,11 +757,15 @@ class WorkflowBuilderService:
 
         return workflow, output_node_id
 
-    def _build_lora_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
+    def _build_lora_workflow(self, cfg_data: Dict[str, Any], seed: int, use_alpha: bool = False) -> Tuple[Dict[str, Any], str]:
         """Xây dựng workflow sử dụng 1 hoặc nhiều LoRA từ template.
         Hỗ trợ chuỗi LoRA nối tiếp nhau theo mẫu: Checkpoint -> LoRA1 -> LoRA2 -> ... -> KSampler/CLIP.
         """
-        template = self.workflow_templates.get("sdxl_lora") or self.workflow_templates.get("sdxl") or self.workflow_templates.get("standard")
+        if isinstance(cfg_data, dict):
+            cfg_data["_workflow_template"] = SDXL_LORA_WORKFLOW_NAME
+
+        template = self.workflow_templates.get("sdxl_lora")
+        template = template or self.workflow_templates.get("sdxl") or self.workflow_templates.get("standard")
         if not template:
             # Không có template phù hợp => fallback standard
             print("⚠️ SDXL LoRA workflow template not found. Falling back to standard workflow.")

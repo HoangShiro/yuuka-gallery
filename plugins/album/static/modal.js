@@ -328,6 +328,61 @@
         try {
             const infoPayload = await options.fetchInfo();
             const { last_config, global_choices } = infoPayload;
+
+            const resolvedViewModeRaw = (options && typeof options === 'object')
+                ? (options.viewMode ?? options.view_mode ?? options.mode)
+                : null;
+            const resolvedViewMode = String(resolvedViewModeRaw || '').trim().toLowerCase();
+            const isCharacterViewMode = resolvedViewMode === 'character';
+            const characterSettings = (infoPayload && typeof infoPayload === 'object' && infoPayload.character_settings)
+                ? infoPayload.character_settings
+                : { pregen_enabled: true };
+            const characterPregenEnabled = (characterSettings && typeof characterSettings.pregen_enabled !== 'undefined')
+                ? !!characterSettings.pregen_enabled
+                : true;
+            const characterVisualNovelMode = (characterSettings && typeof characterSettings.visual_novel_mode !== 'undefined')
+                ? !!characterSettings.visual_novel_mode
+                : true;
+
+            const characterBlurBackground = (() => {
+                try {
+                    if (characterSettings && typeof characterSettings.blur_background !== 'undefined') {
+                        return !!characterSettings.blur_background;
+                    }
+                    const raw = localStorage.getItem('yuuka.album.character.settings');
+                    const obj = raw ? JSON.parse(raw) : null;
+                    if (obj && typeof obj.blur_background !== 'undefined') return !!obj.blur_background;
+                } catch { }
+                return false;
+            })();
+
+            const characterLayerExtraTags = (() => {
+                try {
+                    if (characterSettings && typeof characterSettings.character_layer_extra_tags === 'string') {
+                        return String(characterSettings.character_layer_extra_tags || '').trim();
+                    }
+                    const raw = localStorage.getItem('yuuka.album.character.settings');
+                    const obj = raw ? JSON.parse(raw) : null;
+                    if (obj && typeof obj.character_layer_extra_tags === 'string') {
+                        return String(obj.character_layer_extra_tags || '').trim();
+                    }
+                } catch { }
+                return 'simple background, gray background';
+            })();
+
+            const characterBackgroundLayerExtraTags = (() => {
+                try {
+                    if (characterSettings && typeof characterSettings.background_layer_extra_tags === 'string') {
+                        return String(characterSettings.background_layer_extra_tags || '').trim();
+                    }
+                    const raw = localStorage.getItem('yuuka.album.character.settings');
+                    const obj = raw ? JSON.parse(raw) : null;
+                    if (obj && typeof obj.background_layer_extra_tags === 'string') {
+                        return String(obj.background_layer_extra_tags || '').trim();
+                    }
+                } catch { }
+                return '';
+            })();
             // Prefer backend-provided normalized chain; otherwise derive from last_config
             const deriveNormalizedChain = (cfg) => {
                 const result = [];
@@ -551,10 +606,10 @@
                             <h4>Prompts</h4>
                             <div class="album-settings-section__body">
                                 ${ct('character', 'Character', last_config.character)}
-                                ${ct('outfits', 'Outfits', last_config.outfits)}
-                                ${ct('expression', 'Expression', last_config.expression)}
-                                ${ct('action', 'Action', last_config.action)}
-                                ${ct('context', 'Context', last_config.context)}
+                                ${isCharacterViewMode ? '' : ct('outfits', 'Outfits', last_config.outfits)}
+                                ${isCharacterViewMode ? '' : ct('expression', 'Expression', last_config.expression)}
+                                ${isCharacterViewMode ? '' : ct('action', 'Action', last_config.action)}
+                                ${isCharacterViewMode ? '' : ct('context', 'Context', last_config.context)}
                                 ${ct('quality', 'Quality', last_config.quality)}
                                 ${ct('negative', 'Negative', last_config.negative)}
                             </div>
@@ -582,6 +637,43 @@
                                 ${hiresConfigHTML}
                                 ${cse('ckpt_name', 'Checkpoint', last_config.ckpt_name, checkpointOptions)}
                                 ${ciwb('server_address', 'Server Address', last_config.server_address)}
+                                ${isCharacterViewMode ? `
+                                <div class="plugin-album__character-mode-block" data-character-mode>
+                                    <div class="plugin-album__character-mode-title">Character mode</div>
+                                    <div class="form-group plugin-album__android-toggle-row">
+                                        <label class="plugin-album__android-toggle">
+                                            <input type="checkbox" name="__character_pregen_enabled" ${characterPregenEnabled ? 'checked' : ''}>
+                                            <span class="plugin-album__android-toggle__track" aria-hidden="true"></span>
+                                            <span class="plugin-album__android-toggle__text">Auto task</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-group plugin-album__android-toggle-row">
+                                        <label class="plugin-album__android-toggle">
+                                            <input type="checkbox" name="__character_visual_novel_mode" ${characterVisualNovelMode ? 'checked' : ''}>
+                                            <span class="plugin-album__android-toggle__track" aria-hidden="true"></span>
+                                            <span class="plugin-album__android-toggle__text">Visual Novel mode</span>
+                                        </label>
+                                    </div>
+
+                                    <div class="form-group plugin-album__android-toggle-row">
+                                        <label class="plugin-album__android-toggle">
+                                            <input type="checkbox" name="__character_blur_background" ${characterBlurBackground ? 'checked' : ''}>
+                                            <span class="plugin-album__android-toggle__track" aria-hidden="true"></span>
+                                            <span class="plugin-album__android-toggle__text">Blur background</span>
+                                        </label>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="cfg-character_layer_extra_tags">VN: Extra tags (character layer)</label>
+                                        <textarea id="cfg-character_layer_extra_tags" name="__character_layer_extra_tags" rows="2" placeholder="simple background, gray background">${escapeHtml(characterLayerExtraTags)}</textarea>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="cfg-character_background_layer_extra_tags">VN: Extra tags (background layer)</label>
+                                        <textarea id="cfg-character_background_layer_extra_tags" name="__character_background_layer_extra_tags" rows="2" placeholder="">${escapeHtml(characterBackgroundLayerExtraTags)}</textarea>
+                                    </div>
+                                </div>
+                                ` : ''}
                             </div>
                         </div>
                     </div>
@@ -1418,6 +1510,28 @@
 
             const handleSave = async (shouldGenerate = false) => {
                 const payload = collectFormValues();
+                // Extra settings not part of comfy config
+                try {
+                    if (isCharacterViewMode) {
+                        const enabled = !!form.elements['__character_pregen_enabled']?.checked;
+                        const vnEnabled = !!form.elements['__character_visual_novel_mode']?.checked;
+                        const blurBg = !!form.elements['__character_blur_background']?.checked;
+                        const extraTags = String(form.elements['__character_layer_extra_tags']?.value || '').trim();
+                        const extraBgTags = String(form.elements['__character_background_layer_extra_tags']?.value || '').trim();
+                        payload.__character_settings = {
+                            pregen_enabled: enabled,
+                            visual_novel_mode: vnEnabled,
+                            blur_background: blurBg,
+                            character_layer_extra_tags: extraTags,
+                            background_layer_extra_tags: extraBgTags,
+                        };
+
+                        // Persist these settings locally on every Save.
+                        try {
+                            localStorage.setItem('yuuka.album.character.settings', JSON.stringify(payload.__character_settings));
+                        } catch { }
+                    }
+                } catch {}
                 setActionButtonsDisabled(true);
                 try {
                     try {

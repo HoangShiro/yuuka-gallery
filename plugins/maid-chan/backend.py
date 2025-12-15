@@ -247,7 +247,8 @@ class MaidChanPlugin:
                     part_entry = {
                         'text': str(p.get('text') or ''),
                         'tool_results_text': p.get('tool_results_text') if isinstance(p.get('tool_results_text'), str) else None,
-                        'timestamp': int(p.get('timestamp') or _ts_ms())
+                        'timestamp': int(p.get('timestamp') or _ts_ms()),
+                        'imgs': p.get('imgs') if isinstance(p.get('imgs'), list) else []
                     }
                     # Optional per-part tool info array
                     if isinstance(p.get('tool_info'), list):
@@ -375,7 +376,8 @@ class MaidChanPlugin:
                         entry = {
                             'text': txt,
                             'tool_results_text': x.get('tool_results_text') if isinstance(x.get('tool_results_text'), str) else None,
-                            'timestamp': int(x.get('timestamp') or _ts_ms())
+                            'timestamp': int(x.get('timestamp') or _ts_ms()),
+                            'imgs': x.get('imgs') if isinstance(x.get('imgs'), list) else []
                         }
                         if isinstance(x.get('tool_info'), list):
                             sanitized = []
@@ -609,6 +611,27 @@ class MaidChanPlugin:
             provider = (payload.get('provider') or base_settings.get('provider') or 'openai').strip().lower()
             user_api_key = payload.get('api_key') or base_settings.get('api_key')
             overrides = payload.get('overrides') or base_settings.get('overrides') or {}
+            def _normalize_lm_base(url: str):
+                if not url:
+                    return url
+                u = str(url).strip()
+                if not u:
+                    return u
+                while u.endswith('/'):
+                    u = u[:-1]
+                if u.lower().endswith('/v1'):
+                    u = u[:-3]
+                if u.lower().endswith('/models'):
+                    u = u[:-7]
+                if u.lower().endswith('/v1'):
+                    u = u[:-3]
+                return f"{u}/v1"
+
+            if overrides.get('base_url') and provider == 'lmstudio':
+                overrides['base_url'] = _normalize_lm_base(overrides.get('base_url'))
+            if provider == 'lmstudio' and not user_api_key:
+                # LM Studio does not require a key; supply a placeholder for OpenAI clients
+                user_api_key = 'lm-studio'
 
             try:
                 if provider == 'gemini':
@@ -677,6 +700,62 @@ class MaidChanPlugin:
                 api_key = api_key or base.get('api_key')
                 provider_overrides = base.get('overrides') or {}
 
+            # Merge client-provided overrides (e.g., LM Studio base_url)
+            payload_overrides = payload.get('overrides') or {}
+            def _normalize_lm_base(url: str):
+                if not url:
+                    return url
+                u = str(url).strip()
+                if not u:
+                    return u
+                while u.endswith('/'):
+                    u = u[:-1]
+                if u.lower().endswith('/v1'):
+                    u = u[:-3]
+                if u.lower().endswith('/models'):
+                    u = u[:-7]
+                if u.lower().endswith('/v1'):
+                    u = u[:-3]
+                return f"{u}/v1"
+
+            if isinstance(payload_overrides, dict):
+                provider_overrides.update(payload_overrides)
+            if provider == 'lmstudio' and provider_overrides.get('base_url'):
+                provider_overrides['base_url'] = _normalize_lm_base(provider_overrides.get('base_url'))
+
+            # LM Studio often omits API keys; supply a placeholder
+            if provider == 'lmstudio' and not api_key:
+                api_key = 'lm-studio'
+
+            # Build kwargs for OpenAI-compatible clients
+            chat_kwargs = {
+                'temperature': temperature,
+                'top_p': top_p,
+                'max_tokens': max_tokens,
+            }
+
+            # Structured outputs: Gemini consumes structured_output, OpenAI-style providers use response_format
+            structured_output = payload.get('structured_output')
+            if structured_output:
+                if provider == 'gemini':
+                    pass  # forwarded below
+                else:
+                    if isinstance(structured_output, dict):
+                        schema = structured_output.get('schema') or structured_output
+                    else:
+                        schema = structured_output
+                    if schema and isinstance(schema, dict):
+                        chat_kwargs['response_format'] = {
+                            'type': 'json_schema',
+                            'json_schema': {
+                                'name': 'maid_structured_output',
+                                'schema': schema,
+                                'strict': True,
+                            }
+                        }
+                    else:
+                        chat_kwargs['response_format'] = {'type': 'json_object'}
+
             # Chuẩn bị payload cho AIService
             ai_payload = {
                 'provider': provider,
@@ -686,11 +765,7 @@ class MaidChanPlugin:
                     'model': model,
                     'messages': messages,
                     'timeout': timeout,
-                    'overrides': {
-                        'temperature': temperature,
-                        'top_p': top_p,
-                        'max_tokens': max_tokens,
-                    },
+                    'kwargs': chat_kwargs,
                     # Forward function-calling hints directly to AIService.
                     # Non-Gemini providers can safely ignore these fields.
                     'tools': tools,
@@ -702,7 +777,6 @@ class MaidChanPlugin:
             ai_service = getattr(self.core_api, 'ai_service', None)
             if ai_service is None:
                 return jsonify({'error': 'AI service is not available.'}), 503
-
             try:
                 result = ai_service.request(
                     provider=provider,
@@ -713,6 +787,7 @@ class MaidChanPlugin:
                     provider_overrides=provider_overrides,
                     timeout=timeout,
                 )
+
                 # Minimal logging format requested: user last request, function_call (if any), model reply
                 try:
                     last_user = None
@@ -720,13 +795,11 @@ class MaidChanPlugin:
                         if isinstance(m, dict) and m.get('role') == 'user':
                             last_user = (m.get('content') or m.get('text'))
                             break
-                    # Prepare fields
                     if isinstance(result, dict):
                         r_type = result.get('type')
                         fn_name = result.get('name') if r_type == 'tool_call' else None
                         fn_args = result.get('arguments') if r_type == 'tool_call' else None
                         reply_text = result.get('text') or result.get('message') or ''
-                        # Serialize full response
                         try:
                             import json
                             full_dump = json.dumps(result, ensure_ascii=False, indent=2, default=str)
@@ -735,25 +808,124 @@ class MaidChanPlugin:
                         print('[MaidChat] user_last_request:', repr(last_user))
                         if fn_name:
                             print('[MaidChat] function_call:', fn_name, fn_args)
-                        # model_reply line then two blank lines then full response dump
                         print('[MaidChat] model_reply:', repr(reply_text))
-                        print()  # first blank line
-                        print(full_dump)
-                        print()  # second blank line
-                    else:
-                        print('[MaidChat] user_last_request:', repr(last_user))
-                        print('[MaidChat] model_reply:', repr(result))
-                        print()  # spacing
-                        print(str(result))
                         print()
+                        print(full_dump)
+                        print()
+                    else:
+                        try:
+                            import json
+                            def _coerce(obj):
+                                try:
+                                    return obj if isinstance(obj, (str, int, float, bool, type(None))) else obj.__dict__
+                                except Exception:
+                                    return str(obj)
+                            if hasattr(result, 'model_dump_json'):
+                                full_dump = result.model_dump_json(indent=2)
+                            else:
+                                full_dump = json.dumps(result, default=_coerce, ensure_ascii=False, indent=2)
+                            print('[MaidChat] user_last_request:', repr(last_user))
+                            print('[MaidChat] model_reply:', repr(str(result)))
+                            print()
+                            print(full_dump)
+                            print()
+                        except Exception:
+                            print('[MaidChat] user_last_request:', repr(last_user))
+                            print('[MaidChat] model_reply:', repr(str(result)))
+                            print()
+                            print(str(result))
+                            print()
                 except Exception:
                     pass
-                return jsonify(result)
+
+                # Normalize OpenAI/LM Studio ChatCompletion-like responses to Maid-chan schema
+                def _extract_text_and_struct(res_dict: dict):
+                    text_val = ''
+                    struct_val = None
+                    tool_calls = None
+                    if not isinstance(res_dict, dict):
+                        return text_val, struct_val, tool_calls
+                    choices = res_dict.get('choices')
+                    if isinstance(choices, list) and choices:
+                        first = choices[0] or {}
+                        msg = first.get('message') or {}
+                        content = msg.get('content')
+                        tool_calls = msg.get('tool_calls') if isinstance(msg.get('tool_calls'), list) else None
+                        if isinstance(content, str):
+                            raw = content.strip()
+                            text_val = raw
+                            try:
+                                import json as _json
+                                parsed = _json.loads(raw)
+                                if isinstance(parsed, dict):
+                                    if 'text' in parsed and isinstance(parsed['text'], str):
+                                        text_val = parsed['text']
+                                    struct_val = parsed
+                            except Exception:
+                                # Fallback for truncated JSON
+                                import re
+                                m = re.search(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)', raw)
+                                if m:
+                                    try:
+                                        import json as _json
+                                        text_val = _json.loads(f'"{m.group(1)}"')
+                                    except Exception:
+                                        text_val = m.group(1)
+                        elif isinstance(content, list):
+                            text_parts = []
+                            for part in content:
+                                if isinstance(part, str):
+                                    text_parts.append(part)
+                                elif isinstance(part, dict) and isinstance(part.get('text'), str):
+                                    text_parts.append(part['text'])
+                            text_val = '\n'.join(text_parts)
+                    return text_val, struct_val, tool_calls
+
+                normalized = result
+                try:
+                    if isinstance(result, dict) and 'choices' in result:
+                        txt, struct_out, tool_calls = _extract_text_and_struct(result)
+                        normalized = {
+                            'type': 'message',
+                            'text': txt,
+                            'content': txt,
+                            'model': result.get('model'),
+                            'finish_reason': (result.get('choices') or [{}])[0].get('finish_reason') if isinstance(result.get('choices'), list) and result.get('choices') else None,
+                        }
+                        if struct_out:
+                            normalized['structured_output'] = struct_out
+                        if tool_calls:
+                            normalized['tool_calls'] = tool_calls
+                except Exception:
+                    normalized = result
+
+                def _jsonable(obj):
+                    try:
+                        if isinstance(obj, (str, int, float, bool)) or obj is None:
+                            return obj
+                        if isinstance(obj, dict):
+                            return {k: _jsonable(v) for k, v in obj.items()}
+                        if isinstance(obj, (list, tuple)):
+                            return [_jsonable(v) for v in obj]
+                        if hasattr(obj, 'model_dump'):
+                            return obj.model_dump()
+                        if hasattr(obj, 'to_dict'):
+                            try:
+                                return obj.to_dict()
+                            except Exception:
+                                pass
+                        if hasattr(obj, '__dict__'):
+                            return _jsonable(obj.__dict__)
+                        return str(obj)
+                    except Exception:
+                        return str(obj)
+
+                return jsonify(_jsonable(normalized))
+
             except Exception as exc:  # noqa: BLE001
                 import traceback, time
                 trace = traceback.format_exc()
                 ts = time.strftime('%Y-%m-%d %H:%M:%S')
-                # Maintain concise error logging
                 print(f"[MaidChat] error {ts} {exc.__class__.__name__}: {exc}")
                 return jsonify({
                     'error': str(exc),

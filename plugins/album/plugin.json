@@ -13,7 +13,25 @@
         "js": [
             "modal.js",
             "album.js",
-            "capabilities.js"
+            "modules/core/comfy.js",
+            "modules/core/generation.js",
+            "modules/core/hires.js",
+            "modules/core/viewer.js",
+            "modules/core/capabilities_instance.js",
+            "modules/core/navibar.js",
+            "modules/core/settings_modal.js",
+            "modules/views/grid.js",
+            "modules/views/album_view.js",
+            "modules/views/character/utils.js",
+            "modules/views/character/main.js",
+            "modules/views/character/menu.js",
+            "modules/views/character/modals.js",
+            "modules/views/character/generation.js",
+            "modules/character/settings.js",
+            "modules/character/auto_suggest.js",
+            "modules/character/auto.js",
+            "capabilities.js",
+            "nodes.js"
         ],
         "css": [
             "album.css"

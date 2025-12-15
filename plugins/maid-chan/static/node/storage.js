@@ -292,12 +292,11 @@
       if(typeof node.data.autoTimestamp !== 'boolean') node.data.autoTimestamp = true;
 
       const wrap = document.createElement('div');
-      wrap.style.display = 'flex';
-      wrap.style.flexDirection = 'column';
-      wrap.style.gap = '8px';
+      wrap.className = 'mc-node-col-loose';
 
       const keyInput = document.createElement('input');
       keyInput.type = 'text';
+      keyInput.className = 'mc-node-input';
       keyInput.placeholder = 'localStorage key (optional)';
       keyInput.value = node.data.storageKey || '';
       keyInput.onchange = ()=>{
@@ -306,13 +305,12 @@
       };
 
       const modeRow = document.createElement('div');
-      modeRow.style.display = 'flex';
-      modeRow.style.gap = '6px';
-      modeRow.style.alignItems = 'center';
+      modeRow.className = 'mc-node-row';
       const modeLabel = document.createElement('span');
+      modeLabel.className = 'mc-node-label';
       modeLabel.textContent = 'Mode:';
-      modeLabel.style.fontSize = '12px';
       const modeSelect = document.createElement('select');
+      modeSelect.className = 'mc-node-select';
       ['replace','append'].forEach(opt=>{
         const o = document.createElement('option');
         o.value = opt;
@@ -329,14 +327,14 @@
       modeRow.appendChild(modeSelect);
 
       const historyWrap = document.createElement('div');
+      historyWrap.className = 'mc-node-row';
       historyWrap.style.display = node.data.mode === 'append' ? 'flex' : 'none';
-      historyWrap.style.gap = '6px';
-      historyWrap.style.alignItems = 'center';
       const historyLabel = document.createElement('span');
+      historyLabel.className = 'mc-node-label';
       historyLabel.textContent = 'History limit:';
-      historyLabel.style.fontSize = '12px';
       const historyInput = document.createElement('input');
       historyInput.type = 'number';
+      historyInput.className = 'mc-node-input';
       historyInput.min = '0';
       historyInput.value = String(node.data.historyLimit || 0);
       historyInput.onchange = ()=>{
@@ -348,9 +346,7 @@
       historyWrap.appendChild(historyInput);
 
       const optionsRow = document.createElement('label');
-      optionsRow.style.display = 'flex';
-      optionsRow.style.alignItems = 'center';
-      optionsRow.style.gap = '6px';
+      optionsRow.className = 'mc-node-checkbox-row';
       const emitCheck = document.createElement('input');
       emitCheck.type = 'checkbox';
       emitCheck.checked = !!node.data.emitStoredWhenEmpty;
@@ -360,14 +356,11 @@
       };
       const emitText = document.createElement('span');
       emitText.textContent = 'Emit stored value when input is empty';
-      emitText.style.fontSize = '12px';
       optionsRow.appendChild(emitCheck);
       optionsRow.appendChild(emitText);
 
       const tsRow = document.createElement('label');
-      tsRow.style.display = 'flex';
-      tsRow.style.alignItems = 'center';
-      tsRow.style.gap = '6px';
+      tsRow.className = 'mc-node-checkbox-row';
       const tsCheck = document.createElement('input');
       tsCheck.type = 'checkbox';
       tsCheck.checked = !!node.data.autoTimestamp;
@@ -377,27 +370,27 @@
       };
       const tsText = document.createElement('span');
       tsText.textContent = 'Wrap entries with timestamp (append mode)';
-      tsText.style.fontSize = '12px';
       tsRow.appendChild(tsCheck);
       tsRow.appendChild(tsText);
 
       const viewBtn = document.createElement('button');
       viewBtn.type = 'button';
-      viewBtn.className = 'mc-history-view-btn';
+      viewBtn.className = 'mc-node-btn';
       viewBtn.textContent = 'View stored value';
       viewBtn.onclick = ()=>{
         const key = (node.data.storageKey && node.data.storageKey.trim()) || makeDefaultKey(node);
         const val = readLocal(key);
         const pre = document.createElement('pre');
+        pre.className = 'mc-preview-message';
         pre.style.maxHeight = '240px';
         pre.style.overflow = 'auto';
         pre.style.whiteSpace = 'pre-wrap';
         pre.textContent = val == null ? '(empty)' : JSON.stringify(val, null, 2);
         const overlay = document.createElement('div');
-        overlay.className = 'mc-history-overlay';
+        overlay.className = 'mc-overlay';
         overlay.style.zIndex = 10000;
         const inner = document.createElement('div');
-        inner.className = 'mc-history-overlay-body';
+        inner.className = 'mc-overlay-body';
         inner.style.maxWidth = '480px';
         inner.appendChild(pre);
         overlay.appendChild(inner);
@@ -486,21 +479,23 @@
       if (typeof node.data.logLimit !== 'number') node.data.logLimit = 50;
 
       const container = document.createElement('div');
-      container.className = 'mc-logger-container';
+      container.className = 'mc-node-col-loose';
 
       const listEl = document.createElement('div');
-      listEl.className = 'mc-logger-list';
+      listEl.className = 'mc-node-col';
       container.appendChild(listEl);
 
       const controlsRow = document.createElement('div');
-      controlsRow.className = 'mc-logger-controls';
+      controlsRow.className = 'mc-node-row';
 
       const minuteWrap = document.createElement('div');
-      minuteWrap.className = 'mc-logger-control';
+      minuteWrap.className = 'mc-node-col';
       const minuteLabel = document.createElement('span');
+      minuteLabel.className = 'mc-node-label';
       minuteLabel.textContent = 'Minute limit';
       const minuteInput = document.createElement('input');
       minuteInput.type = 'number';
+      minuteInput.className = 'mc-node-input';
       minuteInput.min = '0';
       minuteInput.value = String(node.data.minuteLimit || 0);
       minuteInput.onchange = () => {
@@ -512,11 +507,13 @@
       minuteWrap.appendChild(minuteInput);
 
       const logWrap = document.createElement('div');
-      logWrap.className = 'mc-logger-control';
+      logWrap.className = 'mc-node-col';
       const logLabel = document.createElement('span');
+      logLabel.className = 'mc-node-label';
       logLabel.textContent = 'Log limit';
       const logInput = document.createElement('input');
       logInput.type = 'number';
+      logInput.className = 'mc-node-input';
       logInput.min = '0';
       logInput.value = String(node.data.logLimit || 0);
       logInput.onchange = () => {
@@ -560,15 +557,17 @@
 
         node.data.logs.forEach((log, idx) => {
           const row = document.createElement('div');
-          row.className = 'mc-logger-row';
+          row.className = 'mc-node-row';
 
           const timeSpan = document.createElement('span');
-          timeSpan.className = 'mc-logger-time';
+          timeSpan.style.fontSize = '10px';
+          timeSpan.style.color = 'var(--mc-text-dim)';
+          timeSpan.style.minWidth = '70px';
           timeSpan.textContent = formatLocalTime(log.timestamp);
 
           const input = document.createElement('input');
           input.type = 'text';
-          input.className = 'mc-logger-input';
+          input.className = 'mc-node-input';
           input.value = log.text || '';
           input.onchange = () => {
             log.text = input.value;
@@ -576,8 +575,9 @@
           };
 
           const btn = document.createElement('button');
-          btn.className = 'mc-logger-remove';
+          btn.className = 'mc-node-btn danger';
           btn.textContent = 'x';
+          btn.style.width = '24px';
           btn.onclick = () => {
             node.data.logs.splice(idx, 1);
             renderList();
@@ -734,7 +734,7 @@
 
       const addCategoryBtn = document.createElement('button');
       addCategoryBtn.type = 'button';
-      addCategoryBtn.className = 'mc-custom-msg-add-btn mc-tags-node-add-category';
+      addCategoryBtn.className = 'mc-node-btn mc-tags-node-add-category';
       addCategoryBtn.textContent = '+ Thêm loại tags';
       addCategoryBtn.onclick = () => {
         node.data.categories.push({ id: tagsCreateId(), name: '', components: [] });
@@ -865,7 +865,7 @@
 
             const addComponentBtn = document.createElement('button');
             addComponentBtn.type = 'button';
-            addComponentBtn.className = 'mc-custom-msg-add-btn mc-tags-node-add-component';
+            addComponentBtn.className = 'mc-node-btn mc-tags-node-add-component';
             addComponentBtn.textContent = '+ Thêm thành phần';
             addComponentBtn.onclick = () => {
               cat.components = cat.components || [];
