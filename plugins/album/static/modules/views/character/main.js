@@ -498,13 +498,11 @@
             const menu = this.contentArea.querySelector('.plugin-album__character-menu');
             menu?.addEventListener('click', this._handleCharacterMenuClick);
 
-            // Click on character layer opens preset viewer (for favourite selection)
+            // Click on character layer replays current animation playlist.
             const charLayer = root?.querySelector('.plugin-album__character-layer--char');
             if (charLayer) {
                 charLayer.addEventListener('click', () => {
-                    const presetId = this._characterResolveActivePresetId();
-                    if (!presetId) return;
-                    this._characterOpenPresetViewer(presetId);
+                    try { this._characterPlayCurrentCharacterLayerAnimations?.({ restart: true, reason: 'click' }); } catch { }
                 });
             }
 

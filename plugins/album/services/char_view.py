@@ -283,3 +283,140 @@ class AlbumCharacterViewMixin:
             else:
                 out[key] = gid
         return out
+
+    def _delete_character_images_by_tag_group_id(self, user_hash, group_id):
+        """Delete all character-view images for this user that reference a given tag group id."""
+        if not user_hash or not group_id:
+            return 0
+
+        images_data = self.core_api.read_data(
+            self.core_api.image_service.IMAGE_DATA_FILENAME,
+            default_value={},
+            obfuscated=True
+        )
+        user_images = images_data.get(user_hash, {})
+        if not isinstance(user_images, dict):
+            return 0
+
+        deleted_count = 0
+        for _character_hash, items in list(user_images.items()):
+            if not isinstance(items, list):
+                continue
+            for entry in list(items):
+                if not isinstance(entry, dict):
+                    continue
+                gen_cfg = entry.get('generationConfig', {}) or {}
+                if not isinstance(gen_cfg, dict):
+                    continue
+
+                # Only touch character-view images (or anything clearly using character grouping fields).
+                is_character_view = (
+                    str(gen_cfg.get('viewMode') or '').strip() == 'character'
+                    or 'album_character_group_ids' in gen_cfg
+                    or 'album_character_category_selections' in gen_cfg
+                    or str(gen_cfg.get('album_character_preset_key') or '').startswith('g:')
+                )
+                if not is_character_view:
+                    continue
+
+                # New schema
+                group_ids = gen_cfg.get('album_character_group_ids')
+                if isinstance(group_ids, list) and any(str(gid).strip() == str(group_id) for gid in group_ids):
+                    image_id = entry.get('id')
+                    if image_id and self.core_api.image_service.delete_image_by_id(user_hash, image_id):
+                        deleted_count += 1
+                    continue
+
+                # Legacy schema
+                selections = gen_cfg.get('album_character_category_selections')
+                if isinstance(selections, dict) and any(str(gid).strip() == str(group_id) for gid in selections.values()):
+                    image_id = entry.get('id')
+                    if image_id and self.core_api.image_service.delete_image_by_id(user_hash, image_id):
+                        deleted_count += 1
+                    continue
+
+                preset_key = str(gen_cfg.get('album_character_preset_key') or '').strip()
+                if preset_key.startswith('g:'):
+                    gids = [p.strip() for p in preset_key[2:].split('|') if p.strip()]
+                    if any(gid == str(group_id) for gid in gids):
+                        image_id = entry.get('id')
+                        if image_id and self.core_api.image_service.delete_image_by_id(user_hash, image_id):
+                            deleted_count += 1
+
+        return deleted_count
+
+    def _cleanup_character_states_for_removed_tag_group_ids(self, user_hash, removed_group_ids):
+        """Remove references to deleted tag group ids from character-view States.
+
+        If a State becomes empty after cleanup, delete it.
+        Any State-group preset pointing to a deleted state will be deleted.
+        """
+        try:
+            removed = {str(gid).strip() for gid in (removed_group_ids or []) if str(gid).strip()}
+        except Exception:
+            removed = set()
+        if not removed:
+            return {"states_deleted": 0, "states_updated": 0, "presets_updated": 0}
+
+        states = self._load_char_states(user_hash)
+        presets = self._load_char_state_group_presets(user_hash)
+
+        changed_states = False
+        changed_presets = False
+        states_deleted = 0
+        states_updated = 0
+        deleted_state_ids: set[str] = set()
+
+        new_states: list[dict] = []
+        for s in states:
+            if not isinstance(s, dict):
+                continue
+            sid = str(s.get('id') or '').strip()
+            tgids = s.get('tag_group_ids') or s.get('tagGroupIds') or s.get('group_ids') or []
+            if not isinstance(tgids, list):
+                tgids = []
+            original = [str(x).strip() for x in tgids if str(x).strip()]
+            filtered = [x for x in original if x not in removed]
+            if filtered != original:
+                changed_states = True
+                if not filtered:
+                    if sid:
+                        deleted_state_ids.add(sid)
+                    states_deleted += 1
+                    continue
+                s['tag_group_ids'] = filtered
+                # Normalize legacy keys away
+                for k in ('tagGroupIds', 'group_ids'):
+                    if k in s:
+                        try:
+                            s.pop(k, None)
+                        except Exception:
+                            pass
+                states_updated += 1
+            new_states.append(s)
+
+        new_presets = presets
+        presets_removed = 0
+        if deleted_state_ids and isinstance(presets, list):
+            new_presets = []
+            for p in presets:
+                if not isinstance(p, dict):
+                    continue
+                st = str(p.get('state_id') or p.get('stateId') or '').strip()
+                if st and st in deleted_state_ids:
+                    presets_removed += 1
+                    changed_presets = True
+                    continue
+                new_presets.append(p)
+
+        if changed_states:
+            self._save_char_states(user_hash, new_states)
+        if changed_presets:
+            self._save_char_state_group_presets(user_hash, new_presets)
+
+        return {
+            "states_deleted": int(states_deleted),
+            "states_updated": int(states_updated),
+            "presets_removed": int(presets_removed),
+        }
+

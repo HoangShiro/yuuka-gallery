@@ -228,6 +228,111 @@
     animation: fadeIn 0.3s;
     color: white;
 }
+
+/* --- Character view: Animation editor modal (minimal) --- */
+.plugin-album__character-animation-editor-modal .modal-dialog.plugin-album__anim-editor {
+    width: min(980px, calc(100vw - 24px));
+    max-height: min(720px, calc(100vh - 24px));
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+}
+
+.plugin-album__anim-editor-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    align-items: center;
+    gap: var(--spacing-2);
+}
+
+.plugin-album__anim-editor-header-left {
+    display: flex;
+    gap: var(--spacing-2);
+    flex-wrap: wrap;
+}
+
+.plugin-album__anim-editor-header-left button {
+    padding: var(--spacing-1) var(--spacing-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-card-bg);
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.plugin-album__anim-editor-name {
+    width: 100%;
+    padding: var(--spacing-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-card-bg);
+    color: var(--color-text);
+}
+
+.plugin-album__anim-editor-close {
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-card-bg);
+    color: var(--color-text);
+    cursor: pointer;
+    padding: var(--spacing-1) var(--spacing-2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.plugin-album__anim-editor-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-3);
+}
+
+.plugin-album__anim-editor-control {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+}
+
+.plugin-album__anim-editor-control label {
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+}
+
+.plugin-album__anim-editor-control input {
+    padding: var(--spacing-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-card-bg);
+    color: var(--color-text);
+}
+
+.plugin-album__anim-editor-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+}
+
+.plugin-album__anim-editor-track {
+    position: relative;
+    height: 44px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-card-bg);
+    cursor: crosshair;
+    overflow: hidden;
+}
+
+.plugin-album__anim-editor-key {
+    position: absolute;
+    top: 6px;
+    transform: translateX(-50%);
+    width: 10px;
+    height: 32px;
+    border-radius: var(--rounded-sm);
+    border: 1px solid var(--color-border);
+    background: var(--color-accent);
+    cursor: pointer;
+}
 /* --- Kết thúc Style mới --- */
 
 /* --- Settings Modal --- */
@@ -356,6 +461,9 @@
 .plugin-album__character-layer--char {
     z-index: 2;
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
     /* Do NOT span full width/height hitbox; center and size to the image */
     inset: auto;
     left: 50%;
@@ -368,6 +476,15 @@
     object-position: center;
     transform: translateX(-50%);
     pointer-events: auto;
+}
+
+/* Touch devices may briefly show a focus/active highlight (blue frame) on tap.
+   Suppress the non-keyboard focus outline while keeping :focus-visible behavior. */
+.plugin-album__character-layer--char:focus {
+    outline: none;
+}
+.plugin-album__character-layer--char:focus-visible {
+    outline: none;
 }
 
 /* VN mode: on narrow screens, allow overflow width (crop) but do not allow horizontal scrolling. */
@@ -984,6 +1101,19 @@
     animation: fadeIn 0.2s;
 }
 
+/* Animation preset manager (used by Animation editor -> Load) */
+.plugin-album__anim-preset-row {
+    align-items: center;
+}
+
+.plugin-album__anim-preset-actions {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    flex-wrap: nowrap;
+}
+
 /* Character modal: Main menu mode edit (auto-save) */
 .plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings {
     display: grid;
@@ -1037,6 +1167,589 @@
 
 .plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-iconbtn.is-selected {
     background: color-mix(in srgb, var(--color-accent) 18%, var(--color-primary-bg));
+}
+
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-actionbtn {
+    height: 44px;
+    padding: 0 var(--spacing-3);
+    border-radius: var(--rounded-md);
+    border: transparent;
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-actionbtn:hover {
+    background: var(--color-border);
+}
+
+/* --- Character view: Animation editor (page overlay) --- */
+.plugin-album__character-view--anim-editor {
+    position: relative;
+}
+
+.plugin-album__anim-editor-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.plugin-album__anim-editor-overlay button,
+.plugin-album__anim-editor-overlay input {
+    pointer-events: auto;
+}
+
+/* While editing animations, interactions should go to the overlay (not the image layers). */
+.plugin-album__character-view--anim-editor .plugin-album__character-layer {
+    pointer-events: none;
+}
+
+.plugin-album__anim-editor-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2);
+    background: transparent;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+
+.plugin-album__anim-editor-header-left {
+    display: flex;
+    gap: var(--spacing-2);
+    flex-wrap: nowrap;
+    align-items: center;
+}
+
+.plugin-album__anim-editor-header-left button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    padding: var(--spacing-1) var(--spacing-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.plugin-album__anim-editor-btn-label {
+    display: inline;
+}
+
+.plugin-album__anim-editor-name {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 140px;
+    padding: var(--spacing-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    color: var(--color-text);
+}
+
+.plugin-album__anim-editor-close {
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    color: var(--color-text);
+    cursor: pointer;
+    padding: var(--spacing-1) var(--spacing-2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.plugin-album__anim-editor-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
+}
+
+.plugin-album__anim-editor-config {
+    position: absolute;
+    top: var(--spacing-2);
+    right: var(--spacing-2);
+    bottom: var(--spacing-2);
+
+    width: fit-content;
+    max-width: min(520px, 48vw);
+    overflow: auto;
+
+    padding: var(--spacing-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    background: transparent;
+}
+
+.plugin-album__anim-editor-control {
+    display: grid;
+    grid-template-columns: max-content max-content;
+    align-items: center;
+    column-gap: var(--spacing-2);
+    row-gap: var(--spacing-1);
+}
+
+.plugin-album__anim-editor-control label {
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    white-space: nowrap;
+}
+
+.plugin-album__anim-editor-control input {
+    width: 220px;
+    padding: var(--spacing-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    color: var(--color-text);
+}
+
+.plugin-album__anim-editor-timeline {
+    flex: 0 0 auto;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+    background: transparent;
+    padding: var(--spacing-2);
+}
+
+/* Animation editor timeline (v2): 2 columns + ruler + needle */
+.plugin-album__anim-editor-timeline {
+    --album-anim-title-col-w: 92px;
+    --album-anim-ruler-box-h: 26px;
+    --album-anim-ruler-label-h: 16px;
+    --album-anim-ruler-h: calc(var(--album-anim-ruler-label-h) + var(--album-anim-ruler-box-h));
+    --album-anim-track-h: 44px;
+}
+
+.plugin-album__anim-editor-timeline-grid {
+    display: grid;
+    grid-template-columns: var(--album-anim-title-col-w) 1fr;
+    align-items: start;
+    column-gap: var(--spacing-2);
+}
+
+.plugin-album__anim-editor-timeline-col--title {
+    display: grid;
+    grid-template-rows: var(--album-anim-ruler-h) var(--album-anim-track-h) var(--album-anim-track-h) var(--album-anim-track-h);
+    row-gap: 0;
+    min-width: 0;
+}
+
+.plugin-album__anim-editor-track-title {
+    display: flex;
+    align-items: center;
+    height: var(--album-anim-track-h);
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    white-space: nowrap;
+}
+
+.plugin-album__anim-editor-track-title--spacer {
+    height: var(--album-anim-ruler-h);
+}
+
+.plugin-album__anim-editor-playbtn {
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    color: var(--color-text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.plugin-album__anim-editor-loopmini {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    user-select: none;
+}
+
+.plugin-album__anim-editor-current-time {
+    display: inline-flex;
+    align-items: center;
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    user-select: none;
+    margin-left: var(--spacing-2);
+    white-space: nowrap;
+}
+
+.plugin-album__anim-editor-loopmini input {
+    margin: 0;
+}
+
+.plugin-album__anim-editor-timeline-area {
+    position: relative;
+    min-width: 0;
+    overflow: visible;
+}
+
+.plugin-album__anim-editor-ruler-wrap {
+    position: relative;
+    height: var(--album-anim-ruler-h);
+    overflow: visible;
+}
+
+.plugin-album__anim-editor-mini-config {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translateY(calc(-100% - var(--spacing-2)));
+    z-index: 6;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1);
+    border-radius: var(--rounded-md);
+    background: color-mix(in srgb, var(--color-primary-bg) 82%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+.plugin-album__anim-editor-mini-config label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    white-space: nowrap;
+}
+
+.plugin-album__anim-editor-mini-config input,
+.plugin-album__anim-editor-mini-config select {
+    height: 28px;
+    padding: 0 var(--spacing-1);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    color: var(--color-text);
+}
+
+.plugin-album__anim-editor-mini-config input {
+    width: 96px;
+}
+
+.plugin-album__anim-editor-mini-config select {
+    width: 140px;
+}
+
+.plugin-album__anim-editor-ruler-labels {
+    position: relative;
+    height: var(--album-anim-ruler-label-h);
+    overflow: visible;
+    pointer-events: none;
+}
+
+.plugin-album__anim-editor-ruler-label {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translateX(-50%);
+    font-size: var(--font-size-sm);
+    line-height: 1;
+    color: var(--color-secondary-text);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.plugin-album__anim-editor-ruler-label.is-edge-start {
+    transform: translateX(0);
+}
+
+.plugin-album__anim-editor-ruler-label.is-edge-end {
+    transform: translateX(-100%);
+}
+
+.plugin-album__anim-editor-ruler {
+    position: relative;
+    height: var(--album-anim-ruler-box-h);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    cursor: ew-resize;
+    overflow: hidden;
+}
+
+.plugin-album__anim-editor-ruler-ticks {
+    position: absolute;
+    inset: 0;
+}
+
+.plugin-album__anim-editor-ruler-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+
+
+.plugin-album__anim-editor-ruler-tick.is-minor {
+    top: 6px;
+    bottom: 6px;
+    background: color-mix(in srgb, var(--color-border) 45%, transparent);
+}
+
+.plugin-album__anim-editor-track-stack {
+    position: relative;
+    margin-top: var(--spacing-2);
+
+    /* Prevent native text selection / callout while drag-selecting */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: none;
+
+    /* Single container so tracks look connected */
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    overflow: hidden;
+    background: transparent;
+}
+
+/* Override old per-track border so the 3 tracks connect visually */
+.plugin-album__anim-editor-track-stack .plugin-album__anim-editor-track {
+    height: var(--album-anim-track-h);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    cursor: default;
+}
+
+/* Subtle separators between tracks */
+.plugin-album__anim-editor-track-stack .plugin-album__anim-editor-track + .plugin-album__anim-editor-track {
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
+}
+
+.plugin-album__anim-editor-gridlines {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.plugin-album__anim-editor-gridline {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: color-mix(in srgb, var(--color-border) 45%, transparent);
+}
+
+.plugin-album__anim-editor-gridline.is-minor {
+    background: color-mix(in srgb, var(--color-border) 28%, transparent);
+}
+
+.plugin-album__anim-editor-needle {
+    position: absolute;
+    top: var(--album-anim-ruler-label-h);
+    bottom: 0;
+    width: 2px;
+    background: var(--color-accent);
+    transform: translateX(-1px);
+    pointer-events: none;
+    z-index: 3;
+}
+
+@media (max-width: 640px) {
+    .plugin-album__anim-editor-timeline {
+        --album-anim-title-col-w: 72px;
+    }
+}
+
+.plugin-album__anim-editor-track-row {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    align-items: center;
+    gap: var(--spacing-2);
+}
+
+.plugin-album__anim-editor-track-label {
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    white-space: nowrap;
+}
+
+.plugin-album__anim-editor-track {
+    position: relative;
+    height: 44px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    cursor: crosshair;
+    overflow: hidden;
+}
+
+.plugin-album__anim-editor-key {
+    position: absolute;
+    top: 6px;
+    transform: translateX(-50%);
+    width: 10px;
+    height: 32px;
+    border-radius: var(--rounded-sm);
+    border: 1px solid var(--color-border);
+    background: var(--color-accent);
+    cursor: ew-resize;
+}
+
+.plugin-album__anim-editor-key.is-selected {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 60%, var(--color-primary-bg));
+}
+
+.plugin-album__anim-editor-selectbox {
+    position: absolute;
+    pointer-events: none;
+    border: 1px solid var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    border-radius: var(--rounded-md);
+    z-index: 6;
+}
+
+/* Animation editor: key context menu */
+.plugin-album__anim-editor-keymenu {
+    position: absolute;
+    z-index: 8;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    padding: var(--spacing-1);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    min-width: 160px;
+}
+
+.plugin-album__anim-editor-keymenu[hidden] {
+    display: none !important;
+}
+
+.plugin-album__anim-editor-keymenu button {
+    height: 34px;
+    padding: 0 var(--spacing-2);
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--color-text);
+    cursor: pointer;
+    text-align: left;
+}
+
+.plugin-album__anim-editor-keymenu button:hover {
+    background: color-mix(in srgb, var(--color-border) 55%, transparent);
+}
+
+/* Animation editor: layer anchor point (move/scale) */
+.plugin-album__anim-editor-anchor {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(320px, 60vw);
+    aspect-ratio: 1;
+    border: 2px solid #a855f7;
+    border-radius: var(--rounded-md);
+    background: transparent;
+    z-index: 25;
+    pointer-events: auto;
+    touch-action: none;
+    cursor: grab;
+}
+
+.plugin-album__anim-editor-anchor-opacity {
+    position: absolute;
+    top: 50%;
+    right: calc(-1 * (var(--spacing-2) + 26px));
+    transform: translateY(-50%);
+    width: 26px;
+    height: 72%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    opacity: 0.72;
+    pointer-events: auto;
+}
+
+.plugin-album__anim-editor-anchor-opacity input[type="range"] {
+    width: 18px;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    opacity: 0.72;
+    accent-color: var(--color-accent);
+    /* Vertical range (standards-based; avoids deprecated slider-vertical) */
+    writing-mode: vertical-lr;
+    direction: rtl;
+}
+
+.plugin-album__anim-editor-anchor-opacity input[type="range"]::-webkit-slider-runnable-track {
+    background: transparent;
+    border: 0;
+}
+
+.plugin-album__anim-editor-anchor-opacity input[type="range"]::-moz-range-track {
+    background: transparent;
+    border: 0;
+}
+
+.plugin-album__anim-editor-anchor-dot {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    transform: translate(-50%, -50%);
+    border-radius: 999px;
+    background: #a855f7;
+    border: 2px solid var(--color-primary-bg);
+}
+
+
+@media (max-width: 640px) {
+    .plugin-album__anim-editor-btn-label {
+        display: none;
+    }
+
+    .plugin-album__anim-editor-config {
+        max-width: 92vw;
+        left: var(--spacing-2);
+        width: auto;
+    }
+
+    .plugin-album__anim-editor-control {
+        grid-template-columns: max-content 1fr;
+    }
+    .plugin-album__anim-editor-control input {
+        width: 100%;
+        min-width: 160px;
+    }
 }
 
 /* Icon picker grid (category icon selection) */

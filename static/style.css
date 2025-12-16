@@ -62,6 +62,27 @@ body {
 
 *, *::before, *::after { box-sizing: border-box; }
 img { max-width: 100%; display: block; }
+
+/* Mobile/touch: prevent the blue tap-highlight flash on interactive controls */
+button,
+[role="button"],
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+a {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Keep keyboard accessibility: only remove outline when focus is NOT keyboard-driven */
+button:focus:not(:focus-visible),
+[role="button"]:focus:not(:focus-visible),
+input[type="button"]:focus:not(:focus-visible),
+input[type="submit"]:focus:not(:focus-visible),
+input[type="reset"]:focus:not(:focus-visible),
+a:focus:not(:focus-visible) {
+    outline: none;
+}
+
 .material-symbols-outlined {
     font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }

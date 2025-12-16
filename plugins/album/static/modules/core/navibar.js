@@ -36,6 +36,41 @@
             onClick: () => this._handleGenerateToolClick()
         });
 
+        // Tools: Animation editor history (Undo / Redo)
+        // Note: ordering will be managed by _syncNavibarToolButtons().
+        navibar.registerButton({
+            id: 'album-anim-undo',
+            type: 'tools',
+            pluginId: 'album',
+            order: 200,
+            icon: 'undo',
+            title: 'Undo',
+            isActive: () => {
+                try { return !!this._albumAnimEditorCanUndo?.(); } catch { return false; }
+            },
+            onClick: () => {
+                try {
+                    if (typeof this._albumAnimEditorUndo === 'function') this._albumAnimEditorUndo();
+                } catch { }
+            }
+        });
+        navibar.registerButton({
+            id: 'album-anim-redo',
+            type: 'tools',
+            pluginId: 'album',
+            order: 201,
+            icon: 'redo',
+            title: 'Redo',
+            isActive: () => {
+                try { return !!this._albumAnimEditorCanRedo?.(); } catch { return false; }
+            },
+            onClick: () => {
+                try {
+                    if (typeof this._albumAnimEditorRedo === 'function') this._albumAnimEditorRedo();
+                } catch { }
+            }
+        });
+
         // Tools: choose open view mode (only shown in grid via dynamic ordering)
         navibar.registerButton({
             id: 'album-open-mode-album',
@@ -76,13 +111,14 @@
         if (!navibar) return;
 
         const inGrid = this.state.viewMode === 'grid';
+        const inAnimEditor = this.state.viewMode === 'character' && !!(this.state.character?._animEditor?.isOpen);
 
         // In grid: show mode selector tools; in album/character: show settings+generate
         navibar.registerButton({
             id: 'album-settings',
             type: 'tools',
             pluginId: 'album',
-            order: inGrid ? 99 : 1,
+            order: inGrid ? 99 : (inAnimEditor ? 99 : 1),
             icon: 'tune',
             title: 'Cấu hình',
             onClick: () => this.openSettings()
@@ -91,10 +127,44 @@
             id: 'album-generate',
             type: 'tools',
             pluginId: 'album',
-            order: inGrid ? 100 : 2,
+            order: inGrid ? 100 : (inAnimEditor ? 100 : 2),
             icon: 'auto_awesome',
             title: 'Tạo ảnh mới',
             onClick: () => this._handleGenerateToolClick()
+        });
+
+        // Animation editor: prioritize Undo/Redo into the 2 tool slots
+        navibar.registerButton({
+            id: 'album-anim-undo',
+            type: 'tools',
+            pluginId: 'album',
+            order: inAnimEditor ? 1 : 200,
+            icon: 'undo',
+            title: 'Undo',
+            isActive: () => {
+                try { return !!this._albumAnimEditorCanUndo?.(); } catch { return false; }
+            },
+            onClick: () => {
+                try {
+                    if (typeof this._albumAnimEditorUndo === 'function') this._albumAnimEditorUndo();
+                } catch { }
+            }
+        });
+        navibar.registerButton({
+            id: 'album-anim-redo',
+            type: 'tools',
+            pluginId: 'album',
+            order: inAnimEditor ? 2 : 201,
+            icon: 'redo',
+            title: 'Redo',
+            isActive: () => {
+                try { return !!this._albumAnimEditorCanRedo?.(); } catch { return false; }
+            },
+            onClick: () => {
+                try {
+                    if (typeof this._albumAnimEditorRedo === 'function') this._albumAnimEditorRedo();
+                } catch { }
+            }
         });
         navibar.registerButton({
             id: 'album-open-mode-album',

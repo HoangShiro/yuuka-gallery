@@ -528,6 +528,7 @@
 
             if (presetId && ref && String(ref) === String(presetId)) {
                 this._characterRefreshDisplayedImage();
+                try { this._characterAutoPlayAfterTaskIfNeeded?.({ taskId, imageData }); } catch { }
                 return;
             }
 
@@ -536,6 +537,7 @@
                 const key = cfg?.album_character_preset_key;
                 if (key && presetId === `auto:${key}`) {
                     this._characterRefreshDisplayedImage();
+                    try { this._characterAutoPlayAfterTaskIfNeeded?.({ taskId, imageData }); } catch { }
                     return;
                 }
             }
