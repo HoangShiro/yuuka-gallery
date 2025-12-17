@@ -399,6 +399,17 @@
             const dialog = modal.querySelector('.modal-dialog');
 
             // --- Animation preset playlist editor (duplicates allowed, order preserved) ---
+            const AUTO_ANIM_SUFFIX = ' - auto save';
+            const isAutoSaveAnimPresetKey = (key) => {
+                try {
+                    const k = String(key || '').trim();
+                    if (!k) return false;
+                    return k.toLowerCase().endsWith(AUTO_ANIM_SUFFIX.toLowerCase());
+                } catch {
+                    return false;
+                }
+            };
+
             const readAnimList = (obj) => {
                 try {
                     const a = obj?.animation_presets;
@@ -410,6 +421,10 @@
             };
 
             let selectedAnimPresets = isEditing ? readAnimList(group) : [];
+            // Never allow editor autosave presets to be referenced by tag groups.
+            try {
+                selectedAnimPresets = selectedAnimPresets.filter(k => !isAutoSaveAnimPresetKey(k));
+            } catch { }
 
             // --- Sound FX playlist editor (duplicates allowed, order preserved; no-duplicate across slot 1/2) ---
             const readSoundList = (obj, slot) => {
@@ -531,7 +546,8 @@
                     const arr = Array.isArray(all) ? all : [];
                     allAnimPresetKeys = arr
                         .map(p => String(p?.key || '').trim())
-                        .filter(Boolean);
+                        .filter(Boolean)
+                        .filter(k => !isAutoSaveAnimPresetKey(k));
                 } catch {
                     allAnimPresetKeys = [];
                 }
@@ -812,6 +828,7 @@
                     btn.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        if (isAutoSaveAnimPresetKey(k)) return;
                         selectedAnimPresets.push(String(k));
                         try { if (animInput) animInput.value = ''; } catch { }
                         renderAnimSelected();

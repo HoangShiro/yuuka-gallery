@@ -256,6 +256,15 @@
                 };
 
                 const AUTO_SUFFIX = ' - auto save';
+                const isAutoSavePresetKey = (key) => {
+                    try {
+                        const k = String(key || '').trim();
+                        if (!k) return false;
+                        return k.toLowerCase().endsWith(AUTO_SUFFIX.toLowerCase());
+                    } catch {
+                        return false;
+                    }
+                };
                 const normalizeBasePresetKey = (key) => {
                     const k = String(key || '').trim();
                     if (!k) return '';
@@ -1756,7 +1765,8 @@
 
                         const refreshList = async () => {
                             await fetchAllPresets();
-                            const presets = Array.isArray(state.presets) ? state.presets : [];
+                            const presets = (Array.isArray(state.presets) ? state.presets : [])
+                                .filter(p => !isAutoSavePresetKey(p?.key));
                             if (!listEl) return;
                             listEl.innerHTML = '';
 

@@ -807,13 +807,30 @@
                 })();
 
                 let allAnimPresetKeys = [];
+                const AUTO_ANIM_SUFFIX = ' - auto save';
+                const isAutoSaveAnimPresetKey = (key) => {
+                    try {
+                        const k = String(key || '').trim();
+                        if (!k) return false;
+                        return k.toLowerCase().endsWith(AUTO_ANIM_SUFFIX.toLowerCase());
+                    } catch {
+                        return false;
+                    }
+                };
+
+                // Never allow editor autosave presets to be referenced by states.
+                try {
+                    selectedAnimPresets = (Array.isArray(selectedAnimPresets) ? selectedAnimPresets : [])
+                        .filter(k => !isAutoSaveAnimPresetKey(k));
+                } catch { }
                 const fetchAnimPresets = async () => {
                     try {
                         const all = await this.api.album.get('/animation/presets');
                         const arr = Array.isArray(all) ? all : [];
                         allAnimPresetKeys = arr
                             .map(p => String(p?.key || '').trim())
-                            .filter(Boolean);
+                            .filter(Boolean)
+                            .filter(k => !isAutoSaveAnimPresetKey(k));
                     } catch {
                         allAnimPresetKeys = [];
                     }
@@ -1122,6 +1139,7 @@
                         btn.addEventListener('click', (e) => {
                             e.preventDefault();
                             e.stopPropagation();
+                            if (isAutoSaveAnimPresetKey(k)) return;
                             selectedAnimPresets.push(String(k));
                             try { if (animInput) animInput.value = ''; } catch { }
                             renderAnimSelected();
@@ -1259,7 +1277,10 @@
                     const cleaned = selectedIds.map(x => String(x || '').trim()).filter(Boolean);
                     const unique = Array.from(new Set(cleaned));
 
-                    const animClean = selectedAnimPresets.map(x => String(x || '').trim()).filter(Boolean);
+                    const animClean = selectedAnimPresets
+                        .map(x => String(x || '').trim())
+                        .filter(Boolean)
+                        .filter(k => !isAutoSaveAnimPresetKey(k));
 
                     if (!name) {
                         showError('Vui lòng nhập tên state.');

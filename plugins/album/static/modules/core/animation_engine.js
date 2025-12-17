@@ -47,6 +47,93 @@
             this._allPresetsFetchedAt = 0;
         }
 
+        _sanitizeGraphType(v) {
+            const s = String(v || '').trim();
+            if (!s) return 'linear';
+            const allowed = new Set([
+                'linear',
+                'ease',
+                'ease-in',
+                'ease-out',
+                'ease-in-out',
+                'step-start',
+                'step-end',
+            ]);
+            return allowed.has(s) ? s : 'linear';
+        }
+
+        _cubicBezierYForX(x, p1x, p1y, p2x, p2y) {
+            // Solve cubic-bezier for a given x in [0..1], return y.
+            // Uses binary search; good enough for animation sampling.
+            const cx = clamp(Number(x), 0, 1);
+
+            const sampleX = (t) => {
+                const u = 1 - t;
+                // 3*u*u*t*p1x + 3*u*t*t*p2x + t*t*t
+                return (3 * u * u * t * p1x) + (3 * u * t * t * p2x) + (t * t * t);
+            };
+
+            const sampleY = (t) => {
+                const u = 1 - t;
+                return (3 * u * u * t * p1y) + (3 * u * t * t * p2y) + (t * t * t);
+            };
+
+            let lo = 0;
+            let hi = 1;
+            let t = cx;
+            for (let i = 0; i < 14; i += 1) {
+                const sx = sampleX(t);
+                if (sx > cx) hi = t;
+                else lo = t;
+                t = (lo + hi) / 2;
+            }
+            return clamp(sampleY(t), 0, 1);
+        }
+
+        _easeRatio(ratio, graphType) {
+            const r = clamp(Number(ratio), 0, 1);
+            const g = this._sanitizeGraphType(graphType);
+            if (g === 'linear') return r;
+
+            // Note: CSS step timing can't be represented per-track in a single transform animation.
+            // We keep it best-effort here (global), but recommend linear/ease curves for multi-track offsets.
+            if (g === 'step-start') return (r <= 0 ? 0 : 1);
+            if (g === 'step-end') return (r < 1 ? 0 : 1);
+
+            // CSS default cubic-beziers
+            if (g === 'ease') return this._cubicBezierYForX(r, 0.25, 0.1, 0.25, 1.0);
+            if (g === 'ease-in') return this._cubicBezierYForX(r, 0.42, 0.0, 1.0, 1.0);
+            if (g === 'ease-out') return this._cubicBezierYForX(r, 0.0, 0.0, 0.58, 1.0);
+            if (g === 'ease-in-out') return this._cubicBezierYForX(r, 0.42, 0.0, 0.58, 1.0);
+
+            return r;
+        }
+
+        _valueAtEased(keys, t, valueKeys, graphType) {
+            // keys: sorted [{t,...}] and t within [0,duration]
+            if (!Array.isArray(keys) || keys.length === 0) return null;
+            const time = Math.round(t);
+
+            if (time <= keys[0].t) return keys[0];
+            if (time >= keys[keys.length - 1].t) return keys[keys.length - 1];
+
+            let i = 0;
+            while (i < keys.length - 1 && keys[i + 1].t < time) i += 1;
+            const a = keys[i];
+            const b = keys[i + 1];
+            const span = Math.max(1, b.t - a.t);
+            const raw = clamp((time - a.t) / span, 0, 1);
+            const ratio = this._easeRatio(raw, graphType);
+
+            const out = { t: time };
+            (Array.isArray(valueKeys) ? valueKeys : []).forEach((k) => {
+                const av = toNumber(a[k], 0);
+                const bv = toNumber(b[k], 0);
+                out[k] = av + (bv - av) * ratio;
+            });
+            return out;
+        }
+
         _ensureStyleEl() {
             if (!this._styleEl) this._styleEl = getOrCreateStyleHost();
             return this._styleEl;
@@ -109,17 +196,19 @@
             }
         }
 
-        _readTrackValuesAt({ durationMs, positionKeys, scaleKeys, opacityKeys }, tMs) {
+        _readTrackValuesAt({ durationMs, positionKeys, scaleKeys, opacityKeys, graphType }, tMs) {
             const duration = Math.max(1, Math.round(Number(durationMs || 1000)));
             const t = clamp(Math.round(Number(tMs || 0)), 0, duration);
+
+            const g = this._sanitizeGraphType(graphType);
 
             const posKeys = this._ensureEndpoints(positionKeys, duration, { x: 0, y: 0 });
             const scKeys = this._ensureEndpoints(scaleKeys, duration, { s: 1 });
             const opKeys = this._ensureEndpoints(opacityKeys, duration, { o: 1 });
 
-            const pos = posKeys.length ? this._valueAt(posKeys, t, ['x', 'y']) : null;
-            const sc = scKeys.length ? this._valueAt(scKeys, t, ['s']) : null;
-            const op = opKeys.length ? this._valueAt(opKeys, t, ['o']) : null;
+            const pos = posKeys.length ? this._valueAtEased(posKeys, t, ['x', 'y'], g) : null;
+            const sc = scKeys.length ? this._valueAtEased(scKeys, t, ['s'], g) : null;
+            const op = opKeys.length ? this._valueAtEased(opKeys, t, ['o'], g) : null;
 
             return {
                 tMs: t,
@@ -514,15 +603,20 @@
             return out;
         }
 
-        _buildMergedKeyframes({ durationMs, loop, positionKeys, scaleKeys, opacityKeys }, { baseTransform } = {}) {
+        _buildMergedKeyframes({ durationMs, loop, positionKeys, scaleKeys, opacityKeys, graphType }, { baseTransform } = {}) {
             const duration = Math.max(1, Math.round(durationMs || 1000));
+
+            const g = this._sanitizeGraphType(graphType);
 
             const posKeys = this._ensureEndpoints(positionKeys, duration, { x: 0, y: 0 });
             const scKeys = this._ensureEndpoints(scaleKeys, duration, { s: 1 });
             const opKeys = this._ensureEndpoints(opacityKeys, duration, { o: 1 });
 
             // Collect union times from each track, plus 0/duration.
-            const times = uniqSorted([
+            // IMPORTANT: If we rely on CSS easing (ease-in-out, etc.), every union time becomes a segment boundary
+            // which causes *all* properties to ease-to-zero velocity at that boundary.
+            // To avoid cross-track "linked stops", we bake easing into sampled values and keep CSS timing linear.
+            const unionTimes = uniqSorted([
                 0,
                 duration,
                 ...posKeys.map(k => k.t),
@@ -530,19 +624,36 @@
                 ...opKeys.map(k => k.t),
             ].filter(n => Number.isFinite(n) && n >= 0));
 
+            const times = (() => {
+                if (g === 'linear') return unionTimes;
+
+                const maxFrames = 320;
+                const idealStep = 16;
+                const idealCount = Math.ceil(duration / idealStep) + 1;
+                const step = (idealCount > maxFrames)
+                    ? Math.max(1, Math.ceil(duration / Math.max(2, (maxFrames - 1))))
+                    : idealStep;
+
+                const sampled = [];
+                for (let t = 0; t <= duration; t += step) sampled.push(Math.round(t));
+                sampled.push(duration);
+
+                return uniqSorted([...unionTimes, ...sampled]);
+            })();
+
             const readPos = (t) => {
                 if (!posKeys.length) return { x: 0, y: 0 };
-                const v = this._valueAt(posKeys, t, ['x', 'y']);
+                const v = this._valueAtEased(posKeys, t, ['x', 'y'], g);
                 return { x: toNumber(v?.x ?? 0, 0), y: toNumber(v?.y ?? 0, 0) };
             };
             const readScale = (t) => {
                 if (!scKeys.length) return { s: 1 };
-                const v = this._valueAt(scKeys, t, ['s']);
+                const v = this._valueAtEased(scKeys, t, ['s'], g);
                 return { s: Math.max(0, toNumber(v?.s ?? 1, 1)) };
             };
             const readOpacity = (t) => {
                 if (!opKeys.length) return { o: 1 };
-                const v = this._valueAt(opKeys, t, ['o']);
+                const v = this._valueAtEased(opKeys, t, ['o'], g);
                 return { o: clamp(toNumber(v?.o ?? 1, 1), 0, 1) };
             };
 
@@ -641,22 +752,6 @@
         applyPresetOnElement(el, preset, { loop = null, seamless = true, phaseShiftMs = 0 } = {}) {
             if (!el || !preset) return false;
 
-            const sanitizeTiming = (v) => {
-                const s = String(v || '').trim();
-                if (!s) return 'ease-in-out';
-                const allowed = new Set([
-                    'linear',
-                    'ease',
-                    'ease-in',
-                    'ease-out',
-                    'ease-in-out',
-                    'step-start',
-                    'step-end',
-                ]);
-                if (allowed.has(s)) return s;
-                return 'ease-in-out';
-            };
-
             const nowPerf = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
             const phaseMs = seamless ? this._getExistingPhaseMs(el, nowPerf) : 0;
 
@@ -672,10 +767,10 @@
 
             const parsed = this._parseTimeline(preset.timeline, { graphType: preset.graphType });
             const effectiveLoop = (typeof loop === 'boolean') ? loop : !!parsed.loop;
-            const timing = sanitizeTiming(parsed.graphType || preset.graphType);
+            const graphType = this._sanitizeGraphType(parsed.graphType || preset.graphType);
 
             const merged = this._buildMergedKeyframes(
-                { ...parsed, loop: effectiveLoop },
+                { ...parsed, loop: effectiveLoop, graphType },
                 { baseTransform }
             );
 
@@ -704,7 +799,9 @@
                 const delayMs = -Math.round(shiftedPhase);
                 style.animationName = animName;
                 style.animationDuration = `${durationMs}ms`;
-                style.animationTimingFunction = timing;
+                // Keep timing linear to avoid cross-track "linked stops" at union keyframe boundaries.
+                // Easing (ease/ease-in-out/etc.) is baked into the sampled keyframe values.
+                style.animationTimingFunction = 'linear';
                 style.animationDelay = `${delayMs}ms`;
                 style.animationIterationCount = effectiveLoop ? 'infinite' : '1';
                 style.animationFillMode = 'both';
@@ -721,6 +818,7 @@
                 loop: effectiveLoop,
                 startPerf,
                 inlineSnapshot,
+                graphType,
                 // Keep parsed tracks so we can sample current pose for smooth transitions.
                 positionKeys: parsed.positionKeys,
                 scaleKeys: parsed.scaleKeys,
