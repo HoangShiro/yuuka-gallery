@@ -364,6 +364,46 @@ def register_routes(blueprint, plugin):
                 if not isinstance(anim, list):
                     anim = []
                 anim = [str(x).strip() for x in anim if str(x).strip()]
+
+                sfx1 = s.get('sound_fx_1')
+                if not isinstance(sfx1, list):
+                    sfx1 = s.get('soundFx1')
+                if not isinstance(sfx1, list):
+                    sfx1 = []
+                sfx1 = [str(x).strip() for x in sfx1 if str(x).strip()]
+
+                sfx2 = s.get('sound_fx_2')
+                if not isinstance(sfx2, list):
+                    sfx2 = s.get('soundFx2')
+                if not isinstance(sfx2, list):
+                    sfx2 = []
+                sfx2_raw = [str(x).strip() for x in sfx2 if str(x).strip()]
+                sfx1_set = set(sfx1)
+                sfx2 = [x for x in sfx2_raw if x not in sfx1_set]
+
+                p1 = s.get('sound_fx_1_parallel')
+                if p1 is None:
+                    p1 = s.get('soundFx1Parallel')
+                p2 = s.get('sound_fx_2_parallel')
+                if p2 is None:
+                    p2 = s.get('soundFx2Parallel')
+
+                def _to_bool(v, default=False):
+                    if isinstance(v, bool):
+                        return v
+                    if isinstance(v, (int, float)):
+                        return bool(v)
+                    if isinstance(v, str):
+                        sv = v.strip().casefold()
+                        if sv in ('1', 'true', 'yes', 'y', 'on'):
+                            return True
+                        if sv in ('0', 'false', 'no', 'n', 'off', ''):
+                            return False
+                    return default
+
+                p1 = _to_bool(p1, default=False)
+                p2 = _to_bool(p2, default=True)
+
                 if sid and name and gid:
                     cleaned.append({
                         'id': sid,
@@ -371,6 +411,10 @@ def register_routes(blueprint, plugin):
                         'group_id': gid,
                         'tag_group_ids': tgids,
                         'animation_presets': anim,
+                        'sound_fx_1': sfx1,
+                        'sound_fx_2': sfx2,
+                        'sound_fx_1_parallel': p1,
+                        'sound_fx_2_parallel': p2,
                     })
             return jsonify(cleaned)
 
@@ -381,6 +425,20 @@ def register_routes(blueprint, plugin):
         animation_presets = data.get('animation_presets')
         if not isinstance(animation_presets, list):
             animation_presets = data.get('animationPresets')
+
+        sound_fx_1 = data.get('sound_fx_1')
+        if not isinstance(sound_fx_1, list):
+            sound_fx_1 = data.get('soundFx1')
+        sound_fx_2 = data.get('sound_fx_2')
+        if not isinstance(sound_fx_2, list):
+            sound_fx_2 = data.get('soundFx2')
+
+        sound_fx_1_parallel = data.get('sound_fx_1_parallel')
+        if sound_fx_1_parallel is None:
+            sound_fx_1_parallel = data.get('soundFx1Parallel')
+        sound_fx_2_parallel = data.get('sound_fx_2_parallel')
+        if sound_fx_2_parallel is None:
+            sound_fx_2_parallel = data.get('soundFx2Parallel')
         if not name:
             abort(400, 'Missing field: name')
         if not group_id:
@@ -400,6 +458,32 @@ def register_routes(blueprint, plugin):
         if not isinstance(animation_presets, list):
             animation_presets = []
         anim_list = [str(x).strip() for x in animation_presets if str(x).strip()]
+
+        # Sound fx presets (playlist): allow duplicates + preserve order.
+        if not isinstance(sound_fx_1, list):
+            sound_fx_1 = []
+        if not isinstance(sound_fx_2, list):
+            sound_fx_2 = []
+        sfx1 = [str(x).strip() for x in sound_fx_1 if str(x).strip()]
+        sfx2_raw = [str(x).strip() for x in sound_fx_2 if str(x).strip()]
+        sfx1_set = set(sfx1)
+        sfx2 = [x for x in sfx2_raw if x not in sfx1_set]
+
+        def _to_bool(v, default=False):
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, (int, float)):
+                return bool(v)
+            if isinstance(v, str):
+                sv = v.strip().casefold()
+                if sv in ('1', 'true', 'yes', 'y', 'on'):
+                    return True
+                if sv in ('0', 'false', 'no', 'n', 'off', ''):
+                    return False
+            return default
+
+        p1 = _to_bool(sound_fx_1_parallel, default=False)
+        p2 = _to_bool(sound_fx_2_parallel, default=True)
 
         groups = plugin._load_char_state_groups(user_hash)
         if not any(isinstance(g, dict) and str(g.get('id') or '').strip() == group_id for g in groups):
@@ -422,6 +506,10 @@ def register_routes(blueprint, plugin):
             'group_id': group_id,
             'tag_group_ids': tgids,
             'animation_presets': anim_list,
+            'sound_fx_1': sfx1,
+            'sound_fx_2': sfx2,
+            'sound_fx_1_parallel': p1,
+            'sound_fx_2_parallel': p2,
         }
         states.append(new_state)
         plugin._save_char_states(user_hash, states)
@@ -503,6 +591,17 @@ def register_routes(blueprint, plugin):
             animation_presets = data.get('animation_presets')
             if not isinstance(animation_presets, list):
                 animation_presets = data.get('animationPresets')
+
+            has_sfx = any(k in data for k in (
+                'sound_fx_1', 'sound_fx_2', 'soundFx1', 'soundFx2',
+                'sound_fx_1_parallel', 'sound_fx_2_parallel', 'soundFx1Parallel', 'soundFx2Parallel'
+            ))
+            sound_fx_1 = data.get('sound_fx_1')
+            if not isinstance(sound_fx_1, list):
+                sound_fx_1 = data.get('soundFx1')
+            sound_fx_2 = data.get('sound_fx_2')
+            if not isinstance(sound_fx_2, list):
+                sound_fx_2 = data.get('soundFx2')
             if not name:
                 abort(400, 'Missing field: name')
             if not group_id:
@@ -554,6 +653,51 @@ def register_routes(blueprint, plugin):
                     except Exception:
                         pass
 
+            if has_sfx:
+                if not isinstance(sound_fx_1, list):
+                    abort(400, 'Invalid field: sound_fx_1')
+                if not isinstance(sound_fx_2, list):
+                    abort(400, 'Invalid field: sound_fx_2')
+                sfx1 = [str(x).strip() for x in sound_fx_1 if str(x).strip()]
+                sfx2_raw = [str(x).strip() for x in sound_fx_2 if str(x).strip()]
+                sfx1_set = set(sfx1)
+                sfx2 = [x for x in sfx2_raw if x not in sfx1_set]
+
+                p1_raw = data.get('sound_fx_1_parallel')
+                if p1_raw is None:
+                    p1_raw = data.get('soundFx1Parallel')
+                p2_raw = data.get('sound_fx_2_parallel')
+                if p2_raw is None:
+                    p2_raw = data.get('soundFx2Parallel')
+
+                def _to_bool(v, default=False):
+                    if isinstance(v, bool):
+                        return v
+                    if isinstance(v, (int, float)):
+                        return bool(v)
+                    if isinstance(v, str):
+                        sv = v.strip().casefold()
+                        if sv in ('1', 'true', 'yes', 'y', 'on'):
+                            return True
+                        if sv in ('0', 'false', 'no', 'n', 'off', ''):
+                            return False
+                    return default
+
+                p1_default = bool(state.get('sound_fx_1_parallel') is True)
+                p2_default = True if state.get('sound_fx_2_parallel') is None else bool(state.get('sound_fx_2_parallel') is True)
+                p1 = _to_bool(p1_raw, default=p1_default)
+                p2 = _to_bool(p2_raw, default=p2_default)
+                state['sound_fx_1'] = sfx1
+                state['sound_fx_2'] = sfx2
+                state['sound_fx_1_parallel'] = p1
+                state['sound_fx_2_parallel'] = p2
+                for k in ('soundFx1', 'soundFx2', 'soundFx1Parallel', 'soundFx2Parallel'):
+                    if k in state:
+                        try:
+                            state.pop(k, None)
+                        except Exception:
+                            pass
+
             state['name'] = name
             state['group_id'] = group_id
             if 'groupId' in state:
@@ -568,6 +712,10 @@ def register_routes(blueprint, plugin):
                 'group_id': group_id,
                 'tag_group_ids': state.get('tag_group_ids') if isinstance(state.get('tag_group_ids'), list) else [],
                 'animation_presets': state.get('animation_presets') if isinstance(state.get('animation_presets'), list) else [],
+                'sound_fx_1': state.get('sound_fx_1') if isinstance(state.get('sound_fx_1'), list) else [],
+                'sound_fx_2': state.get('sound_fx_2') if isinstance(state.get('sound_fx_2'), list) else [],
+                'sound_fx_1_parallel': bool(state.get('sound_fx_1_parallel') is True),
+                'sound_fx_2_parallel': True if state.get('sound_fx_2_parallel') is None else bool(state.get('sound_fx_2_parallel') is True),
             })
 
         # DELETE
@@ -613,6 +761,22 @@ def register_routes(blueprint, plugin):
             anim = []
         anim = [str(x).strip() for x in anim if str(x).strip()]
 
+        sfx1 = state.get('sound_fx_1')
+        if not isinstance(sfx1, list):
+            sfx1 = state.get('soundFx1')
+        if not isinstance(sfx1, list):
+            sfx1 = []
+        sfx1 = [str(x).strip() for x in sfx1 if str(x).strip()]
+
+        sfx2 = state.get('sound_fx_2')
+        if not isinstance(sfx2, list):
+            sfx2 = state.get('soundFx2')
+        if not isinstance(sfx2, list):
+            sfx2 = []
+        sfx2_raw = [str(x).strip() for x in sfx2 if str(x).strip()]
+        sfx1_set = set(sfx1)
+        sfx2 = [x for x in sfx2_raw if x not in sfx1_set]
+
         existing_names = {
             str((s or {}).get('name') or '').strip()
             for s in states
@@ -635,6 +799,10 @@ def register_routes(blueprint, plugin):
             'group_id': group_id,
             'tag_group_ids': tgids,
             'animation_presets': anim,
+            'sound_fx_1': sfx1,
+            'sound_fx_2': sfx2,
+            'sound_fx_1_parallel': bool(state.get('sound_fx_1_parallel') is True),
+            'sound_fx_2_parallel': True if state.get('sound_fx_2_parallel') is None else bool(state.get('sound_fx_2_parallel') is True),
         }
         states.append(new_state)
         plugin._save_char_states(user_hash, states)

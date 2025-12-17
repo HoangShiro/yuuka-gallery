@@ -253,6 +253,9 @@
                 document.removeEventListener('mousedown', this._handleCharacterGlobalPointerDown);
                 document.removeEventListener('touchstart', this._handleCharacterGlobalPointerDown);
             } catch { }
+
+            // Stop any hold-loop playback when leaving Character View.
+            try { this._characterStopCharacterLayerLoop?.({ stopEngine: true }); } catch { }
             try {
                 this.container?.classList?.remove('plugin-album--character');
             } catch { }
@@ -501,9 +504,86 @@
             // Click on character layer replays current animation playlist.
             const charLayer = root?.querySelector('.plugin-album__character-layer--char');
             if (charLayer) {
-                charLayer.addEventListener('click', () => {
+                // Mobile: prevent the browser's default long-press menu on the character layer.
+                try {
+                    const isCoarsePointerDevice = (() => {
+                        try {
+                            if (typeof window !== 'undefined' && window.matchMedia) {
+                                if (window.matchMedia('(pointer: coarse)').matches) return true;
+                                if (window.matchMedia('(any-pointer: coarse)').matches) return true;
+                            }
+                        } catch { }
+                        try {
+                            if (typeof navigator !== 'undefined' && typeof navigator.maxTouchPoints === 'number') {
+                                return navigator.maxTouchPoints > 0;
+                            }
+                        } catch { }
+                        try { return (typeof window !== 'undefined') && ('ontouchstart' in window); } catch { }
+                        return false;
+                    })();
+
+                    charLayer.addEventListener('contextmenu', (e) => {
+                        if (!isCoarsePointerDevice) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }, true);
+                } catch { }
+
+                // Hold (0.5s) => enable loop; click => normal play (and stops loop).
+                try {
+                    let holdTimer = null;
+                    let holdFired = false;
+
+                    const clearHold = () => {
+                        try { if (holdTimer) clearTimeout(holdTimer); } catch { }
+                        holdTimer = null;
+                    };
+
+                    const startHold = () => {
+                        clearHold();
+                        holdFired = false;
+                        holdTimer = setTimeout(() => {
+                            holdFired = true;
+                            try { charLayer.dataset.suppressNextClick = '1'; } catch { }
+                            try { this._characterStartCharacterLayerLoop?.({ reason: 'hold' }); } catch { }
+                        }, 500);
+                    };
+
+                    // Pointer events (mouse + touch + pen)
+                    charLayer.addEventListener('pointerdown', (e) => {
+                        try {
+                            // Left click only for mouse; allow touch/pen.
+                            if (typeof e.pointerType === 'string' && e.pointerType === 'mouse') {
+                                if (e.button !== 0) return;
+                            }
+                        } catch { }
+                        startHold();
+                    });
+                    charLayer.addEventListener('pointerup', clearHold);
+                    charLayer.addEventListener('pointercancel', clearHold);
+                    charLayer.addEventListener('pointerleave', clearHold);
+
+                    // Fallback touch events (some embedded browsers)
+                    charLayer.addEventListener('touchstart', () => startHold(), { passive: true });
+                    charLayer.addEventListener('touchend', clearHold);
+                    charLayer.addEventListener('touchcancel', clearHold);
+                } catch { }
+
+                // Capture click to suppress the release-click after a hold.
+                charLayer.addEventListener('click', (e) => {
+                    try {
+                        const sup = String(charLayer.dataset.suppressNextClick || '').trim();
+                        if (sup) {
+                            try { delete charLayer.dataset.suppressNextClick; } catch { }
+                            e.preventDefault();
+                            e.stopPropagation();
+                            return;
+                        }
+                    } catch { }
+
+                    // Normal click play.
                     try { this._characterPlayCurrentCharacterLayerAnimations?.({ restart: true, reason: 'click' }); } catch { }
-                });
+                }, true);
             }
 
             // Initial image

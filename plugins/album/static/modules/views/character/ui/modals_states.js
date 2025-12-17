@@ -632,6 +632,33 @@
                         <div class="plugin-album__character-submenu-list" data-role="anim-preset-suggestions" style="max-height: 220px; overflow: auto;"></div>
                         <div class="plugin-album__character-hint" data-role="anim-lock-hint" style="margin-top: 8px; color: var(--color-secondary-text);"></div>
                     </div>
+                    <div class="form-group">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap: 10px; width: 100%; min-width: 0;">
+                            <label style="margin:0; flex: 1 1 auto; min-width: 0;">Sound Fx 1</label>
+                            <label class="plugin-album__android-toggle plugin-album__android-toggle--compact" style="margin:0; flex: 0 0 auto; max-width: 100%;">
+                                <span class="plugin-album__android-toggle__text">Play parallel</span>
+                                <input type="checkbox" data-role="sfx1-parallel" />
+                                <span class="plugin-album__android-toggle__track"></span>
+                            </label>
+                        </div>
+                        <div class="plugin-album__character-preset-pillwrap" data-role="selected-sfx1"></div>
+                        <input type="text" id="sfx1-search" placeholder="Gõ để tìm sound..." autocomplete="off" />
+                        <div class="plugin-album__character-preset-pillwrap" data-role="sfx1-suggestions"></div>
+                    </div>
+                    <div class="form-group">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap: 10px; width: 100%; min-width: 0;">
+                            <label style="margin:0; flex: 1 1 auto; min-width: 0;">Sound Fx 2</label>
+                            <label class="plugin-album__android-toggle plugin-album__android-toggle--compact" style="margin:0; flex: 0 0 auto; max-width: 100%;">
+                                <span class="plugin-album__android-toggle__text">Play parallel</span>
+                                <input type="checkbox" data-role="sfx2-parallel" />
+                                <span class="plugin-album__android-toggle__track"></span>
+                            </label>
+                        </div>
+                        <div class="plugin-album__character-preset-pillwrap" data-role="selected-sfx2"></div>
+                        <input type="text" id="sfx2-search" placeholder="Gõ để tìm sound..." autocomplete="off" />
+                        <div class="plugin-album__character-preset-pillwrap" data-role="sfx2-suggestions"></div>
+                        <div class="plugin-album__character-hint" data-role="sfx-lock-hint" style="margin-top: 8px; color: var(--color-secondary-text);"></div>
+                    </div>
                     <div class="modal-actions">
                         ${(isEditing) ? `<button id="btn-delete" class="btn-danger" title="Xoá"><span class="material-symbols-outlined">delete_forever</span></button>` : ''}
                         <div style="flex-grow:1"></div>
@@ -670,10 +697,82 @@
                 };
 
                 let selectedAnimPresets = isEditing ? readAnimList(existing) : [];
+
+                // --- Sound FX playlist editor (duplicates allowed, order preserved; no-duplicate across slot 1/2) ---
+                const readSoundList = (obj, slot) => {
+                    try {
+                        const s = Number(slot);
+                        if (s === 1) {
+                            const a = obj?.sound_fx_1;
+                            if (Array.isArray(a)) return a.map(x => String(x || '').trim()).filter(Boolean);
+                            const b = obj?.soundFx1;
+                            if (Array.isArray(b)) return b.map(x => String(x || '').trim()).filter(Boolean);
+                            return [];
+                        }
+                        if (s === 2) {
+                            const a = obj?.sound_fx_2;
+                            if (Array.isArray(a)) return a.map(x => String(x || '').trim()).filter(Boolean);
+                            const b = obj?.soundFx2;
+                            if (Array.isArray(b)) return b.map(x => String(x || '').trim()).filter(Boolean);
+                            return [];
+                        }
+                    } catch { }
+                    return [];
+                };
+
+                let selectedSfx1 = isEditing ? readSoundList(existing, 1) : [];
+                let selectedSfx2 = isEditing ? readSoundList(existing, 2) : [];
+                try {
+                    const set1 = new Set(selectedSfx1);
+                    selectedSfx2 = selectedSfx2.filter(x => !set1.has(x));
+                } catch { }
                 const animPillWrap = dialog.querySelector('[data-role="selected-anim-presets"]');
                 const animInput = dialog.querySelector('#anim-preset-search');
                 const animSug = dialog.querySelector('[data-role="anim-preset-suggestions"]');
                 const animHint = dialog.querySelector('[data-role="anim-lock-hint"]');
+
+                const sfx1PillWrap = dialog.querySelector('[data-role="selected-sfx1"]');
+                const sfx1Input = dialog.querySelector('#sfx1-search');
+                const sfx1Sug = dialog.querySelector('[data-role="sfx1-suggestions"]');
+                const sfx2PillWrap = dialog.querySelector('[data-role="selected-sfx2"]');
+                const sfx2Input = dialog.querySelector('#sfx2-search');
+                const sfx2Sug = dialog.querySelector('[data-role="sfx2-suggestions"]');
+                const sfxHint = dialog.querySelector('[data-role="sfx-lock-hint"]');
+
+                const readSoundParallel = (obj, slot) => {
+                    try {
+                        const s = Number(slot);
+                        if (s === 1) {
+                            const v = obj?.sound_fx_1_parallel;
+                            if (typeof v === 'boolean') return v;
+                            const v2 = obj?.soundFx1Parallel;
+                            if (typeof v2 === 'boolean') return v2;
+                            return false;
+                        }
+                        if (s === 2) {
+                            const v = obj?.sound_fx_2_parallel;
+                            if (typeof v === 'boolean') return v;
+                            const v2 = obj?.soundFx2Parallel;
+                            if (typeof v2 === 'boolean') return v2;
+                            return true;
+                        }
+                    } catch { }
+                    return (Number(slot) === 2);
+                };
+
+                let sfx1Parallel = isEditing ? readSoundParallel(existing, 1) : false;
+                let sfx2Parallel = isEditing ? readSoundParallel(existing, 2) : true;
+
+                const sfx1ParallelToggle = dialog.querySelector('[data-role="sfx1-parallel"]');
+                const sfx2ParallelToggle = dialog.querySelector('[data-role="sfx2-parallel"]');
+                try { if (sfx1ParallelToggle) sfx1ParallelToggle.checked = !!sfx1Parallel; } catch { }
+                try { if (sfx2ParallelToggle) sfx2ParallelToggle.checked = !!sfx2Parallel; } catch { }
+                sfx1ParallelToggle?.addEventListener('change', () => {
+                    try { sfx1Parallel = !!sfx1ParallelToggle.checked; } catch { sfx1Parallel = false; }
+                });
+                sfx2ParallelToggle?.addEventListener('change', () => {
+                    try { sfx2Parallel = !!sfx2ParallelToggle.checked; } catch { sfx2Parallel = true; }
+                });
 
                 const findActiveAnimStateGroupId = () => {
                     try {
@@ -734,6 +833,251 @@
                             animPillWrap.style.pointerEvents = animLocked ? 'none' : '';
                         }
                     } catch { }
+                };
+
+                const findActiveSoundStateGroupId = () => {
+                    try {
+                        const all = Array.isArray(this.state.character?.state?.states) ? this.state.character.state.states : [];
+                        const groupsWithSound = new Set();
+                        all.forEach((s) => {
+                            if (!s || typeof s !== 'object') return;
+                            const sgid = String(s?.group_id || s?.groupId || '').trim();
+                            if (!sgid) return;
+                            const s1 = readSoundList(s, 1);
+                            const s2 = readSoundList(s, 2);
+                            if ((s1 && s1.length) || (s2 && s2.length)) groupsWithSound.add(sgid);
+                        });
+                        if (groupsWithSound.has(gid)) return gid;
+                        const it = groupsWithSound.values().next();
+                        return it && !it.done ? it.value : null;
+                    } catch {
+                        return null;
+                    }
+                };
+
+                const activeSoundStateGroupId = findActiveSoundStateGroupId();
+                const sfxLocked = !!(activeSoundStateGroupId && String(activeSoundStateGroupId) !== String(gid));
+                const activeSoundStateGroupName = (() => {
+                    try {
+                        if (!activeSoundStateGroupId) return '';
+                        if (typeof this._characterGetStateGroupNameById === 'function') {
+                            return this._characterGetStateGroupNameById(activeSoundStateGroupId) || activeSoundStateGroupId;
+                        }
+                        return activeSoundStateGroupId;
+                    } catch {
+                        return activeSoundStateGroupId || '';
+                    }
+                })();
+
+                const applySfxLockUi = () => {
+                    const msg = sfxLocked ? `Sound Fx đã có sẵn ở ${String(activeSoundStateGroupName)}.` : '';
+                    try { if (sfxHint) sfxHint.textContent = msg; } catch { }
+                    try {
+                        const locked = !!sfxLocked;
+                        if (sfx1Input) sfx1Input.disabled = locked;
+                        if (sfx2Input) sfx2Input.disabled = locked;
+                        if (sfx1ParallelToggle) sfx1ParallelToggle.disabled = locked;
+                        if (sfx2ParallelToggle) sfx2ParallelToggle.disabled = locked;
+                        const blocks = [sfx1Sug, sfx2Sug, sfx1PillWrap, sfx2PillWrap];
+                        blocks.forEach((el) => {
+                            if (!el) return;
+                            el.style.opacity = locked ? '0.55' : '';
+                            el.style.pointerEvents = locked ? 'none' : '';
+                        });
+                    } catch { }
+                };
+
+                const limitPillsToMaxLines = (wrapEl, maxLines = 3) => {
+                    try {
+                        if (!wrapEl) return;
+                        const children = Array.from(wrapEl.children || []);
+                        if (!children.length) return;
+                        const first = children[0];
+                        const rowGap = (() => {
+                            try {
+                                const cs = window.getComputedStyle(wrapEl);
+                                const g = cs.rowGap || cs.gap || '0px';
+                                const n = parseFloat(String(g || '0').replace('px', ''));
+                                return Number.isFinite(n) ? n : 0;
+                            } catch {
+                                return 0;
+                            }
+                        })();
+                        const pillH = Math.max(1, Number(first.offsetHeight || 0));
+                        const maxH = (pillH * Number(maxLines || 3)) + (rowGap * Math.max(0, Number(maxLines || 3) - 1));
+
+                        wrapEl.style.maxHeight = `${maxH}px`;
+                        wrapEl.style.overflow = 'hidden';
+
+                        const mkDots = () => {
+                            const dots = document.createElement('button');
+                            dots.type = 'button';
+                            dots.className = 'plugin-album__character-preset-pill';
+                            dots.textContent = '...';
+                            dots.disabled = true;
+                            dots.title = '...';
+                            return dots;
+                        };
+
+                        let removed = false;
+                        while (wrapEl.scrollHeight > maxH && wrapEl.children.length > 0) {
+                            wrapEl.removeChild(wrapEl.lastChild);
+                            removed = true;
+                        }
+                        if (!removed) return;
+
+                        const dots = mkDots();
+                        wrapEl.appendChild(dots);
+                        while (wrapEl.scrollHeight > maxH && wrapEl.children.length > 1) {
+                            wrapEl.removeChild(wrapEl.children[wrapEl.children.length - 2]);
+                        }
+                    } catch { }
+                };
+
+                let allSoundPresets = [];
+                const fetchSoundPresets = async () => {
+                    try {
+                        const all = await this.api.album.get('/sound_fx/presets');
+                        const arr = Array.isArray(all) ? all : [];
+                        allSoundPresets = arr
+                            .filter(p => p && typeof p === 'object')
+                            .map(p => ({
+                                id: String(p?.id || '').trim(),
+                                name: String(p?.name || '').trim(),
+                                ext: String(p?.ext || '').trim().toLowerCase(),
+                                url: String(p?.url || '').trim(),
+                            }))
+                            .filter(p => p.id && p.name);
+                        try {
+                            if (!this.state.character) this.state.character = {};
+                            this.state.character._soundFxPresetsCache = { fetchedAt: Date.now(), presets: allSoundPresets };
+                        } catch { }
+                    } catch {
+                        allSoundPresets = [];
+                    }
+                };
+
+                const getPreviewEngine = () => {
+                    try {
+                        if (typeof this._albumSoundGetEngine === 'function') return this._albumSoundGetEngine();
+                        if (window.Yuuka?.AlbumSoundEngine) return new window.Yuuka.AlbumSoundEngine();
+                    } catch { }
+                    return null;
+                };
+
+                const formatSoundLabel = (p) => {
+                    const n = String(p?.name || '').trim();
+                    const ext = String(p?.ext || '').trim().toLowerCase();
+                    return ext ? `${n}.${ext}` : n;
+                };
+
+                const renderSfxSelected = (slot) => {
+                    const s = Number(slot);
+                    const wrap = (s === 1) ? sfx1PillWrap : sfx2PillWrap;
+                    if (!wrap) return;
+                    const list = (s === 1) ? selectedSfx1 : selectedSfx2;
+
+                    wrap.innerHTML = '';
+                    list.forEach((pid, idx) => {
+                        const preset = allSoundPresets.find(p => p.id === pid) || null;
+                        const label = preset ? formatSoundLabel(preset) : String(pid);
+
+                        const pill = document.createElement('button');
+                        pill.type = 'button';
+                        pill.className = 'plugin-album__character-preset-pill';
+                        pill.textContent = label;
+                        pill.title = `${label} (bấm để xoá)`;
+                        pill.dataset.index = String(idx);
+                        pill.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const i = Number(pill.dataset.index);
+                            if (!Number.isFinite(i) || i < 0 || i >= list.length) return;
+                            list.splice(i, 1);
+                            if (s === 1) selectedSfx1 = list;
+                            else selectedSfx2 = list;
+                            renderSfxSelected(1);
+                            renderSfxSelected(2);
+                            renderSfxSuggestions(1);
+                            renderSfxSuggestions(2);
+                        });
+                        wrap.appendChild(pill);
+                    });
+                };
+
+                const renderSfxSuggestions = (slot) => {
+                    const s = Number(slot);
+                    const inputEl = (s === 1) ? sfx1Input : sfx2Input;
+                    const sugEl = (s === 1) ? sfx1Sug : sfx2Sug;
+                    if (!sugEl) return;
+                    const q = String(inputEl?.value || '').trim().toLowerCase();
+                    sugEl.innerHTML = '';
+                    try { sugEl.style.maxHeight = ''; sugEl.style.overflow = ''; } catch { }
+                    if (sfxLocked) return;
+
+                    const selectedAll = new Set([...(selectedSfx1 || []), ...(selectedSfx2 || [])]);
+                    const matches = (Array.isArray(allSoundPresets) ? allSoundPresets : [])
+                        .filter(p => !selectedAll.has(p.id))
+                        .filter(p => {
+                            if (!q) return true;
+                            return formatSoundLabel(p).toLowerCase().includes(q);
+                        })
+                        .slice(0, 30);
+
+                    matches.forEach((p) => {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'plugin-album__character-preset-pill';
+                        btn.title = formatSoundLabel(p);
+                        btn.style.gap = '6px';
+                        btn.style.maxWidth = '100%';
+
+                        const play = document.createElement('span');
+                        play.className = 'material-symbols-outlined';
+                        play.textContent = 'play_arrow';
+                        play.title = 'Preview';
+                        play.style.opacity = '0.9';
+                        play.style.cursor = 'pointer';
+                        play.style.fontSize = '18px';
+                        play.style.lineHeight = '1';
+                        play.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            try {
+                                const eng = getPreviewEngine();
+                                if (eng && typeof eng.play === 'function') eng.play(p.url);
+                            } catch { }
+                        });
+
+                        const titleEl = document.createElement('span');
+                        titleEl.textContent = formatSoundLabel(p);
+
+                        btn.appendChild(play);
+                        btn.appendChild(titleEl);
+
+                        btn.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const otherSet = new Set((s === 1) ? (selectedSfx2 || []) : (selectedSfx1 || []));
+                            if (otherSet.has(p.id)) {
+                                showError('Sound đã tồn tại ở ô còn lại.');
+                                return;
+                            }
+                            const list = (s === 1) ? (selectedSfx1 || []) : (selectedSfx2 || []);
+                            if (!list.includes(p.id)) list.push(p.id);
+                            if (s === 1) selectedSfx1 = list;
+                            else selectedSfx2 = list;
+                            try { if (inputEl) inputEl.value = ''; } catch { }
+                            renderSfxSelected(1);
+                            renderSfxSelected(2);
+                            renderSfxSuggestions(1);
+                            renderSfxSuggestions(2);
+                        });
+                        sugEl.appendChild(btn);
+                    });
+
+                    // Limit suggestion pills to 3 lines; show "..." if overflow.
+                    limitPillsToMaxLines(sugEl, 3);
                 };
 
                 const renderAnimSelected = () => {
@@ -867,6 +1211,16 @@
                 });
                 animInput?.addEventListener('input', () => renderAnimSuggestions());
 
+                applySfxLockUi();
+                fetchSoundPresets().then(() => {
+                    renderSfxSelected(1);
+                    renderSfxSelected(2);
+                    renderSfxSuggestions(1);
+                    renderSfxSuggestions(2);
+                });
+                sfx1Input?.addEventListener('input', () => renderSfxSuggestions(1));
+                sfx2Input?.addEventListener('input', () => renderSfxSuggestions(2));
+
                 dialog.querySelector('#btn-cancel').onclick = () => close({ changed: false });
 
                 const delBtn = dialog.querySelector('#btn-delete');
@@ -913,7 +1267,16 @@
                     }
 
                     try {
-                        const payload = { name, group_id: gid, tag_group_ids: unique, animation_presets: animClean };
+                        const payload = {
+                            name,
+                            group_id: gid,
+                            tag_group_ids: unique,
+                            animation_presets: animClean,
+                            sound_fx_1: selectedSfx1,
+                            sound_fx_2: selectedSfx2,
+                            sound_fx_1_parallel: !!sfx1Parallel,
+                            sound_fx_2_parallel: !!sfx2Parallel,
+                        };
                         if (isEditing) {
                             await this.api.album.put(`/character/states/${encodeURIComponent(sid)}`, payload);
                         } else {

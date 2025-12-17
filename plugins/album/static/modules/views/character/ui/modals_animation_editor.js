@@ -27,6 +27,9 @@
             try {
                 if (this.state?.viewMode !== 'character') return;
 
+                // Treat opening editor as leaving Character View playback mode.
+                try { this._characterStopCharacterLayerLoop?.({ stopEngine: true }); } catch { }
+
                 // Must have a rendered character image in the current Character View
                 const currentRoot = this.contentArea?.querySelector('.plugin-album__character-view');
                 const currentChar = currentRoot?.querySelector('.plugin-album__character-layer--char');

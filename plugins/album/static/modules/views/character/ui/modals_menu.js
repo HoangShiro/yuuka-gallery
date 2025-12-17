@@ -60,6 +60,9 @@
                         <div class="plugin-album__mainmenu-settings-row" data-block="tools">
                             <div class="plugin-album__mainmenu-settings-row-title">Tools</div>
                             <div class="plugin-album__mainmenu-settings-row-buttons" role="group" aria-label="Tools">
+                                <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-action="open-sound-manager" aria-label="Sound manager" title="Sound manager">
+                                    Sound manager
+                                </button>
                                 <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-action="open-animation-editor" aria-label="Animation editor" title="Animation editor">
                                     Animation editor
                                 </button>
@@ -111,6 +114,17 @@
                 };
 
                 // Wire tools actions
+                dialog.querySelector('[data-action="open-sound-manager"]')?.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    try { close(); } catch { }
+                    try {
+                        if (typeof this._characterOpenSoundManagerPage === 'function') {
+                            this._characterOpenSoundManagerPage();
+                        }
+                    } catch { }
+                });
+
                 dialog.querySelector('[data-action="open-animation-editor"]')?.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();

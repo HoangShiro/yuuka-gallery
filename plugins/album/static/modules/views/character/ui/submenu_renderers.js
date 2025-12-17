@@ -6,6 +6,24 @@
 
     const proto = AlbumComponent.prototype;
 
+    const _albumIsCoarsePointerDevice = (() => {
+        try {
+            if (typeof window !== 'undefined' && window.matchMedia) {
+                if (window.matchMedia('(pointer: coarse)').matches) return true;
+                if (window.matchMedia('(any-pointer: coarse)').matches) return true;
+            }
+        } catch { }
+        try {
+            if (typeof navigator !== 'undefined' && typeof navigator.maxTouchPoints === 'number') {
+                return navigator.maxTouchPoints > 0;
+            }
+        } catch { }
+        try {
+            return (typeof window !== 'undefined') && ('ontouchstart' in window);
+        } catch { }
+        return false;
+    })();
+
     Object.assign(proto, {
         _characterRenderTagGroupList(category, toolbarEl, listEl) {
             // Toolbar row: + (create group) + edit (edit category icon / delete category)
@@ -260,10 +278,12 @@
                 row.addEventListener('mouseup', clearLongPress);
                 row.addEventListener('mouseleave', clearLongPress);
 
-                // Touch hold
-                row.addEventListener('touchstart', () => startLongPress(), { passive: true });
-                row.addEventListener('touchend', clearLongPress);
-                row.addEventListener('touchcancel', clearLongPress);
+                // Touch hold: disabled on mobile/coarse-pointer to avoid conflict with drag gestures.
+                if (!_albumIsCoarsePointerDevice) {
+                    row.addEventListener('touchstart', () => startLongPress(), { passive: true });
+                    row.addEventListener('touchend', clearLongPress);
+                    row.addEventListener('touchcancel', clearLongPress);
+                }
                 nameBtn.addEventListener('click', async (e) => {
                     if (longPressFired) {
                         e.preventDefault();
@@ -493,10 +513,12 @@
                     row.addEventListener('mouseup', clear);
                     row.addEventListener('mouseleave', clear);
 
-                    // Touch hold
-                    row.addEventListener('touchstart', () => start(), { passive: true });
-                    row.addEventListener('touchend', clear);
-                    row.addEventListener('touchcancel', clear);
+                    // Touch hold: disabled on mobile/coarse-pointer to avoid conflict with drag gestures.
+                    if (!_albumIsCoarsePointerDevice) {
+                        row.addEventListener('touchstart', () => start(), { passive: true });
+                        row.addEventListener('touchend', clear);
+                        row.addEventListener('touchcancel', clear);
+                    }
 
                     // If long press fired, suppress subsequent click/selection
                     row.addEventListener('click', (e) => {
@@ -973,17 +995,20 @@
                     this._characterOpenPresetEditor(preset.id);
                 });
 
-                let longPressTimer = null;
-                const clear = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
-                btn.addEventListener('touchstart', () => {
-                    clear();
-                    longPressTimer = setTimeout(() => {
-                        longPressTimer = null;
-                        this._characterOpenPresetEditor(preset.id);
-                    }, 500);
-                }, { passive: true });
-                btn.addEventListener('touchend', clear);
-                btn.addEventListener('touchcancel', clear);
+                // Touch hold: disabled on mobile/coarse-pointer to avoid conflict with drag gestures.
+                if (!_albumIsCoarsePointerDevice) {
+                    let longPressTimer = null;
+                    const clear = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
+                    btn.addEventListener('touchstart', () => {
+                        clear();
+                        longPressTimer = setTimeout(() => {
+                            longPressTimer = null;
+                            this._characterOpenPresetEditor(preset.id);
+                        }, 500);
+                    }, { passive: true });
+                    btn.addEventListener('touchend', clear);
+                    btn.addEventListener('touchcancel', clear);
+                }
 
                 listEl.appendChild(btn);
             });

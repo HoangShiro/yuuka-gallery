@@ -51,6 +51,8 @@
                 if (presetId && !imgs.length) {
                     await this._characterStartGeneration({ forceNew: true, auto: false, presetId: null });
                 } else {
+                    try { this._characterLoopRequestPlaylistUpdate?.({ reason: 'submenu' }); } catch { }
+                    try { this._characterRequestAutoPlayOnNextCharacterImage?.({ reason: 'submenu' }); } catch { }
                     this._characterRefreshDisplayedImage?.();
                 }
             } catch { }
@@ -92,6 +94,8 @@
                 // User switched to a preset that needs images => cancel auto and run a manual task
                 await this._characterStartGeneration({ forceNew: true, auto: false });
             } else {
+                try { this._characterLoopRequestPlaylistUpdate?.({ reason: 'submenu' }); } catch { }
+                try { this._characterRequestAutoPlayOnNextCharacterImage?.({ reason: 'submenu' }); } catch { }
                 this._characterRefreshDisplayedImage();
             }
         },
@@ -150,6 +154,8 @@
                     // User changed selection and needs a new image => cancel auto and run a manual task
                     await this._characterStartGeneration({ forceNew: true, auto: false });
                 } else {
+                    try { this._characterLoopRequestPlaylistUpdate?.({ reason: 'submenu' }); } catch { }
+                    try { this._characterRequestAutoPlayOnNextCharacterImage?.({ reason: 'submenu' }); } catch { }
                     this._characterRefreshDisplayedImage();
                 }
             }
@@ -190,6 +196,8 @@
                 // User switched to a preset that needs images => cancel auto and run a manual task
                 await this._characterStartGeneration({ forceNew: true, presetId, auto: false });
             } else {
+                try { this._characterLoopRequestPlaylistUpdate?.({ reason: 'submenu' }); } catch { }
+                try { this._characterRequestAutoPlayOnNextCharacterImage?.({ reason: 'submenu' }); } catch { }
                 this._characterRefreshDisplayedImage();
             }
         },

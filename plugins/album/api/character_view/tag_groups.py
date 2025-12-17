@@ -69,6 +69,74 @@ def register_routes(blueprint, plugin):
                         pass
             except Exception:
                 pass
+
+            # Normalize sound fx slots (playlist). Keep duplicates + order.
+            try:
+                s1 = g.get('sound_fx_1')
+                if not isinstance(s1, list):
+                    s1 = g.get('soundFx1')
+                if not isinstance(s1, list):
+                    s1 = []
+                s1 = [str(x).strip() for x in s1 if str(x).strip()]
+
+                s2 = g.get('sound_fx_2')
+                if not isinstance(s2, list):
+                    s2 = g.get('soundFx2')
+                if not isinstance(s2, list):
+                    s2 = []
+                s2_raw = [str(x).strip() for x in s2 if str(x).strip()]
+
+                # Enforce no-duplicate across slots (best-effort).
+                s1_set = set(s1)
+                s2_clean = [x for x in s2_raw if x not in s1_set]
+
+                g['sound_fx_1'] = s1
+                g['sound_fx_2'] = s2_clean
+                for k in ('soundFx1', 'soundFx2'):
+                    if k in g:
+                        try:
+                            del g[k]
+                        except Exception:
+                            pass
+
+                # Normalize sound parallel toggles (defaults: fx1 False, fx2 True)
+                p1 = g.get('sound_fx_1_parallel')
+                if p1 is None:
+                    p1 = g.get('soundFx1Parallel')
+                p2 = g.get('sound_fx_2_parallel')
+                if p2 is None:
+                    p2 = g.get('soundFx2Parallel')
+
+                def _to_bool(v, default=False):
+                    if isinstance(v, bool):
+                        return v
+                    if isinstance(v, (int, float)):
+                        return bool(v)
+                    if isinstance(v, str):
+                        s = v.strip().casefold()
+                        if s in ('1', 'true', 'yes', 'y', 'on'):
+                            return True
+                        if s in ('0', 'false', 'no', 'n', 'off', ''):
+                            return False
+                    return default
+
+                g['sound_fx_1_parallel'] = _to_bool(p1, default=False)
+                g['sound_fx_2_parallel'] = _to_bool(p2, default=True)
+                for k in ('soundFx1Parallel', 'soundFx2Parallel'):
+                    if k in g:
+                        try:
+                            del g[k]
+                        except Exception:
+                            pass
+            except Exception:
+                # Keep schema stable for frontend.
+                try:
+                    g['sound_fx_1'] = []
+                    g['sound_fx_2'] = []
+                    g['sound_fx_1_parallel'] = False
+                    g['sound_fx_2_parallel'] = True
+                except Exception:
+                    pass
             cleaned_user_groups.append(g)
             user_keys.add(_norm_key(cat, name))
 
@@ -119,6 +187,69 @@ def register_routes(blueprint, plugin):
                         pass
             except Exception:
                 pass
+
+            # External groups may omit sound fx; normalize to empty lists.
+            try:
+                s1 = g.get('sound_fx_1')
+                if not isinstance(s1, list):
+                    s1 = g.get('soundFx1')
+                if not isinstance(s1, list):
+                    s1 = []
+                s2 = g.get('sound_fx_2')
+                if not isinstance(s2, list):
+                    s2 = g.get('soundFx2')
+                if not isinstance(s2, list):
+                    s2 = []
+                s1 = [str(x).strip() for x in s1 if str(x).strip()]
+                s2_raw = [str(x).strip() for x in s2 if str(x).strip()]
+                s1_set = set(s1)
+                s2 = [x for x in s2_raw if x not in s1_set]
+                g['sound_fx_1'] = s1
+                g['sound_fx_2'] = s2
+                for k in ('soundFx1', 'soundFx2'):
+                    if k in g:
+                        try:
+                            del g[k]
+                        except Exception:
+                            pass
+
+                # External groups may omit toggles; default.
+                p1 = g.get('sound_fx_1_parallel')
+                if p1 is None:
+                    p1 = g.get('soundFx1Parallel')
+                p2 = g.get('sound_fx_2_parallel')
+                if p2 is None:
+                    p2 = g.get('soundFx2Parallel')
+
+                def _to_bool(v, default=False):
+                    if isinstance(v, bool):
+                        return v
+                    if isinstance(v, (int, float)):
+                        return bool(v)
+                    if isinstance(v, str):
+                        s = v.strip().casefold()
+                        if s in ('1', 'true', 'yes', 'y', 'on'):
+                            return True
+                        if s in ('0', 'false', 'no', 'n', 'off', ''):
+                            return False
+                    return default
+
+                g['sound_fx_1_parallel'] = _to_bool(p1, default=False)
+                g['sound_fx_2_parallel'] = _to_bool(p2, default=True)
+                for k in ('soundFx1Parallel', 'soundFx2Parallel'):
+                    if k in g:
+                        try:
+                            del g[k]
+                        except Exception:
+                            pass
+            except Exception:
+                try:
+                    g['sound_fx_1'] = []
+                    g['sound_fx_2'] = []
+                    g['sound_fx_1_parallel'] = False
+                    g['sound_fx_2_parallel'] = True
+                except Exception:
+                    pass
             cleaned_external_groups.append(g)
 
         groups = cleaned_external_groups + cleaned_user_groups
@@ -139,6 +270,13 @@ def register_routes(blueprint, plugin):
         animation_presets = data.get('animation_presets')
         if not isinstance(animation_presets, list):
             animation_presets = data.get('animationPresets')
+
+        sound_fx_1 = data.get('sound_fx_1')
+        if not isinstance(sound_fx_1, list):
+            sound_fx_1 = data.get('soundFx1')
+        sound_fx_2 = data.get('sound_fx_2')
+        if not isinstance(sound_fx_2, list):
+            sound_fx_2 = data.get('soundFx2')
         if not name or not category:
             abort(400, "Invalid fields.")
         if not isinstance(tags, list):
@@ -155,6 +293,39 @@ def register_routes(blueprint, plugin):
         if not isinstance(animation_presets, list):
             animation_presets = []
         animation_presets = [str(x).strip() for x in animation_presets if str(x).strip()]
+
+        # Sound fx presets (playlist): allow duplicates + preserve order.
+        if not isinstance(sound_fx_1, list):
+            sound_fx_1 = []
+        if not isinstance(sound_fx_2, list):
+            sound_fx_2 = []
+        sfx1 = [str(x).strip() for x in sound_fx_1 if str(x).strip()]
+        sfx2_raw = [str(x).strip() for x in sound_fx_2 if str(x).strip()]
+        sfx1_set = set(sfx1)
+        sfx2 = [x for x in sfx2_raw if x not in sfx1_set]
+
+        sound_fx_1_parallel = data.get('sound_fx_1_parallel')
+        if sound_fx_1_parallel is None:
+            sound_fx_1_parallel = data.get('soundFx1Parallel')
+        sound_fx_2_parallel = data.get('sound_fx_2_parallel')
+        if sound_fx_2_parallel is None:
+            sound_fx_2_parallel = data.get('soundFx2Parallel')
+
+        def _to_bool(v, default=False):
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, (int, float)):
+                return bool(v)
+            if isinstance(v, str):
+                s = v.strip().casefold()
+                if s in ('1', 'true', 'yes', 'y', 'on'):
+                    return True
+                if s in ('0', 'false', 'no', 'n', 'off', ''):
+                    return False
+            return default
+
+        p1 = _to_bool(sound_fx_1_parallel, default=False)
+        p2 = _to_bool(sound_fx_2_parallel, default=True)
 
         def _norm_key(category_value, name_value) -> tuple[str, str]:
             # Category match is case-insensitive; group-name match is case-sensitive.
@@ -181,6 +352,10 @@ def register_routes(blueprint, plugin):
             "tags": tags,
             "negative_tags": negative_tags,
             "animation_presets": animation_presets,
+            "sound_fx_1": sfx1,
+            "sound_fx_2": sfx2,
+            "sound_fx_1_parallel": p1,
+            "sound_fx_2_parallel": p2,
         }
         groups.append(new_group)
         plugin._save_char_tag_groups(user_hash, groups)
@@ -260,6 +435,18 @@ def register_routes(blueprint, plugin):
             animation_presets = data.get('animation_presets')
             if not isinstance(animation_presets, list):
                 animation_presets = data.get('animationPresets')
+
+            # Optional sound fx update
+            has_sfx = any(k in data for k in (
+                'sound_fx_1', 'sound_fx_2', 'soundFx1', 'soundFx2',
+                'sound_fx_1_parallel', 'sound_fx_2_parallel', 'soundFx1Parallel', 'soundFx2Parallel'
+            ))
+            sound_fx_1 = data.get('sound_fx_1')
+            if not isinstance(sound_fx_1, list):
+                sound_fx_1 = data.get('soundFx1')
+            sound_fx_2 = data.get('sound_fx_2')
+            if not isinstance(sound_fx_2, list):
+                sound_fx_2 = data.get('soundFx2')
             if not name:
                 abort(400, "Name cannot be empty.")
             if not isinstance(tags, list):
@@ -276,6 +463,41 @@ def register_routes(blueprint, plugin):
                 if not isinstance(animation_presets, list):
                     abort(400, 'Invalid field: animation_presets')
                 animation_presets = [str(x).strip() for x in animation_presets if str(x).strip()]
+
+            if has_sfx:
+                if not isinstance(sound_fx_1, list):
+                    abort(400, 'Invalid field: sound_fx_1')
+                if not isinstance(sound_fx_2, list):
+                    abort(400, 'Invalid field: sound_fx_2')
+                sfx1 = [str(x).strip() for x in sound_fx_1 if str(x).strip()]
+                sfx2_raw = [str(x).strip() for x in sound_fx_2 if str(x).strip()]
+                sfx1_set = set(sfx1)
+                sfx2 = [x for x in sfx2_raw if x not in sfx1_set]
+
+                def _to_bool(v, default=False):
+                    if isinstance(v, bool):
+                        return v
+                    if isinstance(v, (int, float)):
+                        return bool(v)
+                    if isinstance(v, str):
+                        s = v.strip().casefold()
+                        if s in ('1', 'true', 'yes', 'y', 'on'):
+                            return True
+                        if s in ('0', 'false', 'no', 'n', 'off', ''):
+                            return False
+                    return default
+
+                p1_raw = data.get('sound_fx_1_parallel')
+                if p1_raw is None:
+                    p1_raw = data.get('soundFx1Parallel')
+                p2_raw = data.get('sound_fx_2_parallel')
+                if p2_raw is None:
+                    p2_raw = data.get('soundFx2Parallel')
+
+                p1_default = bool(group.get('sound_fx_1_parallel') is True)
+                p2_default = True if group.get('sound_fx_2_parallel') is None else bool(group.get('sound_fx_2_parallel') is True)
+                p1 = _to_bool(p1_raw, default=p1_default)
+                p2 = _to_bool(p2_raw, default=p2_default)
 
             def _norm_key(category_value, name_value) -> tuple[str, str]:
                 # Category match is case-insensitive; group-name match is case-sensitive.
@@ -315,6 +537,17 @@ def register_routes(blueprint, plugin):
                         del group['animationPresets']
                     except Exception:
                         pass
+            if has_sfx:
+                group['sound_fx_1'] = sfx1
+                group['sound_fx_2'] = sfx2
+                group['sound_fx_1_parallel'] = p1
+                group['sound_fx_2_parallel'] = p2
+                for k in ('soundFx1', 'soundFx2', 'soundFx1Parallel', 'soundFx2Parallel'):
+                    if k in group:
+                        try:
+                            del group[k]
+                        except Exception:
+                            pass
             if 'negativeTags' in group:
                 try:
                     del group['negativeTags']
@@ -387,6 +620,18 @@ def register_routes(blueprint, plugin):
         if not isinstance(animation_presets, list):
             animation_presets = []
 
+        sound_fx_1 = group.get('sound_fx_1')
+        if not isinstance(sound_fx_1, list):
+            sound_fx_1 = group.get('soundFx1')
+        if not isinstance(sound_fx_1, list):
+            sound_fx_1 = []
+
+        sound_fx_2 = group.get('sound_fx_2')
+        if not isinstance(sound_fx_2, list):
+            sound_fx_2 = group.get('soundFx2')
+        if not isinstance(sound_fx_2, list):
+            sound_fx_2 = []
+
         # Ensure unique name within category
         candidate = f"{base_name} (copy)"
         existing_names = {g.get('name') for g in groups if g.get('category') == category}
@@ -408,6 +653,13 @@ def register_routes(blueprint, plugin):
             "tags": [str(t).strip() for t in tags if str(t).strip()],
             "negative_tags": [str(t).strip() for t in negative_tags if str(t).strip()],
             "animation_presets": [str(x).strip() for x in animation_presets if str(x).strip()],
+            "sound_fx_1": [str(x).strip() for x in sound_fx_1 if str(x).strip()],
+            "sound_fx_2": [
+                str(x).strip() for x in sound_fx_2
+                if str(x).strip() and str(x).strip() not in {str(y).strip() for y in sound_fx_1 if str(y).strip()}
+            ],
+            "sound_fx_1_parallel": bool(group.get('sound_fx_1_parallel') is True),
+            "sound_fx_2_parallel": True if group.get('sound_fx_2_parallel') is None else bool(group.get('sound_fx_2_parallel') is True),
         }
         groups.append(new_group)
         plugin._save_char_tag_groups(user_hash, groups)

@@ -241,7 +241,16 @@ def register_routes(blueprint, plugin):
 
     @blueprint.route('/sound_fx/file/<preset_id>', methods=['GET'])
     def sound_fx_get_file(preset_id):
-        user_hash = plugin.core_api.verify_token_and_get_user_hash()
+        # NOTE: <audio src> cannot send Authorization headers, so we also accept
+        # a token via query string (?token=...) and validate it using CoreAPI.
+        try:
+            token_override = str(request.args.get('token') or '').strip() or None
+        except Exception:
+            token_override = None
+        try:
+            user_hash = plugin.core_api.verify_token_and_get_user_hash(token_override=token_override)
+        except Exception as e:
+            abort(401, str(e) or 'Unauthorized')
         presets = plugin._load_sound_fx_presets(user_hash)
         if not isinstance(presets, list):
             presets = []

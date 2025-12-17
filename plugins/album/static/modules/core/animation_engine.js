@@ -191,6 +191,143 @@
             };
         }
 
+        withIntensity(preset, intensity = 1, { affectOpacity = true } = {}) {
+            try {
+                const k = String(preset?.key || '').trim();
+                const graphType = String(preset?.graphType || 'linear').trim() || 'linear';
+                const amt = Math.max(0, Number(intensity));
+                if (!Number.isFinite(amt)) return preset;
+                if (Math.abs(amt - 1) < 1e-9) return preset;
+
+            const doOpacity = (affectOpacity !== false);
+
+                const parsed = this._parseTimeline(preset?.timeline, { graphType });
+                const dur = Math.max(1, Math.round(Number(parsed?.durationMs || 1000)));
+
+                const position = (Array.isArray(parsed.positionKeys) ? parsed.positionKeys : []).map((it) => {
+                    const x0 = toNumber(it?.x ?? 0, 0);
+                    const y0 = toNumber(it?.y ?? 0, 0);
+                    return { t_ms: Math.max(0, Math.round(Number(it?.t || 0))), x: x0 * amt, y: y0 * amt };
+                });
+
+                const scale = (Array.isArray(parsed.scaleKeys) ? parsed.scaleKeys : []).map((it) => {
+                    const s0 = Math.max(0, toNumber(it?.s ?? 1, 1));
+                    const s = 1 + (s0 - 1) * amt;
+                    return { t_ms: Math.max(0, Math.round(Number(it?.t || 0))), s: Math.max(0, s) };
+                });
+
+                const opacity = doOpacity
+                    ? (Array.isArray(parsed.opacityKeys) ? parsed.opacityKeys : []).map((it) => {
+                        const o0 = clamp(toNumber(it?.o ?? 1, 1), 0, 1);
+                        const o = 1 + (o0 - 1) * amt;
+                        return { t_ms: Math.max(0, Math.round(Number(it?.t || 0))), o: clamp(o, 0, 1) };
+                    })
+                    : [{ t_ms: 0, o: 1 }, { t_ms: dur, o: 1 }];
+
+                return {
+                    key: k || '__intensity__',
+                    graphType,
+                    timeline: {
+                        duration_ms: dur,
+                        loop: !!parsed.loop,
+                        tracks: { position, scale, opacity },
+                    },
+                };
+            } catch {
+                return preset;
+            }
+        }
+
+        withLag(preset, lagMs = 0) {
+            try {
+                const graphType = String(preset?.graphType || 'linear').trim() || 'linear';
+                const parsed = this._parseTimeline(preset?.timeline, { graphType });
+                const dur = Math.max(1, Math.round(Number(parsed?.durationMs || 1000)));
+
+                const lagRaw = Number(lagMs || 0);
+                if (!Number.isFinite(lagRaw)) return preset;
+                const lag = Math.max(0, Math.min(dur - 1, Math.round(lagRaw)));
+                if (lag <= 0) return preset;
+
+                const remapT = (t) => {
+                    const tt = Math.max(0, Math.min(dur, Math.round(Number(t || 0))));
+                    // Map [0..dur] -> [lag..dur] (compressed), so the animation ends on time.
+                    const mapped = lag + (tt * (dur - lag)) / dur;
+                    return Math.max(0, Math.min(dur, Math.round(mapped)));
+                };
+
+                const posKeys = this._ensureEndpoints(parsed.positionKeys, dur, { x: 0, y: 0 });
+                const scKeys = this._ensureEndpoints(parsed.scaleKeys, dur, { s: 1 });
+                const opKeys = this._ensureEndpoints(parsed.opacityKeys, dur, { o: 1 });
+
+                const posStart = posKeys.length ? this._valueAt(posKeys, 0, ['x', 'y']) : { x: 0, y: 0 };
+                const scStart = scKeys.length ? this._valueAt(scKeys, 0, ['s']) : { s: 1 };
+                const opStart = opKeys.length ? this._valueAt(opKeys, 0, ['o']) : { o: 1 };
+
+                const position = [];
+                if (posKeys.length) {
+                    position.push({ t_ms: 0, x: toNumber(posStart?.x ?? 0, 0), y: toNumber(posStart?.y ?? 0, 0) });
+                    position.push({ t_ms: lag, x: toNumber(posStart?.x ?? 0, 0), y: toNumber(posStart?.y ?? 0, 0) });
+                    posKeys.forEach((it) => {
+                        position.push({
+                            t_ms: remapT(it.t),
+                            x: toNumber(it?.x ?? 0, 0),
+                            y: toNumber(it?.y ?? 0, 0),
+                        });
+                    });
+                }
+
+                const scale = [];
+                if (scKeys.length) {
+                    scale.push({ t_ms: 0, s: Math.max(0, toNumber(scStart?.s ?? 1, 1)) });
+                    scale.push({ t_ms: lag, s: Math.max(0, toNumber(scStart?.s ?? 1, 1)) });
+                    scKeys.forEach((it) => {
+                        scale.push({
+                            t_ms: remapT(it.t),
+                            s: Math.max(0, toNumber(it?.s ?? 1, 1)),
+                        });
+                    });
+                }
+
+                const opacity = [];
+                if (opKeys.length) {
+                    opacity.push({ t_ms: 0, o: clamp(toNumber(opStart?.o ?? 1, 1), 0, 1) });
+                    opacity.push({ t_ms: lag, o: clamp(toNumber(opStart?.o ?? 1, 1), 0, 1) });
+                    opKeys.forEach((it) => {
+                        opacity.push({
+                            t_ms: remapT(it.t),
+                            o: clamp(toNumber(it?.o ?? 1, 1), 0, 1),
+                        });
+                    });
+                }
+
+                const uniqByT = (arr) => {
+                    const map = new Map();
+                    (Array.isArray(arr) ? arr : []).forEach((k) => {
+                        const t = Math.max(0, Math.min(dur, Math.round(Number(k?.t_ms ?? 0))));
+                        map.set(t, { ...k, t_ms: t });
+                    });
+                    return Array.from(map.values()).sort((a, b) => a.t_ms - b.t_ms);
+                };
+
+                return {
+                    key: String(preset?.key || '').trim() || '__lag__',
+                    graphType,
+                    timeline: {
+                        duration_ms: dur,
+                        loop: !!parsed.loop,
+                        tracks: {
+                            position: uniqByT(position),
+                            scale: uniqByT(scale),
+                            opacity: uniqByT(opacity),
+                        },
+                    },
+                };
+            } catch {
+                return preset;
+            }
+        }
+
         withSmoothReturnToDefault(preset, smoothMs) {
             try {
                 const extra = Math.max(0, Math.round(Number(smoothMs || 0)));
@@ -501,7 +638,7 @@
             return this.applyPresetOnElement(el, preset, { loop, seamless });
         }
 
-        applyPresetOnElement(el, preset, { loop = null, seamless = true } = {}) {
+        applyPresetOnElement(el, preset, { loop = null, seamless = true, phaseShiftMs = 0 } = {}) {
             if (!el || !preset) return false;
 
             const sanitizeTiming = (v) => {
@@ -562,7 +699,9 @@
             // Apply animation (negative delay for seamless phase alignment)
             try {
                 const style = el.style;
-                const delayMs = -Math.round(clamp(phaseMs, 0, durationMs));
+                const shift = Number(phaseShiftMs || 0);
+                const shiftedPhase = clamp(phaseMs + (Number.isFinite(shift) ? shift : 0), 0, durationMs);
+                const delayMs = -Math.round(shiftedPhase);
                 style.animationName = animName;
                 style.animationDuration = `${durationMs}ms`;
                 style.animationTimingFunction = timing;
@@ -573,7 +712,9 @@
             } catch { }
 
             // Record state for seamless updates
-            const startPerf = nowPerf - clamp(phaseMs, 0, durationMs);
+            const shift = Number(phaseShiftMs || 0);
+            const shiftedPhase = clamp(phaseMs + (Number.isFinite(shift) ? shift : 0), 0, durationMs);
+            const startPerf = nowPerf - shiftedPhase;
             this._elementState.set(el, {
                 animName,
                 durationMs,
