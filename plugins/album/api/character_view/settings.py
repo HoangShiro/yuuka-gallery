@@ -178,7 +178,7 @@ def register_routes(blueprint, plugin):
         if removed_groups:
             plugin._save_char_tag_groups(user_hash, groups_after)
 
-        # Cleanup: remove removed tag-group ids from States + state-group presets.
+        # Cleanup: remove removed tag-group ids from States (state-group presets removed).
         # (Only applies to user-owned groups removed here; external groups are unaffected.)
         try:
             if removed_groups:

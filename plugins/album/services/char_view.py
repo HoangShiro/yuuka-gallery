@@ -110,60 +110,6 @@ class AlbumCharacterViewMixin:
         )
 
     # ------------------------------
-    # State / State group / State group preset (GLOBAL, per-user)
-    # ------------------------------
-    def _load_char_state_groups(self, user_hash):
-        groups = self.core_api.data_manager.load_user_data(
-            getattr(self, 'CHAR_STATE_GROUPS_FILENAME', 'album_character_state_groups.json'),
-            user_hash,
-            default_value=[],
-            obfuscated=True,
-        )
-        return groups if isinstance(groups, list) else []
-
-    def _save_char_state_groups(self, user_hash, groups):
-        self.core_api.data_manager.save_user_data(
-            groups if isinstance(groups, list) else [],
-            getattr(self, 'CHAR_STATE_GROUPS_FILENAME', 'album_character_state_groups.json'),
-            user_hash,
-            obfuscated=True,
-        )
-
-    def _load_char_states(self, user_hash):
-        states = self.core_api.data_manager.load_user_data(
-            getattr(self, 'CHAR_STATES_FILENAME', 'album_character_states.json'),
-            user_hash,
-            default_value=[],
-            obfuscated=True,
-        )
-        return states if isinstance(states, list) else []
-
-    def _save_char_states(self, user_hash, states):
-        self.core_api.data_manager.save_user_data(
-            states if isinstance(states, list) else [],
-            getattr(self, 'CHAR_STATES_FILENAME', 'album_character_states.json'),
-            user_hash,
-            obfuscated=True,
-        )
-
-    def _load_char_state_group_presets(self, user_hash):
-        presets = self.core_api.data_manager.load_user_data(
-            getattr(self, 'CHAR_STATE_GROUP_PRESETS_FILENAME', 'album_character_state_group_presets.json'),
-            user_hash,
-            default_value=[],
-            obfuscated=True,
-        )
-        return presets if isinstance(presets, list) else []
-
-    def _save_char_state_group_presets(self, user_hash, presets):
-        self.core_api.data_manager.save_user_data(
-            presets if isinstance(presets, list) else [],
-            getattr(self, 'CHAR_STATE_GROUP_PRESETS_FILENAME', 'album_character_state_group_presets.json'),
-            user_hash,
-            obfuscated=True,
-        )
-
-    # ------------------------------
     # Visual Novel mode: global background cache (per-user)
     # ------------------------------
     def _load_char_vn_backgrounds(self, user_hash):
@@ -349,23 +295,20 @@ class AlbumCharacterViewMixin:
         """Remove references to deleted tag group ids from character-view States.
 
         If a State becomes empty after cleanup, delete it.
-        Any State-group preset pointing to a deleted state will be deleted.
+        (Legacy state-group presets were removed; global state presets are cleaned elsewhere.)
         """
         try:
             removed = {str(gid).strip() for gid in (removed_group_ids or []) if str(gid).strip()}
         except Exception:
             removed = set()
         if not removed:
-            return {"states_deleted": 0, "states_updated": 0, "presets_updated": 0}
+            return {"states_deleted": 0, "states_updated": 0, "presets_removed": 0}
 
         states = self._load_char_states(user_hash)
-        presets = self._load_char_state_group_presets(user_hash)
 
         changed_states = False
-        changed_presets = False
         states_deleted = 0
         states_updated = 0
-        deleted_state_ids: set[str] = set()
 
         new_states: list[dict] = []
         for s in states:
@@ -380,8 +323,6 @@ class AlbumCharacterViewMixin:
             if filtered != original:
                 changed_states = True
                 if not filtered:
-                    if sid:
-                        deleted_state_ids.add(sid)
                     states_deleted += 1
                     continue
                 s['tag_group_ids'] = filtered
@@ -395,28 +336,12 @@ class AlbumCharacterViewMixin:
                 states_updated += 1
             new_states.append(s)
 
-        new_presets = presets
-        presets_removed = 0
-        if deleted_state_ids and isinstance(presets, list):
-            new_presets = []
-            for p in presets:
-                if not isinstance(p, dict):
-                    continue
-                st = str(p.get('state_id') or p.get('stateId') or '').strip()
-                if st and st in deleted_state_ids:
-                    presets_removed += 1
-                    changed_presets = True
-                    continue
-                new_presets.append(p)
-
         if changed_states:
             self._save_char_states(user_hash, new_states)
-        if changed_presets:
-            self._save_char_state_group_presets(user_hash, new_presets)
 
         return {
             "states_deleted": int(states_deleted),
             "states_updated": int(states_updated),
-            "presets_removed": int(presets_removed),
+            "presets_removed": 0,
         }
 

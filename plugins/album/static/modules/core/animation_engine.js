@@ -196,7 +196,7 @@
             }
         }
 
-        _readTrackValuesAt({ durationMs, positionKeys, scaleKeys, opacityKeys, graphType }, tMs) {
+        _readTrackValuesAt({ durationMs, positionKeys, scaleKeys, rotationKeys, opacityKeys, graphType }, tMs) {
             const duration = Math.max(1, Math.round(Number(durationMs || 1000)));
             const t = clamp(Math.round(Number(tMs || 0)), 0, duration);
 
@@ -204,10 +204,12 @@
 
             const posKeys = this._ensureEndpoints(positionKeys, duration, { x: 0, y: 0 });
             const scKeys = this._ensureEndpoints(scaleKeys, duration, { s: 1 });
+            const rotKeys = this._ensureEndpoints(rotationKeys, duration, { r: 0 });
             const opKeys = this._ensureEndpoints(opacityKeys, duration, { o: 1 });
 
             const pos = posKeys.length ? this._valueAtEased(posKeys, t, ['x', 'y'], g) : null;
             const sc = scKeys.length ? this._valueAtEased(scKeys, t, ['s'], g) : null;
+            const rot = rotKeys.length ? this._valueAtEased(rotKeys, t, ['r'], g) : null;
             const op = opKeys.length ? this._valueAtEased(opKeys, t, ['o'], g) : null;
 
             return {
@@ -215,6 +217,7 @@
                 x: toNumber(pos?.x ?? 0, 0),
                 y: toNumber(pos?.y ?? 0, 0),
                 s: Math.max(0, toNumber(sc?.s ?? 1, 1)),
+                r: toNumber(rot?.r ?? 0, 0),
                 o: clamp(toNumber(op?.o ?? 1, 1), 0, 1),
             };
         }
@@ -222,13 +225,29 @@
         getCurrentTrackValues(el) {
             try {
                 const st = this._elementState.get(el);
-                if (!st) return { tMs: 0, x: 0, y: 0, s: 1, o: 1 };
+                if (!st) return { tMs: 0, x: 0, y: 0, s: 1, r: 0, o: 1 };
 
                 const nowPerf = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
                 const phaseMs = this._getExistingPhaseMs(el, nowPerf);
-                return this._readTrackValuesAt(st, phaseMs);
+
+                // If playback speed is applied (via scaled CSS duration), map the real phase time
+                // back into the preset's raw timeline time so sampling matches what the user sees.
+                const speed = (() => {
+                    const s = Number(st?.speed ?? 1);
+                    return (Number.isFinite(s) && s > 0) ? s : 1;
+                })();
+                const rawDur = (() => {
+                    const d = Number(st?.rawDurationMs ?? st?.durationMs ?? 1000);
+                    return (Number.isFinite(d) && d > 0) ? Math.round(d) : 1000;
+                })();
+                const sampleMs = clamp(Math.round(Number(phaseMs || 0) * speed), 0, rawDur);
+
+                return this._readTrackValuesAt({
+                    ...st,
+                    durationMs: rawDur,
+                }, sampleMs);
             } catch {
-                return { tMs: 0, x: 0, y: 0, s: 1, o: 1 };
+                return { tMs: 0, x: 0, y: 0, s: 1, r: 0, o: 1 };
             }
         }
 
@@ -237,7 +256,7 @@
                 const parsed = this._parseTimeline(preset?.timeline, { graphType: preset?.graphType });
                 return this._readTrackValuesAt(parsed, 0);
             } catch {
-                return { tMs: 0, x: 0, y: 0, s: 1, o: 1 };
+                return { tMs: 0, x: 0, y: 0, s: 1, r: 0, o: 1 };
             }
         }
 
@@ -250,11 +269,13 @@
             const fy = toNumber(from.y ?? 0, 0);
             const fs = Math.max(0, toNumber(from.s ?? 1, 1));
             const fo = clamp(toNumber(from.o ?? 1, 1), 0, 1);
+            const fr = toNumber(from.r ?? 0, 0);
 
             const tx = toNumber(to.x ?? 0, 0);
             const ty = toNumber(to.y ?? 0, 0);
             const ts = Math.max(0, toNumber(to.s ?? 1, 1));
             const toO = clamp(toNumber(to.o ?? 1, 1), 0, 1);
+            const tr = toNumber(to.r ?? 0, 0);
 
             return {
                 key: '__transition__',
@@ -271,6 +292,10 @@
                             { t_ms: 0, s: fs },
                             { t_ms: dur, s: ts },
                         ],
+                        rotation: [
+                            { t_ms: 0, r_deg: fr },
+                            { t_ms: dur, r_deg: tr },
+                        ],
                         opacity: [
                             { t_ms: 0, o: fo },
                             { t_ms: dur, o: toO },
@@ -278,6 +303,192 @@
                     },
                 },
             };
+        }
+
+        _springEaseCriticallyDamped01(r, omega = 12) {
+            // Critically damped step response in [0..1].
+            // y(t) = 1 - (1 + w*t) * e^(-w*t)
+            const t = clamp(Number(r), 0, 1);
+            const w = Math.max(0.1, Number(omega) || 12);
+            const e = Math.exp(-w * t);
+            return clamp(1 - (1 + w * t) * e, 0, 1);
+        }
+
+        makeSpringTransitionPreset(fromVals, toVals, durationMs, { omega = 12, frames = null } = {}) {
+            // Creates a transition preset that *bakes* spring smoothing into keyframes.
+            // Intended to reduce visible jitter/jerk at extreme playback speeds.
+            const dur = Math.max(1, Math.round(Number(durationMs || 120)));
+            const from = fromVals && typeof fromVals === 'object' ? fromVals : {};
+            const to = toVals && typeof toVals === 'object' ? toVals : {};
+
+            const fx = toNumber(from.x ?? 0, 0);
+            const fy = toNumber(from.y ?? 0, 0);
+            const fs = Math.max(0, toNumber(from.s ?? 1, 1));
+            const fo = clamp(toNumber(from.o ?? 1, 1), 0, 1);
+            const fr = toNumber(from.r ?? 0, 0);
+
+            const tx = toNumber(to.x ?? 0, 0);
+            const ty = toNumber(to.y ?? 0, 0);
+            const ts = Math.max(0, toNumber(to.s ?? 1, 1));
+            const toO = clamp(toNumber(to.o ?? 1, 1), 0, 1);
+            const tr = toNumber(to.r ?? 0, 0);
+
+            const count = (() => {
+                const n = Number(frames);
+                if (Number.isFinite(n)) return Math.max(6, Math.min(90, Math.round(n)));
+                // ~60fps-ish sampling with a cap.
+                const byTime = Math.round(dur / 16);
+                return Math.max(8, Math.min(60, byTime));
+            })();
+
+            const pos = [];
+            const sc = [];
+            const rot = [];
+            const op = [];
+
+            for (let i = 0; i <= count; i += 1) {
+                const r = count ? (i / count) : 1;
+                const eased = this._springEaseCriticallyDamped01(r, omega);
+                const tMs = Math.round(r * dur);
+
+                pos.push({ t_ms: tMs, x: fx + (tx - fx) * eased, y: fy + (ty - fy) * eased });
+                sc.push({ t_ms: tMs, s: fs + (ts - fs) * eased });
+                rot.push({ t_ms: tMs, r: fr + (tr - fr) * eased });
+                op.push({ t_ms: tMs, o: fo + (toO - fo) * eased });
+            }
+
+            return {
+                key: '__spring_transition__',
+                graphType: 'linear',
+                timeline: {
+                    duration_ms: dur,
+                    loop: false,
+                    tracks: {
+                        position: pos,
+                        scale: sc,
+                        rotation: rot,
+                        opacity: op,
+                    },
+                },
+            };
+        }
+
+        _springSimStep(x, v, target, dt, omega, zeta) {
+            // Second-order spring toward target:
+            // x'' + 2*zeta*omega*x' + omega^2*x = omega^2*target
+            // Semi-implicit Euler integration.
+            const w = Math.max(0.1, Number(omega) || 16);
+            const z = Math.max(0, Number(zeta));
+            const dx = (Number(target) || 0) - (Number(x) || 0);
+            const a = (w * w) * dx - (2 * z * w) * (Number(v) || 0);
+            const v1 = (Number(v) || 0) + a * dt;
+            const x1 = (Number(x) || 0) + v1 * dt;
+            return { x: x1, v: v1 };
+        }
+
+        _unwrapDeg(prev, next) {
+            try {
+                const a = Number(prev) || 0;
+                const b = Number(next) || 0;
+                // Shortest-path unwrap (avoid 360-jumps)
+                let d = b - a;
+                d = ((d + 180) % 360) - 180;
+                return a + d;
+            } catch {
+                return Number(next) || 0;
+            }
+        }
+
+        withSpringSmoothing(preset, { omega = 16, zeta = 1, dtMs = 16 } = {}) {
+            // Bake spring/damping smoothing into the preset timeline itself.
+            // Applies to: position/scale/rotation (vector spring); opacity is sampled as-is.
+            // Output is linear because values are already baked.
+            try {
+                const k = String(preset?.key || '').trim();
+                const graphType = String(preset?.graphType || 'linear').trim() || 'linear';
+
+                // Never spring-smooth synthetic/internal presets.
+                if (k.startsWith('__')) return preset;
+
+                const parsed = this._parseTimeline(preset?.timeline, { graphType });
+                const dur = Math.max(1, Math.round(Number(parsed?.durationMs || 1000)));
+
+                const stepMs = (() => {
+                    const ms = Number(dtMs);
+                    if (!Number.isFinite(ms)) return 16;
+                    return Math.max(8, Math.min(33, Math.round(ms)));
+                })();
+
+                // Cap total frames to keep CSS reasonable.
+                const maxFrames = 180;
+                const count = Math.max(2, Math.min(maxFrames, Math.ceil(dur / stepMs)));
+                const dt = stepMs / 1000;
+
+                const pos = [];
+                const sc = [];
+                const rot = [];
+                const op = [];
+
+                // Initialize from exact t=0 values.
+                const t0 = this._readTrackValuesAt(parsed, 0);
+                let px = Number(t0?.x ?? 0) || 0;
+                let py = Number(t0?.y ?? 0) || 0;
+                let ps = Math.max(0, Number(t0?.s ?? 1) || 1);
+                let pr = Number(t0?.r ?? 0) || 0;
+
+                let vx = 0, vy = 0, vs = 0, vr = 0;
+
+                let prevTargetR = pr;
+
+                for (let i = 0; i <= count; i += 1) {
+                    const tMs = (i >= count) ? dur : Math.min(dur, i * stepMs);
+                    const target = this._readTrackValuesAt(parsed, tMs);
+
+                    const tx = Number(target?.x ?? 0) || 0;
+                    const ty = Number(target?.y ?? 0) || 0;
+                    const ts = Math.max(0, Number(target?.s ?? 1) || 1);
+                    const tr0 = Number(target?.r ?? 0) || 0;
+                    const tr = this._unwrapDeg(prevTargetR, tr0);
+                    prevTargetR = tr;
+
+                    // Advance spring state except for the very first sample.
+                    if (i > 0) {
+                        const sx = this._springSimStep(px, vx, tx, dt, omega, zeta);
+                        px = sx.x; vx = sx.v;
+
+                        const sy = this._springSimStep(py, vy, ty, dt, omega, zeta);
+                        py = sy.x; vy = sy.v;
+
+                        const ss = this._springSimStep(ps, vs, ts, dt, omega, zeta);
+                        ps = Math.max(0, ss.x); vs = ss.v;
+
+                        const sr = this._springSimStep(pr, vr, tr, dt, omega, zeta);
+                        pr = sr.x; vr = sr.v;
+                    }
+
+                    pos.push({ t_ms: tMs, x: px, y: py });
+                    sc.push({ t_ms: tMs, s: ps });
+                    rot.push({ t_ms: tMs, r_deg: pr });
+                    op.push({ t_ms: tMs, o: clamp(Number(target?.o ?? 1) || 1, 0, 1) });
+                }
+
+                return {
+                    key: k,
+                    graphType: 'linear',
+                    timeline: {
+                        duration_ms: dur,
+                        loop: !!parsed.loop,
+                        tracks: {
+                            position: pos,
+                            scale: sc,
+                            rotation: rot,
+                            opacity: op,
+                        },
+                    },
+                };
+            } catch {
+                return preset;
+            }
         }
 
         withIntensity(preset, intensity = 1, { affectOpacity = true } = {}) {
@@ -313,13 +524,18 @@
                     })
                     : [{ t_ms: 0, o: 1 }, { t_ms: dur, o: 1 }];
 
+                const rotation = (Array.isArray(parsed.rotationKeys) ? parsed.rotationKeys : []).map((it) => {
+                    const r0 = toNumber(it?.r ?? 0, 0);
+                    return { t_ms: Math.max(0, Math.round(Number(it?.t || 0))), r_deg: r0 };
+                });
+
                 return {
                     key: k || '__intensity__',
                     graphType,
                     timeline: {
                         duration_ms: dur,
                         loop: !!parsed.loop,
-                        tracks: { position, scale, opacity },
+                        tracks: { position, scale, rotation, opacity },
                     },
                 };
             } catch {
@@ -347,10 +563,12 @@
 
                 const posKeys = this._ensureEndpoints(parsed.positionKeys, dur, { x: 0, y: 0 });
                 const scKeys = this._ensureEndpoints(parsed.scaleKeys, dur, { s: 1 });
+                const rotKeys = this._ensureEndpoints(parsed.rotationKeys, dur, { r: 0 });
                 const opKeys = this._ensureEndpoints(parsed.opacityKeys, dur, { o: 1 });
 
                 const posStart = posKeys.length ? this._valueAt(posKeys, 0, ['x', 'y']) : { x: 0, y: 0 };
                 const scStart = scKeys.length ? this._valueAt(scKeys, 0, ['s']) : { s: 1 };
+                const rotStart = rotKeys.length ? this._valueAt(rotKeys, 0, ['r']) : { r: 0 };
                 const opStart = opKeys.length ? this._valueAt(opKeys, 0, ['o']) : { o: 1 };
 
                 const position = [];
@@ -390,6 +608,18 @@
                     });
                 }
 
+                const rotation = [];
+                if (rotKeys.length) {
+                    rotation.push({ t_ms: 0, r_deg: toNumber(rotStart?.r ?? 0, 0) });
+                    rotation.push({ t_ms: lag, r_deg: toNumber(rotStart?.r ?? 0, 0) });
+                    rotKeys.forEach((it) => {
+                        rotation.push({
+                            t_ms: remapT(it.t),
+                            r_deg: toNumber(it?.r ?? 0, 0),
+                        });
+                    });
+                }
+
                 const uniqByT = (arr) => {
                     const map = new Map();
                     (Array.isArray(arr) ? arr : []).forEach((k) => {
@@ -408,6 +638,7 @@
                         tracks: {
                             position: uniqByT(position),
                             scale: uniqByT(scale),
+                            rotation: uniqByT(rotation),
                             opacity: uniqByT(opacity),
                         },
                     },
@@ -429,6 +660,7 @@
                 const posEnd = this._readTrackValuesAt(parsed, baseDur);
                 const scEnd = posEnd;
                 const opEnd = posEnd;
+                const rotEnd = posEnd;
 
                 // Ensure we hold the last value until baseDur, then return to defaults at dur.
                 const position = [
@@ -447,6 +679,12 @@
                     { t_ms: dur, o: 1 },
                 ];
 
+                const rotation = [
+                    ...(Array.isArray(parsed.rotationKeys) ? parsed.rotationKeys : []).map(k => ({ t_ms: k.t, r_deg: toNumber(k.r ?? 0, 0) })),
+                    { t_ms: baseDur, r_deg: toNumber(rotEnd.r ?? 0, 0) },
+                    { t_ms: dur, r_deg: 0 },
+                ];
+
                 return {
                     key: String(preset?.key || '').trim() || '__smoothed__',
                     graphType: String(preset?.graphType || 'linear').trim() || 'linear',
@@ -456,6 +694,7 @@
                         tracks: {
                             position,
                             scale,
+                            rotation,
                             opacity,
                         },
                     },
@@ -468,7 +707,7 @@
         _parseTimeline(timelineRaw, { graphType } = {}) {
             // Supports:
             // - legacy list: [t1, t2, ...]
-            // - dict with duration_ms and per-track keys (position/scale/opacity)
+            // - dict with duration_ms and per-track keys (position/scale/rotation/opacity)
             const timeline = timelineRaw && (Array.isArray(timelineRaw) || typeof timelineRaw === 'object') ? timelineRaw : [];
 
             const durationMs = (() => {
@@ -543,17 +782,34 @@
                 return out;
             };
 
+            const normalizeRotationKeys = (rawKeys) => {
+                const out = [];
+                (Array.isArray(rawKeys) ? rawKeys : []).forEach((it) => {
+                    const t = (typeof it === 'number') ? it : readTimeMs(it);
+                    if (!Number.isFinite(t)) return;
+                    const obj = (it && typeof it === 'object') ? it : {};
+                    const r = toNumber(
+                        obj.r_deg ?? obj.rDeg ?? obj.r ?? obj.rotation_deg ?? obj.rotationDeg ?? obj.rotation ?? obj.deg ?? obj.value ?? 0,
+                        0
+                    );
+                    out.push({ t: Math.max(0, Math.round(t)), r });
+                });
+                return out;
+            };
+
             const positionTrack = readTrack('position');
             const scaleTrack = readTrack('scale');
+            const rotationTrack = readTrack('rotation');
             const opacityTrack = readTrack('opacity');
 
             const positionKeys = normalizePositionKeys(positionTrack.keys);
             const scaleKeys = normalizeScaleKeys(scaleTrack.keys);
+            const rotationKeys = normalizeRotationKeys(rotationTrack.keys);
             const opacityKeys = normalizeOpacityKeys(opacityTrack.keys);
 
             const graph = String(graphType || (Array.isArray(timeline) ? '' : (timeline.graph_type ?? timeline.graphType)) || 'linear').trim() || 'linear';
 
-            return { durationMs, loop, graphType: graph, positionKeys, scaleKeys, opacityKeys };
+            return { durationMs, loop, graphType: graph, positionKeys, scaleKeys, rotationKeys, opacityKeys };
         }
 
         _ensureEndpoints(keys, durationMs, fallbackValue) {
@@ -603,13 +859,14 @@
             return out;
         }
 
-        _buildMergedKeyframes({ durationMs, loop, positionKeys, scaleKeys, opacityKeys, graphType }, { baseTransform } = {}) {
+        _buildMergedKeyframes({ durationMs, loop, positionKeys, scaleKeys, rotationKeys, opacityKeys, graphType }, { baseTransform } = {}) {
             const duration = Math.max(1, Math.round(durationMs || 1000));
 
             const g = this._sanitizeGraphType(graphType);
 
             const posKeys = this._ensureEndpoints(positionKeys, duration, { x: 0, y: 0 });
             const scKeys = this._ensureEndpoints(scaleKeys, duration, { s: 1 });
+            const rotKeys = this._ensureEndpoints(rotationKeys, duration, { r: 0 });
             const opKeys = this._ensureEndpoints(opacityKeys, duration, { o: 1 });
 
             // Collect union times from each track, plus 0/duration.
@@ -621,6 +878,7 @@
                 duration,
                 ...posKeys.map(k => k.t),
                 ...scKeys.map(k => k.t),
+                ...rotKeys.map(k => k.t),
                 ...opKeys.map(k => k.t),
             ].filter(n => Number.isFinite(n) && n >= 0));
 
@@ -657,6 +915,12 @@
                 return { o: clamp(toNumber(v?.o ?? 1, 1), 0, 1) };
             };
 
+            const readRotation = (t) => {
+                if (!rotKeys.length) return { r: 0 };
+                const v = this._valueAtEased(rotKeys, t, ['r'], g);
+                return { r: toNumber(v?.r ?? 0, 0) };
+            };
+
             const base = String(baseTransform || '').trim();
             const basePrefix = (base && base !== 'none') ? `${base} ` : '';
 
@@ -665,14 +929,16 @@
 
                 let pos = readPos(t);
                 let sc = readScale(t);
+                let rot = readRotation(t);
                 let op = readOpacity(t);
 
                 const x = toNumber(pos.x, 0);
                 const y = toNumber(pos.y, 0);
                 const s = Math.max(0, toNumber(sc.s, 1));
+                const r = toNumber(rot.r, 0);
                 const o = clamp(toNumber(op.o, 1), 0, 1);
 
-                const transform = `${basePrefix}translate(${x.toFixed(3)}px, ${y.toFixed(3)}px) scale(${s.toFixed(4)})`;
+                const transform = `${basePrefix}translate(${x.toFixed(3)}px, ${y.toFixed(3)}px) rotate(${r.toFixed(3)}deg) scale(${s.toFixed(4)})`;
 
                 return {
                     pct,
@@ -749,7 +1015,7 @@
             return this.applyPresetOnElement(el, preset, { loop, seamless });
         }
 
-        applyPresetOnElement(el, preset, { loop = null, seamless = true, phaseShiftMs = 0 } = {}) {
+        applyPresetOnElement(el, preset, { loop = null, seamless = true, phaseShiftMs = 0, speed = 1 } = {}) {
             if (!el || !preset) return false;
 
             const nowPerf = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -774,7 +1040,14 @@
                 { baseTransform }
             );
 
-            const durationMs = merged.durationMs;
+            const rawDurationMs = Math.max(1, Math.round(Number(merged.durationMs || 1000)));
+            const sp = (() => {
+                const s = Number(speed);
+                return (Number.isFinite(s) && s > 0) ? s : 1;
+            })();
+            // Applied duration is scaled inversely by speed.
+            // Example: speed=2 => duration halves => plays 2x faster.
+            const durationMs = Math.max(1, Math.round(rawDurationMs / sp));
             const animName = this._makeAnimationName('album');
 
             const framesCss = merged.frames
@@ -815,6 +1088,8 @@
             this._elementState.set(el, {
                 animName,
                 durationMs,
+                rawDurationMs,
+                speed: sp,
                 loop: effectiveLoop,
                 startPerf,
                 inlineSnapshot,
@@ -822,6 +1097,7 @@
                 // Keep parsed tracks so we can sample current pose for smooth transitions.
                 positionKeys: parsed.positionKeys,
                 scaleKeys: parsed.scaleKeys,
+                rotationKeys: parsed.rotationKeys,
                 opacityKeys: parsed.opacityKeys,
             });
 

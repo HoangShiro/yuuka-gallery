@@ -181,6 +181,25 @@
     // or when workflow identifiers clearly mention alpha.
     proto._shouldUseAlphaGenerationRoute = function (generationConfig = {}, context = {}) {
         try {
+            // Hard guard: Album must only use alpha generation API while in
+            // Character View AND Visual Novel mode.
+            // This prevents other views (album grid, etc.) from accidentally routing
+            // to the alpha endpoint due to stale workflow identifiers or flags.
+            try {
+                const currentViewMode = String(this.state?.viewMode || '').trim().toLowerCase();
+                if (currentViewMode !== 'character') return false;
+
+                let vnEnabled = true;
+                if (typeof this._characterIsVisualNovelModeEnabled === 'function') {
+                    vnEnabled = !!this._characterIsVisualNovelModeEnabled();
+                } else if (typeof this.state?.character?.settings?.visual_novel_mode !== 'undefined') {
+                    vnEnabled = !!this.state.character.settings.visual_novel_mode;
+                }
+                if (!vnEnabled) return false;
+            } catch {
+                return false;
+            }
+
             const cfg = (generationConfig && typeof generationConfig === 'object') ? generationConfig : {};
             const ctx = (context && typeof context === 'object') ? context : {};
 

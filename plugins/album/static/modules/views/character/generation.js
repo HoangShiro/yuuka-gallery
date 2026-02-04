@@ -73,11 +73,7 @@
 
             // Build prompt parts from selected tag groups.
             // For auto scheduling, we may generate for a preset that is not currently selected.
-            // In State mode, selections live in `state.character.state.*` and are encoded into the resolved preset id (auto:g:...).
-            const isStateMode = (typeof this._characterIsStateModeEnabled === 'function')
-                ? !!this._characterIsStateModeEnabled()
-                : (String(this.state.character?.ui?.menuMode || '').trim().toLowerCase() === 'state');
-            const rawSelections = (auto || isStateMode)
+            const rawSelections = auto
                 ? this._characterGetSelectionsForPresetId(resolvedPresetId)
                 : (this.state.character.selections || {});
             // Visual Novel mode: background category selection does not affect character layer.

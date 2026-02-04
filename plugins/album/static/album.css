@@ -21,6 +21,407 @@
     height: 100%;
 }
 
+/* --- Character view: Sound editor page --- */
+.plugin-album__character-view--sound-editor {
+    position: relative;
+    height: 100%;
+}
+
+.plugin-album__soundedit-overlay {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: var(--spacing-4);
+    gap: var(--spacing-3);
+}
+
+.plugin-album__soundedit-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    min-width: 0;
+}
+
+.plugin-album__soundedit-title {
+    font-weight: var(--font-weight-semibold);
+    white-space: nowrap;
+}
+
+.plugin-album__soundedit-spacer {
+    flex: 1;
+}
+
+.plugin-album__soundedit-iconbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--rounded-md);
+    border: none;
+    background: color-mix(in srgb, var(--color-secondary-text) 12%, transparent);
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.plugin-album__soundedit-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--rounded-md);
+    border: none;
+    background: color-mix(in srgb, var(--color-secondary-text) 12%, transparent);
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.plugin-album__soundedit-name {
+    height: 40px;
+    padding: 0 var(--spacing-2);
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-card-bg) 70%, transparent);
+    color: var(--color-text);
+    min-width: 240px;
+    flex: 1 1 240px;
+    max-width: 100%;
+}
+
+.plugin-album__soundedit-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    padding: var(--spacing-2);
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-card-bg);
+    min-width: 0;
+}
+
+.plugin-album__soundedit-zoom {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    padding: var(--spacing-2);
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-card-bg);
+    min-width: 0;
+}
+
+.plugin-album__soundedit-zoom-label {
+    font-size: 12px;
+    color: var(--color-secondary-text);
+    white-space: nowrap;
+}
+
+.plugin-album__soundedit-zoom-track {
+    --zoom-start: 0%;
+    --zoom-end: 100%;
+    --sel-start: 0%;
+    --sel-end: 100%;
+    --needle-x: 0%;
+    position: relative;
+    flex: 1;
+    height: 32px;
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background:
+        linear-gradient(
+            to right,
+            transparent 0,
+            transparent var(--zoom-start),
+            color-mix(in srgb, var(--color-accent) 14%, transparent) var(--zoom-start),
+            color-mix(in srgb, var(--color-accent) 14%, transparent) var(--zoom-end),
+            transparent var(--zoom-end),
+            transparent 100%
+        ),
+        color-mix(in srgb, var(--color-card-bg) 70%, transparent);
+    overflow: hidden;
+}
+
+.plugin-album__soundedit-zoom-selection {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        linear-gradient(
+            to right,
+            transparent 0,
+            transparent calc(var(--sel-start) - 1px),
+            var(--color-accent) calc(var(--sel-start) - 1px),
+            var(--color-accent) calc(var(--sel-start) + 1px),
+            transparent calc(var(--sel-start) + 1px),
+            transparent calc(var(--sel-end) - 1px),
+            var(--color-accent) calc(var(--sel-end) - 1px),
+            var(--color-accent) calc(var(--sel-end) + 1px),
+            transparent calc(var(--sel-end) + 1px),
+            transparent 100%
+        );
+    opacity: 0.8;
+}
+
+.plugin-album__soundedit-zoom-needle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--needle-x);
+    width: 2px;
+    transform: translateX(-1px);
+    background: var(--color-accent);
+    pointer-events: none;
+    opacity: 0.9;
+}
+
+.plugin-album__soundedit-zoom-range {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background: transparent;
+    pointer-events: none;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.plugin-album__soundedit-zoom-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 32px;
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-accent) 22%, var(--color-card-bg));
+    pointer-events: auto;
+    cursor: ew-resize;
+}
+
+.plugin-album__soundedit-zoom-range::-moz-range-thumb {
+    width: 14px;
+    height: 32px;
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-accent) 22%, var(--color-card-bg));
+    pointer-events: auto;
+    cursor: ew-resize;
+}
+
+.plugin-album__soundedit-zoom-range::-webkit-slider-runnable-track {
+    height: 32px;
+    background: transparent;
+}
+
+.plugin-album__soundedit-zoom-range::-moz-range-track {
+    height: 32px;
+    background: transparent;
+}
+
+.plugin-album__soundedit-field {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    min-width: 0;
+}
+
+.plugin-album__soundedit-field-label {
+    font-size: 12px;
+    color: var(--color-secondary-text);
+    white-space: nowrap;
+}
+
+.plugin-album__soundedit-field-input {
+    height: 36px;
+    width: 110px;
+    padding: 0 var(--spacing-2);
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-card-bg) 70%, transparent);
+    color: var(--color-text);
+}
+
+@media (max-width: 560px) {
+    .plugin-album__soundedit-header {
+        flex-wrap: nowrap;
+    }
+
+    .plugin-album__soundedit-title {
+        max-width: 110px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .plugin-album__soundedit-name {
+        min-width: 70px;
+        width: 1px;
+        flex: 1 1 auto;
+    }
+
+    .plugin-album__soundedit-toolbar {
+        flex-wrap: nowrap;
+        gap: var(--spacing-2);
+        overflow: hidden;
+    }
+
+    .plugin-album__soundedit-zoom {
+        gap: var(--spacing-2);
+    }
+
+    .plugin-album__soundedit-field-label {
+        font-size: 11px;
+        max-width: 120px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .plugin-album__soundedit-field-input {
+        width: 68px;
+    }
+}
+
+.plugin-album__soundedit-timeline {
+    position: relative;
+    flex: 1;
+    min-height: 160px;
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-card-bg);
+    overflow: hidden;
+    touch-action: none;
+}
+
+.plugin-album__soundedit-wave {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.plugin-album__soundedit-selection {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-left: 2px solid var(--color-accent);
+    border-right: 2px solid var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    pointer-events: none;
+    z-index: 2;
+}
+
+.plugin-album__soundedit-selmeta {
+    position: absolute;
+    top: 2px;
+    left: 4px;
+    right: 4px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: var(--spacing-1);
+    font-size: 10px;
+    line-height: 1;
+    color: var(--color-secondary-text);
+    opacity: 0.9;
+    user-select: none;
+    pointer-events: none;
+}
+
+.plugin-album__soundedit-selmeta-start {
+    justify-self: start;
+    white-space: nowrap;
+}
+
+.plugin-album__soundedit-selmeta-total {
+    justify-self: center;
+    white-space: nowrap;
+}
+
+.plugin-album__soundedit-selmeta-end {
+    justify-self: end;
+    white-space: nowrap;
+}
+
+.plugin-album__soundedit-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 12px;
+    background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+    pointer-events: auto;
+    cursor: ew-resize;
+    z-index: 4;
+}
+
+.plugin-album__soundedit-handle--left {
+    left: -6px;
+}
+
+.plugin-album__soundedit-handle--right {
+    right: -6px;
+}
+
+.plugin-album__soundedit-needle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--color-accent);
+    transform: translateX(-1px);
+    opacity: 1;
+    cursor: ew-resize;
+    touch-action: none;
+    z-index: 6;
+}
+
+.plugin-album__soundedit-needle::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -6px;
+    width: 14px;
+    background: transparent;
+}
+
+.plugin-album__soundedit-hint {
+    font-size: 12px;
+    color: var(--color-secondary-text);
+    padding: 0 var(--spacing-1);
+}
+
+/* Sound editor: action menu (right click / long press in selection) */
+.plugin-album__soundedit-menu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 160px;
+    padding: var(--spacing-1);
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-card-bg);
+    color: var(--color-text);
+    box-shadow: 0 10px 30px color-mix(in srgb, var(--color-text) 14%, transparent);
+}
+
+.plugin-album__soundedit-menuitem {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) var(--spacing-2);
+    border: none;
+    border-radius: var(--rounded-sm);
+    background: transparent;
+    color: var(--color-text);
+    cursor: pointer;
+    font-size: 13px;
+    text-align: left;
+}
+
+.plugin-album__soundedit-menuitem:hover {
+    background: color-mix(in srgb, var(--color-secondary-text) 12%, transparent);
+}
+
 .plugin-album__soundmgr-overlay {
     display: flex;
     flex-direction: column;
@@ -55,21 +456,125 @@
     color: var(--color-text);
 }
 
+.plugin-album__soundmgr-new-preset {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    padding: 0 var(--spacing-3);
+    border-radius: var(--rounded-md);
+    border: none;
+    background: color-mix(in srgb, var(--color-secondary-text) 12%, transparent);
+    color: var(--color-text);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
 .plugin-album__soundmgr-list {
     flex: 1;
     overflow: auto;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    grid-auto-rows: max-content;
+    display: flex;
+    flex-direction: column;
     align-content: start;
     gap: var(--spacing-3);
     padding: var(--spacing-2);
 }
 
-@media (max-width: 640px) {
-    .plugin-album__soundmgr-list {
-        grid-template-columns: 1fr;
-    }
+.plugin-album__soundmgr-preset {
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-card-bg);
+    padding: var(--spacing-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+}
+
+.plugin-album__soundmgr-preset-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+}
+
+.plugin-album__soundmgr-preset-name {
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.plugin-album__soundmgr-preset-name-input {
+    height: 34px;
+    padding: 0 var(--spacing-2);
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-card-bg) 70%, transparent);
+    color: var(--color-text);
+    max-width: 260px;
+}
+
+.plugin-album__soundmgr-preset-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--rounded-md);
+    border: none;
+    background: color-mix(in srgb, var(--color-secondary-text) 12%, transparent);
+    color: var(--color-text);
+    cursor: pointer;
+}
+
+.plugin-album__soundmgr-preset-delete[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.plugin-album__soundmgr-preset-spacer {
+    flex: 1;
+}
+
+.plugin-album__soundmgr-preset-search {
+    height: 36px;
+    padding: 0 var(--spacing-2);
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: color-mix(in srgb, var(--color-card-bg) 70%, transparent);
+    color: var(--color-text);
+    min-width: 180px;
+}
+
+.plugin-album__soundmgr-preset-search-results {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-auto-rows: max-content;
+    align-content: start;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2) 0;
+}
+
+.plugin-album__soundmgr-pills-empty {
+    padding: var(--spacing-2) 0;
+    font-size: 12px;
+    color: var(--color-secondary-text);
+}
+
+.plugin-album__soundmgr-preset-items {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-auto-rows: max-content;
+    align-content: start;
+    gap: var(--spacing-2);
+}
+
+.plugin-album__soundmgr-preset-empty {
+    padding: var(--spacing-2);
+    font-size: 12px;
+    color: var(--color-secondary-text);
 }
 
 .plugin-album__soundmgr-item {
@@ -143,6 +648,11 @@
 
 .plugin-album__soundmgr-iconbtn:hover,
 .plugin-album__soundmgr-close:hover {
+    background: color-mix(in srgb, var(--color-secondary-text) 18%, transparent);
+}
+
+.plugin-album__soundmgr-new-preset:hover,
+.plugin-album__soundmgr-preset-delete:hover {
     background: color-mix(in srgb, var(--color-secondary-text) 18%, transparent);
 }
 
@@ -688,6 +1198,77 @@
     display: none !important;
 }
 
+/* Loop mode: animation speed slider (bottom-left overlay) */
+.plugin-album__character-loop-speed {
+    position: absolute;
+    left: var(--spacing-4);
+    bottom: var(--spacing-4);
+    z-index: 12;
+    pointer-events: auto;
+    opacity: 0.55;
+    /* Give the control a stable vertical footprint */
+    width: 28px;
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.plugin-album__character-loop-speed[hidden] {
+    display: none !important;
+}
+
+.plugin-album__character-loop-speed:hover {
+    opacity: 0.9;
+}
+
+.plugin-album__character-loop-speed input[type="range"] {
+    background: transparent;
+    border: 0;
+    outline: none;
+    padding: 0;
+    margin: 0;
+    /* Reliable vertical slider across browsers: rotate a horizontal range */
+    width: 180px;
+    height: 28px;
+    transform: rotate(-90deg);
+    transform-origin: center;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.plugin-album__character-loop-speed input[type="range"]::-webkit-slider-runnable-track {
+    height: 2px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.plugin-album__character-loop-speed input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    border: 0;
+    background: color-mix(in srgb, var(--color-accent) 75%, transparent);
+    margin-top: -6px; /* center on 2px track */
+}
+
+.plugin-album__character-loop-speed input[type="range"]::-moz-range-track {
+    height: 2px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-accent) 40%, transparent);
+    border: 0;
+}
+
+.plugin-album__character-loop-speed input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    border: 0;
+    background: color-mix(in srgb, var(--color-accent) 75%, transparent);
+}
+
 /* VN mode: optional background blur (toggled via Settings → Character mode) */
 .plugin-album__character-view--vn.plugin-album__character-view--vn-blur-bg .plugin-album__character-layer--bg {
     filter: blur(4px);
@@ -1126,18 +1707,20 @@
 }
 
 /* Preset submenu items: no border color (remove borders entirely) */
+.plugin-album__character-submenu[data-menu="Preset"] .plugin-album__character-submenu-item,
 .plugin-album__character-submenu[data-menu="Preset"] .plugin-album__character-submenu-item {
     border: none;
 }
 
+.plugin-album__character-submenu[data-menu="Preset"] .plugin-album__character-submenu-item.is-selected,
 .plugin-album__character-submenu[data-menu="Preset"] .plugin-album__character-submenu-item.is-selected {
     border-color: transparent;
 }
 
 /* Preset submenu: saved preset rows are intentionally more compact than auto-suggest */
 .plugin-album__character-submenu-item--saved {
-    padding: var(--spacing-1) var(--spacing-3);
-    min-height: 36px;
+    padding: 0;
+    min-height: auto;
 }
 
 /* Auto-suggest preset: use an inner wrapper to avoid clipping the pill layout */
@@ -1151,6 +1734,16 @@
     border-radius: inherit;
     padding: var(--spacing-2) var(--spacing-3);
     min-height: 44px;
+}
+
+.plugin-album__character-preset-item-title {
+    position: relative;
+    z-index: 1;
+    font-weight: 600;
+    margin-bottom: var(--spacing-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Preset submenu: show per-preset task progress as a left->right fill (on the inner wrapper) */
@@ -1334,6 +1927,10 @@
     background: var(--color-border);
 }
 
+.plugin-album__character-mainmenu-mode-modal .plugin-album__mainmenu-settings-actionbtn.is-selected {
+    background: color-mix(in srgb, var(--color-accent) 18%, var(--color-primary-bg));
+}
+
 /* --- Character view: Animation editor (page overlay) --- */
 .plugin-album__character-view--anim-editor {
     position: relative;
@@ -1488,7 +2085,7 @@
 
 .plugin-album__anim-editor-timeline-col--title {
     display: grid;
-    grid-template-rows: var(--album-anim-ruler-h) var(--album-anim-track-h) var(--album-anim-track-h) var(--album-anim-track-h);
+    grid-template-rows: var(--album-anim-ruler-h) var(--album-anim-track-h) var(--album-anim-track-h) var(--album-anim-track-h) var(--album-anim-track-h) var(--album-anim-track-h);
     row-gap: 0;
     min-width: 0;
 }
@@ -1500,6 +2097,20 @@
     font-size: var(--font-size-sm);
     color: var(--color-secondary-text);
     white-space: nowrap;
+}
+
+.plugin-album__anim-editor-track-titlebtn {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.plugin-album__anim-editor-track-titlebtn:hover {
+    text-decoration: underline;
 }
 
 .plugin-album__anim-editor-track-title--spacer {
@@ -1821,6 +2432,46 @@
     pointer-events: auto;
     touch-action: none;
     cursor: grab;
+}
+
+.plugin-album__anim-editor-anchor-rotate {
+    position: absolute;
+    top: 50%;
+    left: calc(-1 * (var(--spacing-2) + 26px));
+    transform: translateY(-50%);
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--color-secondary-text);
+    opacity: 0.55;
+    pointer-events: auto;
+    cursor: ns-resize;
+}
+
+.plugin-album__anim-editor-anchor-rotate:hover {
+    opacity: 0.85;
+}
+
+.plugin-album__anim-editor-anchor-rotate .material-symbols-outlined {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.plugin-album__anim-editor-soundbar {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    height: 10px;
+    transform: translateY(-50%);
+    background: color-mix(in srgb, var(--color-accent) 45%, transparent);
+    border-right: 1px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+    pointer-events: none;
 }
 
 .plugin-album__anim-editor-anchor-opacity {

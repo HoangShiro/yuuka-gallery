@@ -37,11 +37,6 @@ class AlbumPlugin(
         self.CHAR_VIEW_SETTINGS_FILENAME = "album_character_view_settings.json"
         self.CHAR_VN_BACKGROUNDS_FILENAME = "album_character_vn_backgrounds.json"
 
-        # --- Character view: States (group tag groups across categories)
-        self.CHAR_STATE_GROUPS_FILENAME = "album_character_state_groups.json"
-        self.CHAR_STATES_FILENAME = "album_character_states.json"
-        self.CHAR_STATE_GROUP_PRESETS_FILENAME = "album_character_state_group_presets.json"
-
         # --- Animation (CSS) presets + groups (per-user)
         self.ANIMATION_GROUPS_FILENAME = "album_animation_groups.json"
         self.ANIMATION_PRESETS_FILENAME = "album_animation_presets.json"
@@ -54,7 +49,7 @@ class AlbumPlugin(
         self.EXTERNAL_ALBUM_PRESET_DIRNAME = os.path.join('album_preset')
         
         self.DEFAULT_CONFIG = {
-            "server_address": "127.0.0.1:8888", "ckpt_name": "waiNSFWIllustrious_v150.safetensors",
+            "server_address": "127.0.0.1:8888", "ckpt_name": "waiNSFWIllustrious_v160.safetensors",
             "character": "", "expression": "smile", "action": "sitting", "outfits": "school uniform",
             "context": "1girl, classroom", "quality": "masterpiece, best quality, highres, amazing quality",
             "negative": "bad hands, bad quality, worst quality, worst detail, sketch, censor, x-ray, watermark",

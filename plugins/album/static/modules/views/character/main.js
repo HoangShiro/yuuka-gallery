@@ -24,10 +24,15 @@
                 if (typeof this.state.character.ui.menuMode === 'undefined' && typeof this._characterLoadMainMenuMode === 'function') {
                     this.state.character.ui.menuMode = this._characterLoadMainMenuMode();
                 }
-            } catch { }
 
-            // Ensure state-mode state container exists
-            try { this._characterEnsureStateModeState?.(); } catch { }
+                // Global Sound Fx mode (slot 1/2)
+                if (typeof this.state.character.ui.soundFx1Mode === 'undefined' && typeof this._characterLoadSoundFxMode === 'function') {
+                    this.state.character.ui.soundFx1Mode = this._characterLoadSoundFxMode(1);
+                }
+                if (typeof this.state.character.ui.soundFx2Mode === 'undefined' && typeof this._characterLoadSoundFxMode === 'function') {
+                    this.state.character.ui.soundFx2Mode = this._characterLoadSoundFxMode(2);
+                }
+            } catch { }
 
             // New session for character auto tasks
             try {
@@ -71,24 +76,13 @@
 
             // Load tag groups + presets + settings
             try {
-                const [tagGroups, presetsPayload, stateGroupsPayload, statesPayload] = await Promise.all([
+                const [tagGroups, presetsPayload] = await Promise.all([
                     this.api.album.get('/character/tag_groups'),
                     this.api.album.get(`/character/${encodeURIComponent(characterHash)}/presets`),
-                    this.api.album.get('/character/state_groups'),
-                    this.api.album.get('/character/states'),
                 ]);
                 this.state.character.tagGroups = tagGroups || { grouped: {}, flat: {} };
                 this.state.character.presets = Array.isArray(presetsPayload?.presets) ? presetsPayload.presets : [];
                 this.state.character.favourites = presetsPayload?.favourites && typeof presetsPayload.favourites === 'object' ? presetsPayload.favourites : {};
-
-                // State mode: state groups + states (global per-user)
-                try {
-                    this._characterEnsureStateModeState?.();
-                    this.state.character.state.groups = Array.isArray(stateGroupsPayload) ? stateGroupsPayload : [];
-                    this.state.character.state.states = Array.isArray(statesPayload) ? statesPayload : [];
-                    if (!this.state.character.state.presetsByGroup) this.state.character.state.presetsByGroup = {};
-                    if (!this.state.character.state.activePresetByGroup) this.state.character.state.activePresetByGroup = {};
-                } catch { }
                 const settingsPayload = presetsPayload?.settings && typeof presetsPayload.settings === 'object' ? presetsPayload.settings : null;
                 const categories = this._characterNormalizeCategories(settingsPayload?.categories);
                 this.state.character.categories = categories.length ? categories : this._characterDefaultCategories();
@@ -141,53 +135,11 @@
                 this.state.character.favourites = {};
                 this.state.character.categories = this._characterDefaultCategories();
                 this.state.character.settings = { pregen_enabled: true, visual_novel_mode: true, blur_background: false, character_layer_extra_tags: 'simple background, gray background', background_layer_extra_tags: '', pregen_category_enabled: {}, pregen_group_enabled: {} };
-
-                // State mode fallback
-                try {
-                    this._characterEnsureStateModeState?.();
-                    this.state.character.state.groups = [];
-                    this.state.character.state.states = [];
-                    this.state.character.state.presetsByGroup = {};
-                    this.state.character.state.activePresetByGroup = {};
-                } catch { }
             }
 
             // Restore last selections from localStorage (per character)
             this.state.character.selections = this._characterLoadSelections(characterHash, this._characterGetCategoryNames());
             this.state.character.activePresetId = this._characterLoadActivePresetId(characterHash);
-
-            // State mode: restore per-character state selections (per state group)
-            try {
-                this._characterEnsureStateModeState?.();
-                const groups = Array.isArray(this.state.character?.state?.groups) ? this.state.character.state.groups : [];
-                this.state.character.state.selections = this._characterLoadStateSelections?.(characterHash, groups) || {};
-                this.state.character.state.activePresetByGroup = this._characterLoadStateGroupActivePresetIds?.(characterHash, groups) || {};
-
-                // Hygiene: prune missing state ids + presets
-                const states = Array.isArray(this.state.character.state.states) ? this.state.character.state.states : [];
-                const stateById = new Set(states.map(s => String(s?.id || '').trim()).filter(Boolean));
-                const sel = (this.state.character.state.selections && typeof this.state.character.state.selections === 'object')
-                    ? { ...this.state.character.state.selections }
-                    : {};
-                let selChanged = false;
-                Object.keys(sel).forEach(gid => {
-                    const sid = String(sel[gid] || '').trim();
-                    if (!sid) return;
-                    if (sid === '__none__') {
-                        sel[gid] = null;
-                        selChanged = true;
-                        return;
-                    }
-                    if (!stateById.has(sid)) {
-                        sel[gid] = null;
-                        selChanged = true;
-                    }
-                });
-                if (selChanged) {
-                    this.state.character.state.selections = sel;
-                    this._characterSaveStateSelections?.();
-                }
-            } catch { }
 
             // VN mode: restore per-character background selection override (if previously set).
             // If the saved BG group no longer exists, fall back to None.
@@ -291,10 +243,8 @@
             const categories = this._characterNormalizeCategories(this.state.character.categories);
             const resolvedCategories = categories.length ? categories : this._characterDefaultCategories();
 
-            const menuMode = String(this.state.character?.ui?.menuMode || 'category').trim().toLowerCase();
-            const isStateMode = menuMode === 'state';
-            const presetMenuName = isStateMode ? 'StatePreset' : 'Preset';
-            const presetTitle = isStateMode ? 'State preset' : 'Preset';
+            const presetMenuName = 'Preset';
+            const presetTitle = 'Preset';
 
             this.contentArea.innerHTML = `
                 <div class="plugin-album__character-view${vnMode ? ' plugin-album__character-view--vn' : ''}${vnBlur ? ' plugin-album__character-view--vn-blur-bg' : ''}" data-character-hash="${characterHash}">
@@ -318,174 +268,92 @@
             // Build category/state-group buttons dynamically (including the top '+' for add)
             const menuButtonsHost = this.contentArea.querySelector('.plugin-album__character-menu-buttons');
             if (menuButtonsHost) {
-                if (!isStateMode) {
-                    const maxTotalCategories = this._CHAR_MAX_TOTAL_CATEGORIES || 10;
-                    const totalCategoryCount = Array.isArray(resolvedCategories) ? resolvedCategories.length : 0;
-                    if (totalCategoryCount < maxTotalCategories) {
-                        const addCatBtn = document.createElement('button');
-                        addCatBtn.className = 'plugin-album__character-menu-btn plugin-album__character-menu-btn--category-add';
-                        addCatBtn.type = 'button';
-                        addCatBtn.dataset.action = 'add-category';
-                        addCatBtn.title = 'Thêm category';
-                        addCatBtn.innerHTML = `<span class="material-symbols-outlined">add</span>`;
-                        menuButtonsHost.appendChild(addCatBtn);
-                    }
-
-                    resolvedCategories.forEach(cat => {
-                        const btn = document.createElement('button');
-                        btn.className = 'plugin-album__character-menu-btn';
-                        btn.type = 'button';
-                        btn.dataset.menu = cat.name;
-                        btn.title = cat.name;
-                        btn.innerHTML = `
-                            <span class="plugin-album__character-menu-btn-label"></span>
-                            <span class="material-symbols-outlined">${cat.icon || 'label'}</span>
-                        `;
-
-                        // Apply per-category icon color (if configured)
-                        try {
-                            const iconEl = btn.querySelector('.material-symbols-outlined');
-                            const color = this._characterIsValidHexColor(cat?.color) ? cat.color : null;
-                            if (iconEl && color) iconEl.style.color = color;
-                        } catch { }
-
-                        // Long-press 0.5s to reorder categories
-                        let longPressTimer = null;
-                        let longPressFired = false;
-                        const clear = () => {
-                            if (longPressTimer) {
-                                clearTimeout(longPressTimer);
-                                longPressTimer = null;
-                            }
-                        };
-
-                        const start = () => {
-                            clear();
-                            longPressFired = false;
-                            longPressTimer = setTimeout(() => {
-                                longPressTimer = null;
-                                longPressFired = true;
-                                this._characterOpenCategoryReorderModal();
-                            }, 500);
-                        };
-
-                        // Mouse hold
-                        btn.addEventListener('mousedown', (e) => {
-                            // Only left button
-                            if (e.button !== 0) return;
-                            start();
-                        });
-                        btn.addEventListener('mouseup', clear);
-                        btn.addEventListener('mouseleave', clear);
-
-                        // Touch hold
-                        btn.addEventListener('touchstart', () => start(), { passive: true });
-                        btn.addEventListener('touchend', clear);
-                        btn.addEventListener('touchcancel', clear);
-
-                        // If long press fired, suppress the subsequent click
-                        btn.addEventListener('click', (e) => {
-                            if (!longPressFired) return;
-                            e.preventDefault();
-                            e.stopPropagation();
-                            longPressFired = false;
-                        }, true);
-
-                        menuButtonsHost.appendChild(btn);
-                    });
-                } else {
-                    const maxTotalGroups = this._CHAR_MAX_TOTAL_STATE_GROUPS || 6;
-                    const groups = Array.isArray(this.state.character?.state?.groups) ? this.state.character.state.groups : [];
-                    const totalCount = groups.length;
-                    if (totalCount < maxTotalGroups) {
-                        const addBtn = document.createElement('button');
-                        addBtn.className = 'plugin-album__character-menu-btn plugin-album__character-menu-btn--category-add';
-                        addBtn.type = 'button';
-                        addBtn.dataset.action = 'add-state-group';
-                        addBtn.title = 'Thêm state group';
-                        addBtn.innerHTML = `<span class="material-symbols-outlined">add</span>`;
-                        menuButtonsHost.appendChild(addBtn);
-                    }
-
-                    groups.forEach(g => {
-                        const gid = String(g?.id || '').trim();
-                        const name = String(g?.name || '').trim();
-                        if (!gid || !name) return;
-                        const icon = String(g?.icon || 'label').trim() || 'label';
-                        const color = this._characterIsValidHexColor(g?.color) ? String(g.color).toUpperCase() : null;
-
-                        const btn = document.createElement('button');
-                        btn.className = 'plugin-album__character-menu-btn';
-                        btn.type = 'button';
-                        btn.dataset.menu = `state:${gid}`;
-                        btn.title = name;
-                        btn.innerHTML = `
-                            <span class="plugin-album__character-menu-btn-label"></span>
-                            <span class="material-symbols-outlined">${icon}</span>
-                        `;
-
-                        try {
-                            const iconEl = btn.querySelector('.material-symbols-outlined');
-                            if (iconEl && color) iconEl.style.color = color;
-
-                            // Long-press 0.5s on icon to reorder state groups
-                            let longPressTimer = null;
-                            let longPressFired = false;
-                            const clear = () => {
-                                if (longPressTimer) {
-                                    clearTimeout(longPressTimer);
-                                    longPressTimer = null;
-                                }
-                            };
-                            const start = () => {
-                                clear();
-                                longPressFired = false;
-                                longPressTimer = setTimeout(() => {
-                                    longPressTimer = null;
-                                    longPressFired = true;
-                                    this._characterOpenStateGroupReorderModal?.();
-                                }, 500);
-                            };
-
-                            // Mouse hold
-                            iconEl.addEventListener('mousedown', (e) => {
-                                if (e.button !== 0) return;
-                                start();
-                            });
-                            iconEl.addEventListener('mouseup', clear);
-                            iconEl.addEventListener('mouseleave', clear);
-
-                            // Touch hold
-                            iconEl.addEventListener('touchstart', () => start(), { passive: true });
-                            iconEl.addEventListener('touchend', clear);
-                            iconEl.addEventListener('touchcancel', clear);
-
-                            // Suppress subsequent click if long press fired
-                            iconEl.addEventListener('click', (e) => {
-                                if (!longPressFired) return;
-                                e.preventDefault();
-                                e.stopPropagation();
-                                longPressFired = false;
-                            }, true);
-                        } catch { }
-
-                        menuButtonsHost.appendChild(btn);
-                    });
+                const maxTotalCategories = this._CHAR_MAX_TOTAL_CATEGORIES || 10;
+                const totalCategoryCount = Array.isArray(resolvedCategories) ? resolvedCategories.length : 0;
+                if (totalCategoryCount < maxTotalCategories) {
+                    const addCatBtn = document.createElement('button');
+                    addCatBtn.className = 'plugin-album__character-menu-btn plugin-album__character-menu-btn--category-add';
+                    addCatBtn.type = 'button';
+                    addCatBtn.dataset.action = 'add-category';
+                    addCatBtn.title = 'Thêm category';
+                    addCatBtn.innerHTML = `<span class="material-symbols-outlined">add</span>`;
+                    menuButtonsHost.appendChild(addCatBtn);
                 }
+
+                resolvedCategories.forEach(cat => {
+                    const btn = document.createElement('button');
+                    btn.className = 'plugin-album__character-menu-btn';
+                    btn.type = 'button';
+                    btn.dataset.menu = cat.name;
+                    btn.title = cat.name;
+                    btn.innerHTML = `
+                        <span class="plugin-album__character-menu-btn-label"></span>
+                        <span class="material-symbols-outlined">${cat.icon || 'label'}</span>
+                    `;
+
+                    // Apply per-category icon color (if configured)
+                    try {
+                        const iconEl = btn.querySelector('.material-symbols-outlined');
+                        const color = this._characterIsValidHexColor(cat?.color) ? cat.color : null;
+                        if (iconEl && color) iconEl.style.color = color;
+                    } catch { }
+
+                    // Long-press 0.5s to reorder categories
+                    let longPressTimer = null;
+                    let longPressFired = false;
+                    const clear = () => {
+                        if (longPressTimer) {
+                            clearTimeout(longPressTimer);
+                            longPressTimer = null;
+                        }
+                    };
+
+                    const start = () => {
+                        clear();
+                        longPressFired = false;
+                        longPressTimer = setTimeout(() => {
+                            longPressTimer = null;
+                            longPressFired = true;
+                            this._characterOpenCategoryReorderModal();
+                        }, 500);
+                    };
+
+                    // Mouse hold
+                    btn.addEventListener('mousedown', (e) => {
+                        // Only left button
+                        if (e.button !== 0) return;
+                        start();
+                    });
+                    btn.addEventListener('mouseup', clear);
+                    btn.addEventListener('mouseleave', clear);
+
+                    // Touch hold
+                    btn.addEventListener('touchstart', () => start(), { passive: true });
+                    btn.addEventListener('touchend', clear);
+                    btn.addEventListener('touchcancel', clear);
+
+                    // If long press fired, suppress the subsequent click
+                    btn.addEventListener('click', (e) => {
+                        if (!longPressFired) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        longPressFired = false;
+                    }, true);
+
+                    menuButtonsHost.appendChild(btn);
+                });
             }
 
             // Menu-bar mode toggle button (must be below Preset button)
             try {
-                const presetBtn = this.contentArea?.querySelector('.plugin-album__character-menu-btn[data-menu="Preset"], .plugin-album__character-menu-btn[data-menu="StatePreset"]');
+                const presetBtn = this.contentArea?.querySelector('.plugin-album__character-menu-btn[data-menu="Preset"]');
                 if (presetBtn) {
-                    const mm = String(this.state.character?.ui?.menuMode || 'category').trim().toLowerCase();
-                    const iconName = (mm === 'state') ? 'filter_2' : 'filter_1';
                     const modeBtn = document.createElement('button');
                     modeBtn.className = 'plugin-album__character-menu-btn plugin-album__character-menu-btn--menumode';
                     modeBtn.type = 'button';
                     modeBtn.dataset.action = 'open-mainmenu-mode-modal';
                     modeBtn.title = 'Main menu settings';
-                    modeBtn.innerHTML = `<span class="material-symbols-outlined">${iconName}</span>`;
+                    modeBtn.innerHTML = `<span class="material-symbols-outlined">filter_1</span>`;
                     presetBtn.insertAdjacentElement('afterend', modeBtn);
                 }
             } catch { }
@@ -581,6 +449,16 @@
                         }
                     } catch { }
 
+                    // If we're currently looping, a user tap should only cancel loop (no extra play).
+                    try {
+                        if (typeof this._characterIsCharacterLayerLoopEnabled === 'function' && this._characterIsCharacterLayerLoopEnabled()) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            try { this._characterStopCharacterLayerLoop?.({ stopEngine: true }); } catch { }
+                            return;
+                        }
+                    } catch { }
+
                     // Normal click play.
                     try { this._characterPlayCurrentCharacterLayerAnimations?.({ restart: true, reason: 'click' }); } catch { }
                 }, true);
@@ -588,6 +466,9 @@
 
             // Initial image
             this._characterRefreshDisplayedImage();
+
+            // Session-only warm cache for animation presets + sound FX referenced by tag groups/presets.
+            try { this._characterSessionMediaCacheWarmFromState?.({ reason: 'start' }); } catch { }
 
             // Ensure menu progress UI exists (border shown when tasks are running)
             this._characterEnsureMenuProgressUI();
@@ -658,19 +539,6 @@
                     }
                 } catch { }
                 this._characterOpenCategoryIconEditor({ mode: 'create' });
-                return;
-            }
-
-            if (action === 'add-state-group') {
-                try {
-                    const maxTotalGroups = this._CHAR_MAX_TOTAL_STATE_GROUPS || 6;
-                    const groups = Array.isArray(this.state.character?.state?.groups) ? this.state.character.state.groups : [];
-                    if (groups.length >= maxTotalGroups) {
-                        showError(`Tối đa ${maxTotalGroups} state group.`);
-                        return;
-                    }
-                } catch { }
-                try { this._characterOpenStateGroupEditModal?.({ mode: 'create' }); } catch { }
                 return;
             }
             const menu = String(btn.dataset.menu || '').trim();

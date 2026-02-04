@@ -584,7 +584,7 @@
                             </div>
                             <div class="stage-config-column" data-stage="stage2">
                                 <h5>Stage 2</h5>
-                                ${cs('hires_stage2_steps', 'Steps', hiresStage2Steps, 10, 60, 1)}
+                                ${cs('hires_stage2_steps', 'Steps', hiresStage2Steps, 2, 25, 1)}
                                 ${cs('hires_stage2_cfg', 'CFG', hiresStage2Cfg, 1.0, 7.0, 0.1)}
                                 ${cse('hires_stage2_sampler_name', 'Sampler', stage2SamplerValue, samplerOptions)}
                                 ${cse('hires_stage2_scheduler', 'Scheduler', stage2SchedulerValue, schedulerOptions)}

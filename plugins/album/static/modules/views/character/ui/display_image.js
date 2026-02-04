@@ -5,6 +5,354 @@
     const proto = AlbumComponent.prototype;
 
     Object.assign(proto, {
+        _characterGetAnimPlaybackSpeedPct() {
+            try {
+                if (!this.state.character) this.state.character = {};
+                const raw = Number(this.state.character.animSpeedPct);
+                const pct = Number.isFinite(raw) ? raw : 100;
+                const clamped = Math.max(50, Math.min(300, Math.round(pct)));
+                this.state.character.animSpeedPct = clamped;
+                return clamped;
+            } catch {
+                return 100;
+            }
+        },
+
+        _characterGetAnimPlaybackSpeedFactor() {
+            try {
+                const pct = this._characterGetAnimPlaybackSpeedPct?.() ?? 100;
+                const f = Number(pct) / 100;
+                if (!Number.isFinite(f) || f <= 0) return 1;
+                return Math.max(0.5, Math.min(3, f));
+            } catch {
+                return 1;
+            }
+        },
+
+        _characterGetLoopSpringSmoothingParams({ speedFactor = 1 } = {}) {
+            try {
+                const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+                const f0 = Number(speedFactor);
+                const f = Number.isFinite(f0) ? clamp(f0, 0.5, 3) : 1;
+
+                // Base: critically damped (no overshoot).
+                // Higher speed => more bounce => lower damping ratio.
+                // Also increase omega a bit so it can "keep up" at high speed.
+                let omega = 16;
+                let zeta = 1;
+
+                if (f > 1) {
+                    const t = clamp((f - 1) / 2, 0, 1); // 1x..3x -> 0..1
+                    zeta = 1 - 0.38 * t;               // 1.00 -> ~0.62 (more bounce)
+                    omega = 16 + 12 * t;               // 16 -> 28 (snappier)
+                } else if (f < 1) {
+                    const t = clamp((1 - f) / 0.5, 0, 1); // 1x..0.5x -> 0..1
+                    zeta = 1 + 0.18 * t;                 // 1.00 -> 1.18 (less bounce)
+                    omega = 16 - 2 * t;                  // 16 -> 14 (softer)
+                }
+
+                return {
+                    omega: clamp(omega, 10, 40),
+                    zeta: clamp(zeta, 0.55, 1.4),
+                    dtMs: 16,
+                };
+            } catch {
+                return { omega: 16, zeta: 1, dtMs: 16 };
+            }
+        },
+
+        _characterSetAnimPlaybackSpeedPct(pct) {
+            try {
+                if (!this.state.character) this.state.character = {};
+                const n = Number(pct);
+                const v = Number.isFinite(n) ? n : 100;
+                const clamped = Math.max(50, Math.min(300, Math.round(v)));
+                this.state.character.animSpeedPct = clamped;
+                return clamped;
+            } catch {
+                return 100;
+            }
+        },
+
+        _characterEnsureLoopSpeedSliderUI() {
+            try {
+                if (this.state.viewMode !== 'character') return;
+                const root = this.contentArea?.querySelector?.('.plugin-album__character-view');
+                if (!root) return;
+
+                const isLoop = (() => {
+                    try { return !!this._characterIsCharacterLayerLoopEnabled?.(); } catch { return false; }
+                })();
+
+                let host = root.querySelector('.plugin-album__character-loop-speed');
+
+                // IMPORTANT: never create this control outside loop mode.
+                // (We may still hide it if it already exists.)
+                if (!host && !isLoop) return;
+
+                if (!host) {
+                    host = document.createElement('div');
+                    host.className = 'plugin-album__character-loop-speed';
+                    host.hidden = true;
+
+                    const input = document.createElement('input');
+                    input.type = 'range';
+                    input.min = '50';
+                    input.max = '300';
+                    input.step = '1';
+                    input.value = String(this._characterGetAnimPlaybackSpeedPct?.() ?? 100);
+                    input.setAttribute('aria-label', 'Animation speed');
+
+                    input.addEventListener('input', () => {
+                        try {
+                            const pct = this._characterSetAnimPlaybackSpeedPct?.(input.value) ?? 100;
+                            try { input.title = `${pct}%`; } catch { }
+
+                            // Speed takes effect on the next preset start (looped playback).
+                            // We intentionally do not hard-restart the current clip.
+                        } catch { }
+                    });
+
+                    host.appendChild(input);
+                    root.appendChild(host);
+                }
+
+                // Sync UI state.
+                try {
+                    const input = host.querySelector('input[type="range"]');
+                    if (input) {
+                        const pct = this._characterGetAnimPlaybackSpeedPct?.() ?? 100;
+                        if (String(input.value) !== String(pct)) input.value = String(pct);
+                        try { input.title = `${pct}%`; } catch { }
+                    }
+                } catch { }
+
+                // Only show in loop mode.
+                try {
+                    host.hidden = !isLoop;
+                } catch {
+                    host.hidden = true;
+                }
+            } catch { }
+        },
+
+        _characterEnsureSessionMediaCache() {
+            try {
+                if (!this.state.character) this.state.character = {};
+                const c = this.state.character._sessionMediaCache;
+                if (c && typeof c === 'object') return;
+                this.state.character._sessionMediaCache = {
+                    animByKey: Object.create(null),
+                    animLoading: new Map(),
+                    animWanted: new Set(),
+                    soundWanted: new Set(),
+                    soundPreloadedUrls: new Set(),
+                    soundKeepAlive: [],
+                };
+            } catch { }
+        },
+
+        _characterSessionMediaCacheCollectRefs() {
+            const animKeys = new Set();
+            const soundEntries = new Set();
+            try {
+                const addAnim = (list) => {
+                    try {
+                        (Array.isArray(list) ? list : []).forEach((k) => {
+                            const key = String(k || '').trim();
+                            if (key) animKeys.add(key);
+                        });
+                    } catch { }
+                };
+                const addSound = (list) => {
+                    try {
+                        (Array.isArray(list) ? list : []).forEach((id) => {
+                            const v = String(id || '').trim();
+                            if (v) soundEntries.add(v);
+                        });
+                    } catch { }
+                };
+
+                const flat = this.state.character?.tagGroups?.flat || {};
+                Object.values(flat).forEach((g) => {
+                    if (!g || typeof g !== 'object') return;
+                    addAnim(this._characterReadAnimationPresetList?.(g));
+                    addSound(this._characterReadSoundFxList?.(g, 1));
+                    addSound(this._characterReadSoundFxList?.(g, 2));
+                });
+
+                const presets = Array.isArray(this.state.character?.presets) ? this.state.character.presets : [];
+                presets.forEach((p) => {
+                    if (!p || typeof p !== 'object') return;
+                    addAnim(this._characterReadAnimationPresetList?.(p));
+                    addSound(this._characterReadSoundFxList?.(p, 1));
+                    addSound(this._characterReadSoundFxList?.(p, 2));
+                });
+            } catch { }
+            return { animKeys, soundEntries };
+        },
+
+        _characterAnimCacheGet(key) {
+            try {
+                this._characterEnsureSessionMediaCache?.();
+                const c = this.state.character?._sessionMediaCache;
+                const k = String(key || '').trim();
+                if (!k || !c) return null;
+                return c.animByKey?.[k] || null;
+            } catch {
+                return null;
+            }
+        },
+
+        _characterAnimCacheLoad(engine, key) {
+            try {
+                this._characterEnsureSessionMediaCache?.();
+                const c = this.state.character?._sessionMediaCache;
+                const k = String(key || '').trim();
+                if (!engine || !k || !c) return Promise.resolve(null);
+
+                const hit = c.animByKey?.[k];
+                if (hit) return Promise.resolve(hit);
+
+                const inFlight = c.animLoading?.get?.(k);
+                if (inFlight && typeof inFlight.then === 'function') return inFlight;
+
+                const p = Promise.resolve(engine.loadPresetByKey(k))
+                    .then((preset) => {
+                        try {
+                            if (preset) c.animByKey[k] = preset;
+                        } catch { }
+                        return preset;
+                    })
+                    .catch(() => null)
+                    .finally(() => {
+                        try { c.animLoading.delete(k); } catch { }
+                    });
+                try { c.animLoading.set(k, p); } catch { }
+                return p;
+            } catch {
+                return Promise.resolve(null);
+            }
+        },
+
+        _characterSoundWithAuthTokenQuery(url) {
+            try {
+                const u0 = String(url || '').trim();
+                if (!u0) return '';
+                const token = String(localStorage.getItem('yuuka-auth-token') || '').trim();
+                if (!token) return u0;
+                const u = new URL(u0, window.location.origin);
+                if (!u.searchParams.get('token')) u.searchParams.set('token', token);
+                return u.toString();
+            } catch {
+                return String(url || '').trim();
+            }
+        },
+
+        _characterSoundPreloadUrl(url) {
+            try {
+                this._characterEnsureSessionMediaCache?.();
+                const c = this.state.character?._sessionMediaCache;
+                if (!c) return;
+                const raw = String(url || '').trim();
+                if (!raw) return;
+                const u = this._characterSoundWithAuthTokenQuery?.(raw) || raw;
+                if (!u) return;
+                if (c.soundPreloadedUrls?.has?.(u)) return;
+                c.soundPreloadedUrls.add(u);
+
+                const a = new Audio();
+                a.preload = 'auto';
+                a.src = u;
+                try { a.load?.(); } catch { }
+
+                // Keep a bounded reference so the browser has a chance to cache/keep the request warm.
+                try {
+                    c.soundKeepAlive.push(a);
+                    while (c.soundKeepAlive.length > 32) c.soundKeepAlive.shift();
+                } catch { }
+            } catch { }
+        },
+
+        _characterSessionMediaCacheWarmFromState({ reason = 'start' } = {}) {
+            try {
+                if (this.state.viewMode !== 'character') return;
+                this._characterEnsureSessionMediaCache?.();
+                const c = this.state.character?._sessionMediaCache;
+                if (!c) return;
+
+                const { animKeys, soundEntries } = this._characterSessionMediaCacheCollectRefs?.() || { animKeys: new Set(), soundEntries: new Set() };
+
+                // Track wanted keys/entries (dedup).
+                try { animKeys.forEach(k => c.animWanted.add(k)); } catch { }
+                try { soundEntries.forEach(s => c.soundWanted.add(s)); } catch { }
+
+                // 1) Animation: preload + playback should prefer cache.
+                try {
+                    const engine = (typeof this._albumAnimGetEngine === 'function') ? this._albumAnimGetEngine() : null;
+                    if (engine) {
+                        // Fire-and-forget: warm cache in background.
+                        (async () => {
+                            try {
+                                const keys = Array.from(animKeys);
+                                // Small concurrency limit
+                                const concurrency = 3;
+                                let idx = 0;
+                                const worker = async () => {
+                                    while (idx < keys.length) {
+                                        const k = keys[idx++];
+                                        if (!k) continue;
+                                        if (this._characterAnimCacheGet?.(k)) continue;
+                                        await this._characterAnimCacheLoad(engine, k);
+                                    }
+                                };
+                                const runners = [];
+                                for (let i = 0; i < concurrency; i += 1) runners.push(worker());
+                                await Promise.allSettled(runners);
+                            } catch { }
+                        })();
+                    }
+                } catch { }
+
+                // 2) Sound: ensure preset URL cache exists, then preload audio URLs.
+                try {
+                    // Ensure preset url map is warm (async; session-only for audio preloads).
+                    const p = (typeof this._characterSoundEnsurePresetsCache === 'function')
+                        ? this._characterSoundEnsurePresetsCache({})
+                        : null;
+                    Promise.resolve(p).then(() => {
+                        try {
+                            const idMap = this.state.character?._soundFxPresetIdMap;
+                            const groupMap = this.state.character?._soundFxGroupIdMap;
+                            const hasMaps = !!((idMap && typeof idMap === 'object') || (groupMap && typeof groupMap === 'object'));
+
+                            const entries = Array.from(soundEntries);
+                            entries.forEach((entry) => {
+                                const raw = String(entry || '').trim();
+                                if (!raw) return;
+
+                                // If it's a preset id, preload directly.
+                                if (hasMaps && idMap && idMap[raw]) {
+                                    const url = this._characterSoundGetPresetUrlById?.(raw) || '';
+                                    if (url) this._characterSoundPreloadUrl?.(url);
+                                    return;
+                                }
+
+                                // Otherwise treat it as a group id and expand.
+                                const ids = this._characterSoundGetPresetIdsByGroupId?.(raw) || [];
+                                ids.forEach((pid) => {
+                                    const url = this._characterSoundGetPresetUrlById?.(pid) || '';
+                                    if (url) this._characterSoundPreloadUrl?.(url);
+                                });
+                            });
+                        } catch { }
+                    });
+                } catch { }
+
+                return;
+            } catch { }
+        },
+
         _characterRefreshDisplayedImage() {
             if (this.state.viewMode !== 'character') return;
             const root = this.contentArea?.querySelector('.plugin-album__character-view');
@@ -73,6 +421,23 @@
                             } else {
                                 bgUrl = String(entry || '').trim() || null;
                             }
+
+                            // New UI session case: selection exists, but VN background cache hasn't been loaded yet.
+                            // If we have no URL, auto-fetch the cache once and refresh.
+                            if (!bgUrl) {
+                                try {
+                                    const vn2 = this.state.character?.vn;
+                                    if (vn2 && !vn2._bgCacheAutoLoadPromise && typeof this._characterVNEnsureBackgroundCacheLoaded === 'function') {
+                                        vn2._bgCacheAutoLoadPromise = Promise.resolve(this._characterVNEnsureBackgroundCacheLoaded())
+                                            .then(() => {
+                                                try { this._characterRefreshDisplayedImage(); } catch { }
+                                            })
+                                            .finally(() => {
+                                                try { vn2._bgCacheAutoLoadPromise = null; } catch { }
+                                            });
+                                    }
+                                } catch { }
+                            }
                         } else {
                             bgUrl = null;
                             bgPvUrl = null;
@@ -91,15 +456,30 @@
 
                     const current = String(imgEl.dataset.currentSrc || '').trim();
                     if (current && current === url) {
-                        imgEl.hidden = false;
+                        // NOTE:
+                        // - In SPA navigation / "new session" re-mounts, it's possible for data-current-src
+                        //   to survive while the actual <img>.src was cleared, or the previous load failed.
+                        // - If we return early here, we may never re-trigger a load => BG stays blank.
+                        const srcNow = String(imgEl.getAttribute?.('src') || imgEl.src || '').trim();
+                        const isLoadedOk = !!(imgEl.complete && Number(imgEl.naturalWidth || 0) > 0);
+                        const isBroken = !!(imgEl.complete && Number(imgEl.naturalWidth || 0) === 0);
 
-                        // Even if the URL didn't change, submenu selection may have requested a replay.
-                        try {
-                            if (imgEl.classList?.contains?.('plugin-album__character-layer--char')) {
-                                this._characterMaybeAutoPlayAfterCharacterImageSwap?.({ imageUrl: url, reason: 'image-same' });
-                            }
-                        } catch { }
-                        return;
+                        // If the element is already loading/loaded the right URL, just ensure visibility.
+                        if (srcNow && srcNow === url && !isBroken) {
+                            imgEl.hidden = false;
+
+                            // Even if the URL didn't change, submenu selection may have requested a replay.
+                            try {
+                                if (imgEl.classList?.contains?.('plugin-album__character-layer--char')) {
+                                    this._characterMaybeAutoPlayAfterCharacterImageSwap?.({ imageUrl: url, reason: 'image-same' });
+                                }
+                            } catch { }
+
+                            // If it is still in-flight, don't start a competing preload.
+                            if (!imgEl.complete || isLoadedOk) return;
+                        }
+
+                        // Otherwise: fall through to the preload path to re-trigger load/fallback/regenerate.
                     }
 
                     const token = `${Date.now()}-${Math.random()}`;
@@ -289,51 +669,115 @@
 
         _characterReadSoundFxList(obj, slot) {
             try {
+                const idMap = (() => {
+                    try {
+                        const m = this.state.character?._soundFxPresetIdMap;
+                        return (m && typeof m === 'object') ? m : null;
+                    } catch {
+                        return null;
+                    }
+                })();
+
+                const groupMap = (() => {
+                    try {
+                        const m = this.state.character?._soundFxGroupIdMap;
+                        return (m && typeof m === 'object') ? m : null;
+                    } catch {
+                        return null;
+                    }
+                })();
+
                 const s = Number(slot);
                 if (s === 1) {
                     const a = obj?.sound_fx_1;
-                    if (Array.isArray(a)) return a.map(x => String(x || '').trim()).filter(Boolean);
+                    if (Array.isArray(a)) {
+                        const ids = a.map(x => String(x || '').trim()).filter(Boolean);
+                        return (idMap || groupMap)
+                            ? ids.filter(id => !!(idMap && idMap[id]) || !!(groupMap && groupMap[id]))
+                            : ids;
+                    }
                     const b = obj?.soundFx1;
-                    if (Array.isArray(b)) return b.map(x => String(x || '').trim()).filter(Boolean);
+                    if (Array.isArray(b)) {
+                        const ids = b.map(x => String(x || '').trim()).filter(Boolean);
+                        return (idMap || groupMap)
+                            ? ids.filter(id => !!(idMap && idMap[id]) || !!(groupMap && groupMap[id]))
+                            : ids;
+                    }
                     return [];
                 }
                 if (s === 2) {
                     const a = obj?.sound_fx_2;
-                    if (Array.isArray(a)) return a.map(x => String(x || '').trim()).filter(Boolean);
+                    if (Array.isArray(a)) {
+                        const ids = a.map(x => String(x || '').trim()).filter(Boolean);
+                        return (idMap || groupMap)
+                            ? ids.filter(id => !!(idMap && idMap[id]) || !!(groupMap && groupMap[id]))
+                            : ids;
+                    }
                     const b = obj?.soundFx2;
-                    if (Array.isArray(b)) return b.map(x => String(x || '').trim()).filter(Boolean);
+                    if (Array.isArray(b)) {
+                        const ids = b.map(x => String(x || '').trim()).filter(Boolean);
+                        return (idMap || groupMap)
+                            ? ids.filter(id => !!(idMap && idMap[id]) || !!(groupMap && groupMap[id]))
+                            : ids;
+                    }
                     return [];
                 }
             } catch { }
             return [];
         },
 
+        _characterHasAnySoundFx(obj) {
+            try {
+                const a = this._characterReadSoundFxList(obj, 1);
+                const b = this._characterReadSoundFxList(obj, 2);
+                return (Array.isArray(a) && a.length) || (Array.isArray(b) && b.length);
+            } catch {
+                return false;
+            }
+        },
+
+        _characterFindActiveSoundCategoryName({ preferCategory = null } = {}) {
+            try {
+                const prefer = String(preferCategory || '').trim();
+                const flat = this.state.character?.tagGroups?.flat || {};
+                const catsWithSound = [];
+                Object.values(flat).forEach((g) => {
+                    if (!g || typeof g !== 'object') return;
+                    const cat = String(g.category || '').trim();
+                    if (!cat) return;
+                    if (this._characterHasAnySoundFx(g)) {
+                        if (!catsWithSound.includes(cat)) catsWithSound.push(cat);
+                    }
+                });
+                if (prefer && catsWithSound.includes(prefer)) return prefer;
+                return catsWithSound.length ? catsWithSound[0] : null;
+            } catch {
+                return null;
+            }
+        },
+
         _characterGetCurrentAnimationSoundContext() {
             try {
-                // State mode
-                if (typeof this._characterIsStateModeEnabled === 'function' && this._characterIsStateModeEnabled()) {
-                    this._characterEnsureStateModeState?.();
-                    const activeAnimGroupId = this._characterFindActiveAnimationStateGroupId({ preferGroupId: null });
-                    if (!activeAnimGroupId) return null;
-
-                    const sel = this.state.character.state.selections || {};
-                    const sid = String(sel?.[activeAnimGroupId] || '').trim();
-                    if (!sid || sid === '__none__') return null;
-
-                    const states = Array.isArray(this.state.character?.state?.states) ? this.state.character.state.states : [];
-                    const st = states.find(s => String(s?.id || '').trim() === sid) || null;
-                    if (!st) return null;
-                    return { type: 'state', id: sid, object: st };
-                }
-
                 // Category mode
-                const activeCat = this._characterFindActiveAnimationCategoryName({ preferCategory: null });
+                // Prefer preset-defined sound if active preset has any.
+                try {
+                    const activePresetId = String(this.state.character?.activePresetId || '').trim();
+                    if (activePresetId && !activePresetId.startsWith('auto:')) {
+                        const presets = Array.isArray(this.state.character?.presets) ? this.state.character.presets : [];
+                        const pr = presets.find(p => String(p?.id || '').trim() === activePresetId) || null;
+                        if (pr && this._characterHasAnySoundFx(pr)) {
+                            return { type: 'preset', id: activePresetId, object: pr };
+                        }
+                    }
+                } catch { }
+
+                const activeCat = this._characterFindActiveSoundCategoryName({ preferCategory: null });
                 if (!activeCat) return null;
                 const gid = String(this.state.character?.selections?.[activeCat] || '').trim();
                 if (!gid || gid === '__none__') return null;
                 const g = this.state.character?.tagGroups?.flat?.[gid] || null;
                 if (!g) return null;
-                return { type: 'tag', id: gid, object: g };
+                return { type: 'tag', id: gid, object: g, category: activeCat };
             } catch {
                 return null;
             }
@@ -348,11 +792,14 @@
                     const age = now - Number(cache.fetchedAt || 0);
                     if (Number.isFinite(age) && age >= 0 && age < maxAgeMs) return;
                 }
-                if (this.state.character._soundFxPresetsFetching) return;
+                if (this.state.character._soundFxPresetsFetching) {
+                    const p = this.state.character._soundFxPresetsFetchPromise;
+                    return (p && typeof p.then === 'function') ? p : undefined;
+                }
                 if (!this.api?.album?.get) return;
 
                 this.state.character._soundFxPresetsFetching = true;
-                Promise.resolve(this.api.album.get('/sound_fx/presets'))
+                const fetchPromise = Promise.resolve(this.api.album.get('/sound_fx/presets'))
                     .then((all) => {
                         const arr = Array.isArray(all) ? all : [];
                         const presets = arr
@@ -362,15 +809,71 @@
                                 name: String(p?.name || '').trim(),
                                 ext: String(p?.ext || '').trim().toLowerCase(),
                                 url: String(p?.url || '').trim(),
+                                group_ids: (() => {
+                                    try {
+                                        const g0 = p?.group_ids;
+                                        if (Array.isArray(g0)) {
+                                            return g0.map(x => String(x || '').trim()).filter(Boolean);
+                                        }
+                                        const g1 = String(p?.group_id || '').trim();
+                                        return g1 ? [g1] : [];
+                                    } catch {
+                                        return [];
+                                    }
+                                })(),
                             }))
                             .filter(p => p.id && p.url);
                         this.state.character._soundFxPresetsCache = { fetchedAt: Date.now(), presets };
+
+                        // Fast lookup to suppress stale ids that are still stored in character/taggroup configs.
+                        const idMap = {};
+                        const groupMap = {};
+                        presets.forEach((p) => {
+                            try {
+                                const pid = String(p?.id || '').trim();
+                                if (pid) idMap[pid] = true;
+
+                                const gids = Array.isArray(p?.group_ids) ? p.group_ids : [];
+                                gids.forEach((g) => {
+                                    try {
+                                        const gid = String(g || '').trim();
+                                        if (gid) groupMap[gid] = true;
+                                    } catch { }
+                                });
+                            } catch { }
+                        });
+                        this.state.character._soundFxPresetIdMap = idMap;
+                        this.state.character._soundFxGroupIdMap = groupMap;
                     })
                     .catch(() => { })
                     .finally(() => {
                         try { this.state.character._soundFxPresetsFetching = false; } catch { }
+                        try { this.state.character._soundFxPresetsFetchPromise = null; } catch { }
                     });
+                this.state.character._soundFxPresetsFetchPromise = fetchPromise;
+                return fetchPromise;
             } catch { }
+        },
+
+        _characterSoundGetPresetIdsByGroupId(groupId) {
+            try {
+                const gid = String(groupId || '').trim();
+                if (!gid) return [];
+                const cache = this.state.character?._soundFxPresetsCache;
+                const presets = Array.isArray(cache?.presets) ? cache.presets : [];
+                const ids = [];
+                presets.forEach((p) => {
+                    try {
+                        const pid = String(p?.id || '').trim();
+                        if (!pid) return;
+                        const gids = Array.isArray(p?.group_ids) ? p.group_ids : [];
+                        if (gids.includes(gid)) ids.push(pid);
+                    } catch { }
+                });
+                return ids;
+            } catch {
+                return [];
+            }
         },
 
         _characterSoundGetPresetUrlById(presetId) {
@@ -381,7 +884,13 @@
                 const presets = Array.isArray(cache?.presets) ? cache.presets : [];
                 const found = presets.find(p => String(p?.id || '').trim() === pid) || null;
                 if (found && String(found.url || '').trim()) return String(found.url).trim();
-                return `/api/plugin/album/sound_fx/file/${encodeURIComponent(pid)}`;
+
+                // Session-cache policy: prefer cached preset URLs; do not fall back to id-based API loads.
+                // If cache isn't loaded yet, trigger fetch and return empty (no request spam).
+                if (!Array.isArray(cache?.presets)) {
+                    try { this._characterSoundEnsurePresetsCache?.({}); } catch { }
+                }
+                return '';
             } catch {
                 return '';
             }
@@ -408,6 +917,63 @@
             return (Number(slot) === 2);
         },
 
+        _characterGetGlobalSoundFxMode(slot = 1) {
+            try {
+                if (!this.state.character) this.state.character = {};
+                if (!this.state.character.ui) this.state.character.ui = {};
+                const s = Number(slot);
+                const key = (s === 2) ? 'soundFx2Mode' : 'soundFx1Mode';
+                let raw = this.state.character.ui?.[key];
+                if (typeof raw === 'undefined' && typeof this._characterLoadSoundFxMode === 'function') {
+                    raw = this._characterLoadSoundFxMode(s);
+                    this.state.character.ui[key] = raw;
+                }
+                if (typeof this._characterNormalizeSoundFxMode === 'function') {
+                    return this._characterNormalizeSoundFxMode(raw, { slot: s });
+                }
+                const v = String(raw || '').trim().toLowerCase();
+                if (v === 'trim' || v === 'parallel' || v === 'continue') return v;
+                return (s === 2) ? 'parallel' : 'trim';
+            } catch {
+                return (Number(slot) === 2) ? 'parallel' : 'trim';
+            }
+        },
+
+        _characterSoundFadeOutContinueSlots({ fadeOutMs = 200 } = {}) {
+            try {
+                const ms = Math.max(0, Number(fadeOutMs || 0)) || 200;
+                const m1 = String(this._characterGetGlobalSoundFxMode?.(1) || '').trim().toLowerCase();
+                const m2 = String(this._characterGetGlobalSoundFxMode?.(2) || '').trim().toLowerCase();
+
+                if (m1 === 'continue') {
+                    const p1 = this._characterSoundGetActivePlayers?.('fx1') || [];
+                    p1.forEach(p => { try { this._characterSoundFadeOutAudio?.(p?.audio, ms); } catch { } });
+                    try { p1.length = 0; } catch { }
+                }
+                if (m2 === 'continue') {
+                    const p2 = this._characterSoundGetActivePlayers?.('fx2') || [];
+                    p2.forEach(p => { try { this._characterSoundFadeOutAudio?.(p?.audio, ms); } catch { } });
+                    try { p2.length = 0; } catch { }
+                }
+            } catch { }
+        },
+
+        _characterSoundOnLoopSelectionChanged({ fadeOutMs = 200 } = {}) {
+            try {
+                if (!this._characterIsCharacterLayerLoopEnabled?.()) return;
+                const m1 = String(this._characterGetGlobalSoundFxMode?.(1) || '').trim().toLowerCase();
+                const m2 = String(this._characterGetGlobalSoundFxMode?.(2) || '').trim().toLowerCase();
+                const hasContinue = (m1 === 'continue') || (m2 === 'continue');
+                if (!hasContinue) return;
+
+                // Fade out current continue sounds and immediately start new sounds for current context.
+                this._characterSoundFadeOutContinueSlots?.({ fadeOutMs });
+                const ctx = this._characterGetCurrentAnimationSoundContext?.();
+                if (!ctx || !ctx.object) return;
+                this._characterSoundOnAnimationPresetActivated?.(ctx);
+            } catch { }
+        },
+
         _characterSoundGetActivePlayers(slotKey) {
             try {
                 if (!this.state.character) this.state.character = {};
@@ -419,6 +985,22 @@
             } catch {
                 return [];
             }
+        },
+
+        _characterSoundTrimAllActive({ fadeOutMs = 100 } = {}) {
+            try {
+                const ms = Math.max(0, Number(fadeOutMs || 0)) || 100;
+                const keys = ['fx1', 'fx2'];
+                keys.forEach((k) => {
+                    try {
+                        const players = this._characterSoundGetActivePlayers?.(k) || [];
+                        players.forEach((p) => {
+                            try { this._characterSoundFadeOutAudio?.(p?.audio, ms); } catch { }
+                        });
+                        try { players.length = 0; } catch { }
+                    } catch { }
+                });
+            } catch { }
         },
 
         _characterSoundFadeOutAudio(audio, fadeOutMs = 50) {
@@ -529,6 +1111,15 @@
                 // Ensure preset url map is warm (non-blocking).
                 this._characterSoundEnsurePresetsCache?.({});
 
+                const hasPresetCache = (() => {
+                    try {
+                        const c = this.state.character?._soundFxPresetsCache;
+                        return !!(c && typeof c === 'object' && Array.isArray(c.presets));
+                    } catch {
+                        return false;
+                    }
+                })();
+
                 if (!this.state.character) this.state.character = {};
                 const lastMap = this.state.character._soundFxLastByContext || (this.state.character._soundFxLastByContext = {});
 
@@ -537,25 +1128,114 @@
                 const sfx1List = this._characterReadSoundFxList(ctx.object, 1);
                 const sfx2List = this._characterReadSoundFxList(ctx.object, 2);
 
-                const sfx1Parallel = this._characterReadSoundParallelFlag(ctx.object, 1);
-                const sfx2Parallel = this._characterReadSoundParallelFlag(ctx.object, 2);
+                const sfx1Mode = this._characterGetGlobalSoundFxMode(1);
+                const sfx2Mode = this._characterGetGlobalSoundFxMode(2);
 
-                const playSlot = (slotKey, list, { parallel } = {}) => {
+                const isAnimPlaying = () => {
+                    try {
+                        // Continue mode should be treated as active while loop is enabled too.
+                        if (this._characterIsCharacterLayerLoopEnabled?.()) return true;
+                        return !!this.state.character?._animPlayback?.isPlaying;
+                    } catch {
+                        return false;
+                    }
+                };
+
+                const playSlot = (slotKey, list, { mode = 'trim' } = {}) => {
+                    // Avoid treating group ids / stale ids as preset ids before the presets list is loaded.
+                    // This prevents /sound_fx/file/<id> 404 spam on first interaction.
+                    if (!hasPresetCache) {
+                        try { this._characterSoundEnsurePresetsCache?.({}); } catch { }
+                        return;
+                    }
+
                     const lastKey = `${ctxKey}:${slotKey}`;
                     const last = String(lastMap[lastKey] || '').trim();
-                    const nextId = this._characterSoundPickRandomNonRepeating(list, last);
+
+                    const players = this._characterSoundGetActivePlayers(slotKey);
+                    // Prune dead players first.
+                    try {
+                        for (let i = players.length - 1; i >= 0; i--) {
+                            const p = players[i];
+                            const a = p?.audio;
+                            const pausedAfterStart = !!(a && a.paused && Number(a.currentTime || 0) > 0);
+                            if (!a || a.ended || pausedAfterStart) players.splice(i, 1);
+                        }
+                    } catch { }
+
+                    const anyPlaying = () => {
+                        try {
+                            return players.some(p => p?.audio && !p.audio.paused && !p.audio.ended);
+                        } catch {
+                            return false;
+                        }
+                    };
+
+                    // Expand group IDs into their member preset IDs (duplicate-preserving).
+                    const expanded = [];
+                    try {
+                        const raw = Array.isArray(list) ? list : [];
+                        raw.forEach((entry) => {
+                            const id = String(entry || '').trim();
+                            if (!id) return;
+                            const members = this._characterSoundGetPresetIdsByGroupId(id);
+                            if (members && members.length) expanded.push(...members);
+                            else expanded.push(id);
+                        });
+                    } catch { }
+
+                    const nextId = this._characterSoundPickRandomNonRepeating(expanded.length ? expanded : list, last);
                     if (!nextId) return;
                     const url = this._characterSoundGetPresetUrlById(nextId);
                     if (!url) return;
 
+                    const normalizedMode = String(mode || '').trim().toLowerCase();
+                    const doContinue = (normalizedMode === 'continue');
+                    const doParallel = (normalizedMode === 'parallel');
+
+                    // Continue: only start if nothing currently playing in this slot.
+                    if (doContinue && anyPlaying()) {
+                        // Back-compat: if user switched to Continue mid-play, attach a chain hook.
+                        try {
+                            players.forEach((p) => {
+                                const a = p?.audio;
+                                if (!a || a._yuukaAlbumContinueHooked) return;
+                                a._yuukaAlbumContinueHooked = true;
+                                a.addEventListener('ended', () => {
+                                    try {
+                                        if (!isAnimPlaying()) return;
+                                        if (this._characterGetGlobalSoundFxMode(slotKey === 'fx2' ? 2 : 1) !== 'continue') return;
+                                        playSlot(slotKey, list, { mode: 'continue' });
+                                    } catch { }
+                                }, { once: true });
+                            });
+                        } catch { }
+                        return;
+                    }
+
                     try {
-                        this._characterSoundPlayUrl(slotKey, url, { parallel: !!parallel, fadeOutMs: 50 });
+                        const audio = this._characterSoundPlayUrl(slotKey, url, {
+                            parallel: !!doParallel,
+                            fadeOutMs: (normalizedMode === 'trim') ? 50 : 0,
+                        });
+
+                        if (doContinue && audio && !audio._yuukaAlbumContinueHooked) {
+                            audio._yuukaAlbumContinueHooked = true;
+                            audio.addEventListener('ended', () => {
+                                try {
+                                    if (!isAnimPlaying()) return;
+                                    if (this._characterGetGlobalSoundFxMode(slotKey === 'fx2' ? 2 : 1) !== 'continue') return;
+                                    playSlot(slotKey, list, { mode: 'continue' });
+                                } catch { }
+                            }, { once: true });
+                        }
                     } catch { }
+
                     lastMap[lastKey] = nextId;
                 };
 
-                playSlot('fx1', sfx1List, { parallel: !!sfx1Parallel });
-                playSlot('fx2', sfx2List, { parallel: !!sfx2Parallel });
+                playSlot('fx1', sfx1List, { mode: sfx1Mode });
+                playSlot('fx2', sfx2List, { mode: sfx2Mode });
             } catch { }
         },
 
@@ -579,43 +1259,20 @@
             }
         },
 
-        _characterFindActiveAnimationStateGroupId({ preferGroupId = null } = {}) {
-            try {
-                this._characterEnsureStateModeState?.();
-                const prefer = String(preferGroupId || '').trim();
-                const states = Array.isArray(this.state.character?.state?.states) ? this.state.character.state.states : [];
-                const groupsWithAnim = [];
-                states.forEach((s) => {
-                    if (!s || typeof s !== 'object') return;
-                    const gid = String(s.group_id || s.groupId || '').trim();
-                    if (!gid) return;
-                    if (this._characterReadAnimationPresetList(s).length > 0) {
-                        if (!groupsWithAnim.includes(gid)) groupsWithAnim.push(gid);
-                    }
-                });
-                if (prefer && groupsWithAnim.includes(prefer)) return prefer;
-                return groupsWithAnim.length ? groupsWithAnim[0] : null;
-            } catch {
-                return null;
-            }
-        },
-
         _characterGetCurrentAnimationPlaylist() {
             try {
-                // State mode: playlist comes from selected State(s)
-                if (typeof this._characterIsStateModeEnabled === 'function' && this._characterIsStateModeEnabled()) {
-                    this._characterEnsureStateModeState?.();
-                    const activeAnimGroupId = this._characterFindActiveAnimationStateGroupId({ preferGroupId: null });
-                    if (!activeAnimGroupId) return [];
-
-                    const sel = this.state.character.state.selections || {};
-                    const sid = String(sel?.[activeAnimGroupId] || '').trim();
-                    if (!sid || sid === '__none__') return [];
-
-                    const states = Array.isArray(this.state.character?.state?.states) ? this.state.character.state.states : [];
-                    const st = states.find(s => String(s?.id || '').trim() === sid) || null;
-                    return this._characterReadAnimationPresetList(st);
-                }
+                // Category preset override: if active preset has animation, use it.
+                try {
+                    const activePresetId = String(this.state.character?.activePresetId || '').trim();
+                    if (activePresetId && !activePresetId.startsWith('auto:')) {
+                        const presets = Array.isArray(this.state.character?.presets) ? this.state.character.presets : [];
+                        const pr = presets.find(p => String(p?.id || '').trim() === activePresetId) || null;
+                        if (pr) {
+                            const list = this._characterReadAnimationPresetList(pr);
+                            if (Array.isArray(list) && list.length) return list;
+                        }
+                    }
+                } catch { }
 
                 // Category mode: playlist comes from the selected tag group in the (single) active animation category
                 const activeCat = this._characterFindActiveAnimationCategoryName({ preferCategory: null });
@@ -654,6 +1311,21 @@
             try {
                 if (this.state.character?._animPlayback) {
                     this.state.character._animPlayback.isPlaying = false;
+                }
+            } catch { }
+
+            // Sound behavior on stop depends on the global Sound Fx mode.
+            // Trim: fade out immediately. Parallel/Continue: let current sounds finish naturally.
+            try {
+                const m1 = this._characterGetGlobalSoundFxMode?.(1) || 'trim';
+                const m2 = this._characterGetGlobalSoundFxMode?.(2) || 'parallel';
+                if (String(m1).toLowerCase() === 'trim') {
+                    const p1 = this._characterSoundGetActivePlayers?.('fx1') || [];
+                    p1.forEach(p => { try { this._characterSoundFadeOutAudio?.(p?.audio, 50); } catch { } });
+                }
+                if (String(m2).toLowerCase() === 'trim') {
+                    const p2 = this._characterSoundGetActivePlayers?.('fx2') || [];
+                    p2.forEach(p => { try { this._characterSoundFadeOutAudio?.(p?.audio, 50); } catch { } });
                 }
             } catch { }
         },
@@ -744,15 +1416,108 @@
         },
 
         _characterStopCharacterLayerLoop({ stopEngine = false } = {}) {
+            let wasEnabled = false;
             try {
                 this._characterEnsureAnimLoopState?.();
                 const lp = this.state.character._animLoop;
+                wasEnabled = !!lp?.enabled;
                 lp.enabled = false;
                 lp.token = (lp.token || 0) + 1;
             } catch { }
 
+            // Hide loop-only speed slider.
+            try { this._characterEnsureLoopSpeedSliderUI?.(); } catch { }
+
+            // If user stops loop while Sound Fx is in Continue mode, fade out immediately.
+            // This prevents long-running looping ambience from lingering after loop cancel.
+            try {
+                if (wasEnabled) {
+                    const m1 = String(this._characterGetGlobalSoundFxMode?.(1) || '').trim().toLowerCase();
+                    const m2 = String(this._characterGetGlobalSoundFxMode?.(2) || '').trim().toLowerCase();
+
+                    if (m1 === 'continue') {
+                        const p1 = this._characterSoundGetActivePlayers?.('fx1') || [];
+                        p1.forEach(p => { try { this._characterSoundFadeOutAudio?.(p?.audio, 200); } catch { } });
+                        try { p1.length = 0; } catch { }
+                    }
+                    if (m2 === 'continue') {
+                        const p2 = this._characterSoundGetActivePlayers?.('fx2') || [];
+                        p2.forEach(p => { try { this._characterSoundFadeOutAudio?.(p?.audio, 200); } catch { } });
+                        try { p2.length = 0; } catch { }
+                    }
+                }
+            } catch { }
+
             // Cancel any in-flight animation runner too.
-            try { this._characterStopCharacterLayerAnimations?.({ stopEngine: !!stopEngine }); } catch { }
+            // If we are exiting loop mode, prefer a short smooth transition before hard-stopping the engine.
+            try {
+                if (wasEnabled && stopEngine) {
+                    // Cancel runner but keep engine running for the transition.
+                    try { this._characterStopCharacterLayerAnimations?.({ stopEngine: false }); } catch { }
+
+                    const engine = (typeof this._albumAnimGetEngine === 'function') ? this._albumAnimGetEngine() : null;
+                    const el = this._characterGetCharacterLayerEl?.();
+
+                    const bgCfg = this._characterGetBgAnimConfig?.() || { enabled: false };
+                    const bgEl = (bgCfg.enabled && typeof this._characterGetBackgroundLayerEl === 'function')
+                        ? this._characterGetBackgroundLayerEl()
+                        : null;
+
+                    const durMs = 200;
+
+                    // Token guard: if user starts a new play/loop during the transition, do nothing at the end.
+                    if (!this.state.character) this.state.character = {};
+                    this.state.character._loopExitSmoothToken = (this.state.character._loopExitSmoothToken || 0) + 1;
+                    const smoothToken = this.state.character._loopExitSmoothToken;
+                    const pbTokenAtSchedule = (this.state.character?._animPlayback?.token || 0);
+
+                    const def = { tMs: 0, x: 0, y: 0, s: 1, r: 0, o: 1 };
+
+                    const applyBack = () => {
+                        try {
+                            if (!engine || typeof engine.getCurrentTrackValues !== 'function' || typeof engine.makeTransitionPreset !== 'function' || typeof engine.applyPresetOnElement !== 'function') {
+                                return;
+                            }
+                            if (el && !el.hidden) {
+                                const cur = engine.getCurrentTrackValues(el);
+                                if (cur) {
+                                    const back = engine.makeTransitionPreset(cur, def, durMs, { graphType: 'linear' });
+                                    engine.applyPresetOnElement(el, back, { loop: false, seamless: false });
+                                }
+                            }
+                            if (bgEl && !bgEl.hidden) {
+                                const curBg = engine.getCurrentTrackValues(bgEl);
+                                if (curBg) {
+                                    // BG should not be affected by opacity easing here.
+                                    const from = { ...curBg, o: 1 };
+                                    const to = { ...def, o: 1 };
+                                    const backBg = engine.makeTransitionPreset(from, to, durMs, { graphType: 'linear' });
+                                    engine.applyPresetOnElement(bgEl, backBg, { loop: false, seamless: false, phaseShiftMs: 0 });
+                                }
+                            }
+                        } catch { }
+                    };
+
+                    applyBack();
+
+                    setTimeout(() => {
+                        try {
+                            if (this.state.viewMode !== 'character') return;
+                            if (!this.state.character) return;
+                            if ((this.state.character._loopExitSmoothToken || 0) !== smoothToken) return;
+
+                            // If loop is re-enabled, or a new playback started, don't hard-stop.
+                            if (this._characterIsCharacterLayerLoopEnabled?.()) return;
+                            const curPbToken = (this.state.character?._animPlayback?.token || 0);
+                            if (curPbToken !== pbTokenAtSchedule) return;
+
+                            try { this._characterStopCharacterLayerAnimations?.({ stopEngine: true }); } catch { }
+                        } catch { }
+                    }, durMs);
+                } else {
+                    this._characterStopCharacterLayerAnimations?.({ stopEngine: !!stopEngine });
+                }
+            } catch { }
         },
 
         async _characterStartCharacterLayerLoop({ reason = 'hold' } = {}) {
@@ -766,6 +1531,9 @@
                 lp.enabled = true;
                 lp.token = (lp.token || 0) + 1;
                 const token = lp.token || 0;
+
+                // Show loop-only speed slider.
+                try { this._characterEnsureLoopSpeedSliderUI?.(); } catch { }
 
                 // Cancel any non-loop run without forcing a snap.
                 try { this._characterStopCharacterLayerAnimations?.({ stopEngine: false }); } catch { }
@@ -820,10 +1588,12 @@
                         }
                     } catch { }
                 }
-
                 return true;
             } catch {
                 return false;
+            } finally {
+                // Ensure loop-only UI is hidden immediately after loop ends for any reason.
+                try { this._characterEnsureLoopSpeedSliderUI?.(); } catch { }
             }
         },
 
@@ -940,10 +1710,38 @@
                 try {
                     if (isCancelled()) return false;
 
+                    const loopEnabledNow = (() => {
+                        try { return !!this._characterIsCharacterLayerLoopEnabled?.(); } catch { return false; }
+                    })();
+
+                    // IMPORTANT: speed slider must not affect non-loop mode.
+                    // Read speed per-clip so slider changes take effect on the next clip.
+                    const speed = loopEnabledNow ? (this._characterGetAnimPlaybackSpeedFactor?.() ?? 1) : 1;
+
                     let preset = (prefetchedPreset && prefetchedKey === k) ? prefetchedPreset : null;
-                    if (!preset) preset = await engine.loadPresetByKey(k);
+                    if (!preset) preset = this._characterAnimCacheGet?.(k);
+                    if (!preset) preset = await this._characterAnimCacheLoad(engine, k);
                     if (isCancelled()) return false;
                     if (!preset) continue;
+
+                    // Internal spring smoothing (within a single preset) only when:
+                    // - loop mode is enabled
+                    // - speed != 100% (to avoid affecting default behavior)
+                    const useInternalSpring = (() => {
+                        try {
+                            if (!loopEnabledNow) return false;
+                            return Math.abs(Number(speed) - 1) > 0.001;
+                        } catch {
+                            return false;
+                        }
+                    })();
+
+                    if (useInternalSpring && typeof engine.withSpringSmoothing === 'function') {
+                        try {
+                            const sp = this._characterGetLoopSpringSmoothingParams?.({ speedFactor: speed }) || { omega: 16, zeta: 1, dtMs: 16 };
+                            preset = engine.withSpringSmoothing(preset, sp);
+                        } catch { }
+                    }
 
                     // If this run was started by a restart, bridge from previous pose to the new preset's start.
                     if (!didBridge && bridgeFrom && smoothEnabled && smoothResetMs > 0 && typeof engine.makeTransitionPreset === 'function') {
@@ -953,7 +1751,7 @@
                                 : { tMs: 0, x: 0, y: 0, s: 1, o: 1 };
 
                             const bridgePreset = engine.makeTransitionPreset(bridgeFrom, toVals, smoothResetMs, { graphType: preset.graphType || 'linear' });
-                            engine.applyPresetOnElement(el, bridgePreset, { loop: false, seamless: false });
+                            engine.applyPresetOnElement(el, bridgePreset, { loop: false, seamless: false, speed });
 
                             if (bgEnabled) {
                                 try {
@@ -976,7 +1774,7 @@
                                 } catch { }
                             }
 
-                            await sleep(smoothResetMs);
+                            await sleep(Math.max(0, Math.round(smoothResetMs / Math.max(0.01, speed))));
                             if (isCancelled()) return false;
                             engine.stop(el);
                             if (bgEnabled) {
@@ -989,12 +1787,21 @@
                     // IMPORTANT: do NOT apply end-smoothing on every preset in a playlist.
                     // We'll only smooth-return to default once, at the end of the whole list.
                     const dur = engine.getPresetDurationMs(preset) || 1000;
+                    const waitMs = Math.max(0, Math.round(dur / Math.max(0.01, speed)));
 
                     // Non-looped + non-seamless: each clip starts from baseline.
-                    engine.applyPresetOnElement(el, preset, { loop: false, seamless: false });
+                    engine.applyPresetOnElement(el, preset, { loop: false, seamless: false, speed });
 
                     if (bgEnabled) {
-                        const bgPreset = makeBgMainPreset(preset);
+                        let bgPreset = makeBgMainPreset(preset);
+
+                        // Match character smoothing for BG too (position/scale/rotation), but only in loop + speed!=1.
+                        if (useInternalSpring && bgPreset && typeof engine.withSpringSmoothing === 'function') {
+                            try {
+                                const sp = this._characterGetLoopSpringSmoothingParams?.({ speedFactor: speed }) || { omega: 16, zeta: 1, dtMs: 16 };
+                                bgPreset = engine.withSpringSmoothing(bgPreset, sp);
+                            } catch { }
+                        }
 
                         // Reset case: during the delay window, bridge BG from its current pose to the next
                         // preset's start pose so the eventual start doesn't look like a jump.
@@ -1016,11 +1823,11 @@
                             } catch { }
                         }
 
-                        try { engine.applyPresetOnElement(bgEl, bgPreset, { loop: false, seamless: false, phaseShiftMs: 0 }); } catch { }
+                        try { engine.applyPresetOnElement(bgEl, bgPreset, { loop: false, seamless: false, phaseShiftMs: 0, speed }); } catch { }
                     }
 
                     try { this._characterSoundOnAnimationPresetActivated?.(soundCtx); } catch { }
-                    await sleep(dur);
+                    await sleep(waitMs);
                     if (isCancelled()) return false;
 
                     // Between presets: optionally smooth-reset from end pose -> next start pose.
@@ -1032,7 +1839,7 @@
                                 : null;
 
                             // Look-ahead next preset once so we can skip smoothing if poses match.
-                            const nextPreset = await engine.loadPresetByKey(nextKey);
+                            const nextPreset = this._characterAnimCacheGet?.(nextKey) || (await this._characterAnimCacheLoad(engine, nextKey));
                             prefetchedPreset = nextPreset;
                             prefetchedKey = nextKey;
 
@@ -1042,7 +1849,7 @@
 
                             if (endPose && nextStart && !posesEqual(endPose, nextStart)) {
                                 const bridge = engine.makeTransitionPreset(endPose, nextStart, smoothResetMs, { graphType: nextPreset?.graphType || preset?.graphType || 'linear' });
-                                engine.applyPresetOnElement(el, bridge, { loop: false, seamless: false });
+                                engine.applyPresetOnElement(el, bridge, { loop: false, seamless: false, speed });
 
                                 if (bgEnabled) {
                                     try {
@@ -1065,7 +1872,7 @@
                                     } catch { }
                                 }
 
-                                await sleep(smoothResetMs);
+                                await sleep(Math.max(0, Math.round(smoothResetMs / Math.max(0.01, speed))));
                                 if (isCancelled()) return false;
                             }
                         } catch { }
@@ -1090,7 +1897,8 @@
                     const def = { tMs: 0, x: 0, y: 0, s: 1, o: 1 };
                     if (endPose && !posesEqual(endPose, def)) {
                         const back = engine.makeTransitionPreset(endPose, def, smoothEndMs, { graphType: 'linear' });
-                        engine.applyPresetOnElement(el, back, { loop: false, seamless: false });
+                        const speed = this._characterGetAnimPlaybackSpeedFactor?.() ?? 1;
+                        engine.applyPresetOnElement(el, back, { loop: false, seamless: false, speed });
 
                         if (bgEnabled) {
                             try {
@@ -1105,12 +1913,12 @@
                                         smoothEndMs,
                                         { graphType: 'linear' },
                                     );
-                                    engine.applyPresetOnElement(bgEl, bgBackPreset, { loop: false, seamless: false, phaseShiftMs: 0 });
+                                    engine.applyPresetOnElement(bgEl, bgBackPreset, { loop: false, seamless: false, phaseShiftMs: 0, speed });
                                 }
                             } catch { }
                         }
 
-                        await sleep(smoothEndMs);
+                        await sleep(Math.max(0, Math.round(smoothEndMs / Math.max(0.01, speed))));
                         if (isCancelled()) return false;
                     }
                 } catch { }
@@ -1142,14 +1950,16 @@
 
                 const engine = (typeof this._albumAnimGetEngine === 'function') ? this._albumAnimGetEngine() : null;
                 let bridgeFrom = null;
-                // Only bridge on reset when something was already playing.
-                const wasPlaying = !!(this.state.character?._animPlayback?.isPlaying);
                 const smoothCfg = this._characterGetAnimSmoothConfig?.() || { enabled: true, endMs: 100, resetMs: 50 };
                 const smoothEnabled = !!smoothCfg.enabled;
                 const smoothResetMs = Math.max(0, Math.round(Number(smoothCfg.resetMs || 0)));
 
                 let currentPose = null;
-                if (restart && wasPlaying && engine && typeof engine.getCurrentTrackValues === 'function') {
+                // IMPORTANT: do NOT rely on `_animPlayback.isPlaying` here.
+                // When user clicks very quickly, we may have already cancelled the runner and flipped `isPlaying=false`
+                // while the CSS animation (or a temporary hold/bridge preset) is still active.
+                // Always sample current pose if possible to keep restart spam smooth.
+                if (restart && engine && typeof engine.getCurrentTrackValues === 'function') {
                     try { currentPose = engine.getCurrentTrackValues(el); } catch { currentPose = null; }
                 }
 
@@ -1161,7 +1971,7 @@
 
                     // If something was playing, immediately replace it with a 1ms hold-at-current-pose animation
                     // so the layer doesn't flicker while presets are loading.
-                    if (wasPlaying && currentPose && engine && typeof engine.makeTransitionPreset === 'function') {
+                    if (currentPose && engine && typeof engine.makeTransitionPreset === 'function') {
                         try {
                             const hold = engine.makeTransitionPreset(currentPose, currentPose, 1, { graphType: 'linear' });
                             engine.applyPresetOnElement(el, hold, { loop: false, seamless: false });
@@ -1173,7 +1983,7 @@
                 }
 
                 // Enable bridge only for true reset smoothing.
-                if (restart && wasPlaying && smoothEnabled && smoothResetMs > 0) {
+                if (restart && currentPose && smoothEnabled && smoothResetMs > 0) {
                     bridgeFrom = currentPose;
                 }
 

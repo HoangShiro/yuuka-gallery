@@ -584,7 +584,7 @@ def register_routes(blueprint, plugin):
         if changed:
             plugin._save_char_presets(user_hash, presets)
 
-        # Cleanup: remove references in States + state-group presets
+        # Cleanup: remove references in States (state-group presets removed)
         try:
             plugin._cleanup_character_states_for_removed_tag_group_ids(user_hash, [group_id])
         except Exception:

@@ -1,4 +1,4 @@
-// Album plugin - Character view UI: submenu renderers (tag groups, states, presets)
+// Album plugin - Character view UI: submenu renderers (tag groups, presets)
 // Pattern: prototype augmentation (no bundler / ESM)
 
 (function () {
@@ -331,529 +331,56 @@
             });
         },
 
-        _characterRenderStateList(stateGroupId, toolbarEl, listEl) {
-            try {
-                this._characterEnsureStateModeState?.();
-                const gid = String(stateGroupId || '').trim();
-                if (!gid) return;
+        _characterPresetUiBuildTitleAndPillsInner({ titleText, parts, tintPart } = {}) {
+            const inner = document.createElement('div');
+            inner.className = 'plugin-album__character-preset-item-inner';
 
-                const groupName = this._characterGetStateGroupNameById?.(gid) || gid;
+            const title = document.createElement('div');
+            title.className = 'plugin-album__character-preset-item-title';
+            title.textContent = String(titleText || '').trim() || 'Preset';
+            inner.appendChild(title);
 
-                // Toolbar row: edit states (manager) + edit state group + None + exit
-                const toolbar = document.createElement('div');
-                toolbar.className = 'plugin-album__character-submenu-row plugin-album__character-submenu-row--toolbar';
+            const wrap = document.createElement('div');
+            wrap.className = 'plugin-album__character-preset-pillwrap';
 
-                const playBtn = document.createElement('button');
-                playBtn.type = 'button';
-                playBtn.className = 'plugin-album__character-submenu-iconbtn';
-                playBtn.title = 'Tạo ảnh (manual)';
-                playBtn.innerHTML = `<span class="material-symbols-outlined">play_arrow</span>`;
-                playBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+            (parts || []).forEach((part) => {
+                const pill = document.createElement('span');
+                pill.className = 'plugin-album__character-preset-pill';
+                pill.textContent = String(part?.name || '').trim();
+                try { if (part?.title) pill.title = String(part.title); } catch { }
+                try { if (typeof tintPart === 'function') tintPart(pill, part); } catch { }
+                wrap.appendChild(pill);
+            });
 
-                    // VN mode: BG state group => regenerate selected background (vn:bg:<tagGroupId>)
-                    try {
-                        if (typeof this._characterIsVisualNovelModeEnabled === 'function'
-                            && this._characterIsVisualNovelModeEnabled()
-                            && typeof this._characterIsVisualNovelBackgroundStateGroup === 'function'
-                            && this._characterIsVisualNovelBackgroundStateGroup(gid)) {
-                            const sid = String(this.state.character?.state?.selections?.[gid] || '').trim();
-                            const bgGid = sid ? (this._characterVNResolveBgGroupIdFromStateId?.(sid) || '') : '';
-                            if (!bgGid) {
-                                try { showError('Hãy chọn background trước.'); } catch { }
-                                return;
-                            }
-                            const resp = await this._characterStartVNBackgroundGeneration?.({ groupId: bgGid, auto: false, silent: false });
-                            if (resp) {
-                                try { this._characterMarkActiveCategorySelectionGenerating?.(`vn:bg:${bgGid}`); } catch { }
-                            }
-                            return;
-                        }
-                    } catch { }
-
-                    await this._characterStartGeneration?.({ forceNew: true, auto: false, silent: false });
-                });
-
-                const exitBtn = document.createElement('button');
-                exitBtn.type = 'button';
-                exitBtn.className = 'plugin-album__character-submenu-iconbtn';
-                exitBtn.title = 'Đóng';
-                exitBtn.innerHTML = `<span class="material-symbols-outlined">close</span>`;
-                exitBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this._characterCloseSubmenu();
-                });
-
-                const editStatesBtn = document.createElement('button');
-                editStatesBtn.type = 'button';
-                editStatesBtn.className = 'plugin-album__character-submenu-iconbtn';
-                editStatesBtn.title = `Edit states (${groupName})`;
-                editStatesBtn.innerHTML = `<span class="material-symbols-outlined">edit</span>`;
-                editStatesBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this._characterOpenStateManagerModal?.(gid);
-                });
-
-                const editGroupBtn = document.createElement('button');
-                editGroupBtn.type = 'button';
-                editGroupBtn.className = 'plugin-album__character-submenu-iconbtn';
-                editGroupBtn.title = `Edit state group (${groupName})`;
-                editGroupBtn.innerHTML = `<span class="material-symbols-outlined">settings</span>`;
-                editGroupBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this._characterOpenStateGroupEditModal?.({ mode: 'edit', groupId: gid });
-                });
-
-                let selectedStateId = this.state.character?.state?.selections?.[gid] || null;
-
-                const noneBtn = document.createElement('button');
-                noneBtn.type = 'button';
-                noneBtn.className = 'plugin-album__character-submenu-name plugin-album__character-submenu-nonebtn';
-                noneBtn.textContent = 'None';
-                noneBtn.title = `None (${groupName})`;
-                noneBtn.classList.toggle('is-selected', !selectedStateId || String(selectedStateId) === '__none__');
-                noneBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    await this._characterSelectState?.(gid, null);
-
-                    // Update selection highlight without closing submenu
-                    noneBtn.classList.add('is-selected');
-                    listEl.querySelectorAll('.plugin-album__character-submenu-row[data-group-id]').forEach(r => {
-                        r.classList.remove('is-selected');
-                    });
-                });
-
-                toolbar.appendChild(editStatesBtn);
-                toolbar.appendChild(editGroupBtn);
-                toolbar.appendChild(noneBtn);
-                toolbar.appendChild(playBtn);
-                toolbar.appendChild(exitBtn);
-                toolbarEl.appendChild(toolbar);
-
-                const statesAll = Array.isArray(this.state.character?.state?.states) ? this.state.character.state.states : [];
-                const states = statesAll.filter(s => {
-                    const sg = String(s?.group_id || s?.groupId || '').trim();
-                    return sg === gid;
-                });
-
-                const byId = new Map(statesAll.map(s => [String(s?.id || '').trim(), s]));
-                const baseSel = (this.state.character?.state?.selections && typeof this.state.character.state.selections === 'object')
-                    ? this.state.character.state.selections
-                    : {};
-                const computeGroupIdsFromSelection = (sel) => {
-                    const out = [];
-                    Object.keys(sel || {}).forEach(xgid => {
-                        const sid = String(sel[xgid] || '').trim();
-                        if (!sid || sid === '__none__') return;
-                        const st = byId.get(sid);
-                        const tgids = st?.tag_group_ids;
-                        if (Array.isArray(tgids)) {
-                            tgids.forEach(x => {
-                                const v = String(x || '').trim();
-                                if (v) out.push(v);
-                            });
-                        }
-                    });
-                    return Array.from(new Set(out));
-                };
-
-                states.forEach(st => {
-                    const sid = String(st?.id || '').trim();
-                    if (!sid) return;
-
-                    const row = document.createElement('div');
-                    row.className = 'plugin-album__character-submenu-row';
-                    row.dataset.groupId = sid;
-                    if (selectedStateId && String(selectedStateId) === sid) row.classList.add('is-selected');
-
-                    // Fade when resulting selection has no images yet
-                    try {
-                        const nextSel = { ...baseSel, [gid]: sid };
-                        const ids = computeGroupIdsFromSelection(nextSel);
-                        const key = this._characterBuildPresetKeyFromGroupIds?.(ids) || '';
-                        const presetId = key ? `auto:${key}` : null;
-                        if (presetId && this._characterGetImagesForPreset(presetId).length === 0) {
-                            row.classList.add('is-empty');
-                        }
-                    } catch { }
-
-                    const nameBtn = document.createElement('button');
-                    nameBtn.type = 'button';
-                    nameBtn.className = 'plugin-album__character-submenu-name';
-                    nameBtn.textContent = String(st?.name || 'Untitled');
-
-                    // Long-press 0.5s to open state editor
-                    let longPressTimer = null;
-                    let longPressFired = false;
-                    const clear = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
-                    const start = () => {
-                        clear();
-                        longPressFired = false;
-                        longPressTimer = setTimeout(() => {
-                            longPressTimer = null;
-                            longPressFired = true;
-                            this._characterOpenStateEditorModal?.(sid, gid, {
-                                afterClose: async ({ changed }) => {
-                                    if (changed) {
-                                        try { this.state.character.state.states = await this.api.album.get('/character/states'); } catch { }
-                                    }
-                                    try { this._characterRefreshSubmenu?.(`state:${gid}`); } catch { }
-                                }
-                            });
-                        }, 500);
-                    };
-
-                    // Mouse hold
-                    row.addEventListener('mousedown', (e) => { if (e.button !== 0) return; start(); });
-                    row.addEventListener('mouseup', clear);
-                    row.addEventListener('mouseleave', clear);
-
-                    // Touch hold: disabled on mobile/coarse-pointer to avoid conflict with drag gestures.
-                    if (!_albumIsCoarsePointerDevice) {
-                        row.addEventListener('touchstart', () => start(), { passive: true });
-                        row.addEventListener('touchend', clear);
-                        row.addEventListener('touchcancel', clear);
-                    }
-
-                    // If long press fired, suppress subsequent click/selection
-                    row.addEventListener('click', (e) => {
-                        if (!longPressFired) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        longPressFired = false;
-                    }, true);
-                    nameBtn.addEventListener('click', async (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (longPressFired) return;
-                        await this._characterSelectState?.(gid, sid);
-
-                        // Update selection highlight without closing submenu
-                        noneBtn.classList.remove('is-selected');
-                        listEl.querySelectorAll('.plugin-album__character-submenu-row[data-group-id]').forEach(r => {
-                            const rid = String(r.dataset.groupId || '').trim();
-                            r.classList.toggle('is-selected', !!rid && rid === sid);
-                        });
-                    });
-
-                    row.addEventListener('click', async (e) => {
-                        e.preventDefault();
-                        if (longPressFired) return;
-                        await this._characterSelectState?.(gid, sid);
-
-                        noneBtn.classList.remove('is-selected');
-                        listEl.querySelectorAll('.plugin-album__character-submenu-row[data-group-id]').forEach(r => {
-                            const rid = String(r.dataset.groupId || '').trim();
-                            r.classList.toggle('is-selected', !!rid && rid === sid);
-                        });
-                    });
-
-                    row.appendChild(nameBtn);
-                    listEl.appendChild(row);
-                });
-            } catch (err) {
-                console.warn('[Album] _characterRenderStateList error:', err);
+            if (!(parts || []).length) {
+                const pill = document.createElement('span');
+                pill.className = 'plugin-album__character-preset-pill';
+                pill.textContent = 'Empty';
+                wrap.appendChild(pill);
             }
-        },
 
-        _characterRenderStatePresetList(toolbarEl, listEl) {
-            try {
-                this._characterEnsureStateModeState?.();
-
-                const groups = Array.isArray(this.state.character?.state?.groups) ? this.state.character.state.groups : [];
-                let groupId = String(this.state.character?.state?.activeGroupId || '').trim();
-                if (!groupId && groups.length) {
-                    groupId = String(groups[0]?.id || '').trim();
-                    this.state.character.state.activeGroupId = groupId;
-                }
-
-                if (!groupId) {
-                    // Nothing to render yet.
-                    listEl.innerHTML = '';
-                    const row = document.createElement('div');
-                    row.className = 'plugin-album__character-submenu-item';
-                    row.textContent = 'Chọn state group trước.';
-                    listEl.appendChild(row);
-                    return;
-                }
-
-                const groupName = this._characterGetStateGroupNameById?.(groupId) || groupId;
-
-                // Ensure presets loaded (lazy)
-                const cache = this.state.character.state.presetsByGroup || (this.state.character.state.presetsByGroup = {});
-                const cached = cache[groupId];
-                if (!Array.isArray(cached)) {
-                    listEl.innerHTML = '';
-                    const row = document.createElement('div');
-                    row.className = 'plugin-album__character-submenu-item';
-                    row.textContent = 'Loading...';
-                    listEl.appendChild(row);
-
-                    (async () => {
-                        try {
-                            const res = await this.api.album.get(`/character/state_groups/${encodeURIComponent(groupId)}/presets`);
-                            cache[groupId] = Array.isArray(res) ? res : [];
-                        } catch (err) {
-                            cache[groupId] = [];
-                            try { showError(`Lỗi load state presets: ${err.message || err}`); } catch { }
-                        }
-                        try {
-                            if (this.state.viewMode !== 'character') return;
-                            if (String(this.state.character?.activeMenu || '').trim() !== 'StatePreset') return;
-                            this._characterOpenSubmenu('StatePreset');
-                        } catch { }
-                    })();
-                    return;
-                }
-
-                const presets = cached;
-                const activePresetId = String(this.state.character?.state?.activePresetByGroup?.[groupId] || '').trim() || null;
-
-                // Toolbar
-                const toolbar = document.createElement('div');
-                toolbar.className = 'plugin-album__character-submenu-row plugin-album__character-submenu-row--toolbar';
-
-                const playBtn = document.createElement('button');
-                playBtn.type = 'button';
-                playBtn.className = 'plugin-album__character-submenu-iconbtn';
-                playBtn.title = 'Tạo ảnh (manual)';
-                playBtn.innerHTML = `<span class="material-symbols-outlined">play_arrow</span>`;
-                playBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    await this._characterStartGeneration?.({ forceNew: true, auto: false, silent: false });
-                });
-
-                const addPresetBtn = document.createElement('button');
-                addPresetBtn.type = 'button';
-                addPresetBtn.className = 'plugin-album__character-submenu-iconbtn';
-                addPresetBtn.title = `Lưu state preset mới (${groupName})`;
-                addPresetBtn.innerHTML = `<span class="material-symbols-outlined">add</span>`;
-                addPresetBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this._characterOpenStateGroupPresetEditor?.(groupId, null);
-                });
-
-                const editPresetBtn = document.createElement('button');
-                editPresetBtn.type = 'button';
-                editPresetBtn.className = 'plugin-album__character-submenu-iconbtn';
-                editPresetBtn.title = `Sửa state preset đang chọn (${groupName})`;
-                editPresetBtn.innerHTML = `<span class="material-symbols-outlined">edit</span>`;
-                editPresetBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (activePresetId) this._characterOpenStateGroupPresetEditor?.(groupId, activePresetId);
-                    else this._characterOpenStateGroupPresetEditor?.(groupId, null);
-                });
-
-                const autoBtn = document.createElement('button');
-                autoBtn.type = 'button';
-                autoBtn.className = 'plugin-album__character-submenu-name plugin-album__character-submenu-nonebtn';
-                autoBtn.textContent = 'Auto';
-                autoBtn.title = `Auto (theo state đang chọn - ${groupName})`;
-                autoBtn.classList.toggle('is-selected', !activePresetId);
-                autoBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    try {
-                        if (!this.state.character.state.activePresetByGroup) this.state.character.state.activePresetByGroup = {};
-                        this.state.character.state.activePresetByGroup[groupId] = null;
-                        this._characterSaveStateGroupActivePresetIds?.();
-                        try { this._characterApplyMenuBarModeUI?.(); } catch { }
-
-                        // VN mode: BG group => apply background selection only.
-                        try {
-                            if (typeof this._characterIsVisualNovelModeEnabled === 'function'
-                                && this._characterIsVisualNovelModeEnabled()
-                                && typeof this._characterIsVisualNovelBackgroundStateGroup === 'function'
-                                && this._characterIsVisualNovelBackgroundStateGroup(groupId)) {
-                                this._characterEnsureVNState?.();
-                                const sid = String(this.state.character?.state?.selections?.[groupId] || '').trim();
-                                const bgGid = sid ? (this._characterVNResolveBgGroupIdFromStateId?.(sid) || '') : '';
-                                this.state.character.vn.activeBgGroupId = bgGid || null;
-                                this.state.character.vn.activeBgGroupIdOverride = true;
-                                try { this._characterVNSaveBgSelection?.(); } catch { }
-                                try { await this._characterVNApplyBackgroundFromSelection?.({ generateIfMissing: false }); } catch { }
-                                try { this._characterRefreshDisplayedImage?.(); } catch { }
-                                setSelectedUI(null);
-                                return;
-                            }
-                        } catch { }
-
-                        const presetId = this._characterResolveActivePresetId();
-                        const imgs = presetId ? this._characterGetImagesForPreset(presetId) : [];
-                        if (presetId && !imgs.length) {
-                            await this._characterStartGeneration({ forceNew: true, auto: false });
-                        } else {
-                            this._characterRefreshDisplayedImage?.();
-                        }
-                    } catch { }
-
-                    setSelectedUI(null);
-                });
-
-                const exitBtn = document.createElement('button');
-                exitBtn.type = 'button';
-                exitBtn.className = 'plugin-album__character-submenu-iconbtn';
-                exitBtn.title = 'Đóng';
-                exitBtn.innerHTML = `<span class="material-symbols-outlined">close</span>`;
-                exitBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this._characterCloseSubmenu();
-                });
-
-                toolbarEl.innerHTML = '';
-                toolbar.appendChild(addPresetBtn);
-                toolbar.appendChild(editPresetBtn);
-                toolbar.appendChild(autoBtn);
-                toolbar.appendChild(playBtn);
-                toolbar.appendChild(exitBtn);
-                toolbarEl.appendChild(toolbar);
-
-                const setSelectedUI = (presetIdOrNull) => {
-                    try {
-                        const target = presetIdOrNull ? String(presetIdOrNull) : '';
-                        listEl.querySelectorAll('.plugin-album__character-submenu-item[data-preset-id]').forEach(el => {
-                            const pid = String(el.dataset.presetId || '').trim();
-                            el.classList.toggle('is-selected', !!target && pid === target);
-                        });
-                        autoBtn.classList.toggle('is-selected', !target);
-                    } catch { }
-                };
-
-                listEl.innerHTML = '';
-
-                presets.forEach(p => {
-                    const pid = String(p?.id || '').trim();
-                    const name = String(p?.name || '').trim();
-                    const sid = String(p?.state_id || p?.stateId || '').trim();
-                    if (!pid || !name) return;
-
-                    const item = document.createElement('button');
-                    item.type = 'button';
-                    item.className = 'plugin-album__character-submenu-item';
-                    item.dataset.presetId = pid;
-                    item.textContent = name;
-
-                    // Tooltip: include state name if available
-                    try {
-                        const stName = (() => {
-                            const all = Array.isArray(this.state.character?.state?.states) ? this.state.character.state.states : [];
-                            const hit = all.find(s => String(s?.id || '').trim() === sid);
-                            return hit ? String(hit.name || '').trim() : '';
-                        })();
-                        item.title = stName ? `${name}: ${stName}` : name;
-                    } catch {
-                        item.title = name;
-                    }
-
-                    item.classList.toggle('is-selected', !!activePresetId && pid === activePresetId);
-                    item.addEventListener('click', async (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-
-                        try {
-                            if (!this.state.character.state.activePresetByGroup) this.state.character.state.activePresetByGroup = {};
-                            this.state.character.state.activePresetByGroup[groupId] = pid;
-                            this._characterSaveStateGroupActivePresetIds?.();
-
-                            this.state.character.state.selections[groupId] = sid || null;
-                            this._characterSaveStateSelections?.();
-
-                            try { this._characterApplyMenuBarModeUI?.(); } catch { }
-
-                            // VN mode: BG group => update VN background selection and avoid character generation.
-                            try {
-                                if (typeof this._characterIsVisualNovelModeEnabled === 'function'
-                                    && this._characterIsVisualNovelModeEnabled()
-                                    && typeof this._characterIsVisualNovelBackgroundStateGroup === 'function'
-                                    && this._characterIsVisualNovelBackgroundStateGroup(groupId)) {
-                                    this._characterEnsureVNState?.();
-                                    const bgGid = sid ? (this._characterVNResolveBgGroupIdFromStateId?.(sid) || '') : '';
-                                    this.state.character.vn.activeBgGroupId = bgGid || null;
-                                    this.state.character.vn.activeBgGroupIdOverride = true;
-                                    try { this._characterVNSaveBgSelection?.(); } catch { }
-                                    try { await this._characterVNApplyBackgroundFromSelection?.({ generateIfMissing: false }); } catch { }
-                                    try { this._characterRefreshDisplayedImage?.(); } catch { }
-                                    setSelectedUI(pid);
-                                    return;
-                                }
-                            } catch { }
-
-                            const presetId = this._characterResolveActivePresetId();
-                            const imgs = presetId ? this._characterGetImagesForPreset(presetId) : [];
-                            if (presetId && !imgs.length) {
-                                await this._characterStartGeneration({ forceNew: true, auto: false });
-                            } else {
-                                this._characterRefreshDisplayedImage?.();
-                            }
-                        } catch { }
-
-                        setSelectedUI(pid);
-                    });
-
-                    listEl.appendChild(item);
-                });
-
-                // Ensure highlight reflects activePresetId
-                setSelectedUI(activePresetId);
-            } catch (err) {
-                console.warn('[Album] _characterRenderStatePresetList error:', err);
-            }
+            inner.appendChild(wrap);
+            return inner;
         },
 
         _characterRenderPresetList(toolbarEl, listEl) {
-            // Backward/defensive: if called with a single arg (list element), resolve proper hosts.
-            try {
-                if (!listEl && toolbarEl && typeof toolbarEl.closest === 'function') {
-                    const maybeList = toolbarEl;
-                    const submenu = maybeList.closest('.plugin-album__character-submenu');
-                    const resolvedToolbar = submenu?.querySelector('.plugin-album__character-submenu-toolbar');
-                    const resolvedList = submenu?.querySelector('.plugin-album__character-submenu-list');
-                    if (resolvedToolbar && resolvedList) {
-                        toolbarEl = resolvedToolbar;
-                        listEl = resolvedList;
-                    }
-                }
-            } catch { }
             if (!toolbarEl || !listEl) return;
 
-            const presets = Array.isArray(this.state.character.presets) ? this.state.character.presets : [];
-            const activeId = this.state.character.activePresetId;
+            const presets = Array.isArray(this.state.character?.presets) ? this.state.character.presets : [];
+            const activeId = String(this.state.character?.activePresetId || '').trim();
+            const categories = (typeof this._characterGetCategoryNames === 'function')
+                ? (this._characterGetCategoryNames() || [])
+                : [];
 
-            let categories = this._characterGetCategoryNames();
-            try {
-                if (typeof this._characterIsVisualNovelModeEnabled === 'function' && this._characterIsVisualNovelModeEnabled()) {
-                    const bg = this._characterGetVisualNovelBackgroundCategoryName?.();
-                    if (bg) {
-                        const bgLower = String(bg).trim().toLowerCase();
-                        categories = (categories || []).filter(c => String(c || '').trim().toLowerCase() !== bgLower);
-                    }
-                }
-            } catch { }
+            const suggested = Array.isArray(this.state.character?.autoSuggestPresets)
+                ? this.state.character.autoSuggestPresets
+                : [];
+            const autoKeys = suggested
+                .map(s => [String(s?.key || '').trim(), Number(s?.score) || 0])
+                .filter(([k]) => !!k)
+                .slice(0, 20);
 
-            // Running-task progress per preset (for fill animation in this submenu)
-            const progressByPreset = this._characterGetRunningPresetProgressMap(this._lastAllTasksStatus || {});
-
-            // Auto-suggest presets (computed in-session). Show full 20 in UI.
-            // Shape: [{ key: 'g:...', score: number }, ...]
-            let autoKeys = [];
-            try {
-                const suggested = this.state.character.autoSuggestPresets;
-                if (Array.isArray(suggested) && suggested.length) {
-                    autoKeys = suggested
-                        .filter(s => s && typeof s.key === 'string' && s.key.trim())
-                        .slice(0, 20)
-                        .map(s => [String(s.key).trim(), Number(s.score) || 0]);
-                }
-            } catch { }
+            const progressByPreset = this._characterGetRunningPresetProgressMap?.(this._lastAllTasksStatus || {}) || new Map();
 
             // Toolbar row (match layout/UX of normal category submenu toolbars)
             const toolbar = document.createElement('div');
@@ -965,11 +492,42 @@
                 return (g && g.name) ? String(g.name) : '';
             };
 
+            const buildTitleAndPillsInner = ({ titleText, parts, tintCategoryForPart }) => {
+                const inner = document.createElement('div');
+                inner.className = 'plugin-album__character-preset-item-inner';
+
+                const title = document.createElement('div');
+                title.className = 'plugin-album__character-preset-item-title';
+                title.textContent = String(titleText || '').trim() || 'Preset';
+                inner.appendChild(title);
+
+                const wrap = document.createElement('div');
+                wrap.className = 'plugin-album__character-preset-pillwrap';
+                (parts || []).forEach((part) => {
+                    const pill = document.createElement('span');
+                    pill.className = 'plugin-album__character-preset-pill';
+                    pill.textContent = String(part?.name || '').trim();
+                    try {
+                        if (typeof tintCategoryForPart === 'function') tintCategoryForPart(pill, part);
+                    } catch { }
+                    try { if (part?.title) pill.title = String(part.title); } catch { }
+                    wrap.appendChild(pill);
+                });
+                if (!(parts || []).length) {
+                    const pill = document.createElement('span');
+                    pill.className = 'plugin-album__character-preset-pill';
+                    pill.textContent = 'Empty';
+                    wrap.appendChild(pill);
+                }
+
+                inner.appendChild(wrap);
+                return inner;
+            };
+
             // 1) User-saved presets first
             presets.forEach(preset => {
                 const btn = document.createElement('button');
                 btn.className = 'plugin-album__character-submenu-item plugin-album__character-submenu-item--saved';
-                btn.textContent = preset.name || 'Preset';
                 btn.dataset.presetId = preset.id;
                 if (activeId && preset.id === activeId) btn.classList.add('is-selected');
 
@@ -984,6 +542,46 @@
                         btn.style.setProperty('--album-preset-progress', String(p));
                     }
                 } catch { }
+
+                // Render parts as pills (like autosuggest)
+                const savedParts = (() => {
+                    try {
+                        const rawSel = preset?.selection;
+                        const sel = (rawSel && typeof rawSel === 'object') ? rawSel : {};
+                        const norm = {};
+                        Object.keys(sel).forEach(k => {
+                            const kk = String(k || '').trim().toLowerCase();
+                            if (!kk) return;
+                            norm[kk] = String(sel[k] || '').trim();
+                        });
+                        return (categories || [])
+                            .map((cat) => {
+                                const k = String(cat || '').trim().toLowerCase();
+                                const gid = (k && Object.prototype.hasOwnProperty.call(norm, k)) ? (norm[k] || '') : '';
+                                const n = nameForId(gid);
+                                return n ? { name: n, category: cat } : null;
+                            })
+                            .filter(Boolean);
+                    } catch {
+                        return [];
+                    }
+                })();
+
+                const inner = buildTitleAndPillsInner({
+                    titleText: String(preset?.name || 'Preset'),
+                    parts: savedParts,
+                    tintCategoryForPart: (pill, part) => {
+                        try {
+                            const catColor = this._characterGetCategoryColor(part?.category);
+                            const dark = catColor ? (this._characterDarkenHexColor(catColor, 0.45) || catColor) : null;
+                            if (dark) {
+                                pill.classList.add('is-tinted');
+                                pill.style.backgroundColor = dark;
+                            }
+                        } catch { }
+                    },
+                });
+                btn.appendChild(inner);
 
                 btn.addEventListener('click', async () => {
                     await this._characterSelectPreset(preset.id);
@@ -1044,35 +642,20 @@
                     }
                 } catch { }
 
-                // Inner wrapper: fixes layout/height issues and isolates progress fill background.
-                const inner = document.createElement('div');
-                inner.className = 'plugin-album__character-preset-item-inner';
-
-                const wrap = document.createElement('div');
-                wrap.className = 'plugin-album__character-preset-pillwrap';
-                parts.forEach((part) => {
-                    const pill = document.createElement('span');
-                    pill.className = 'plugin-album__character-preset-pill';
-                    pill.textContent = String(part?.name || '');
-
-                    // Tint auto-suggest tag pill using the category color (darkened)
-                    try {
-                        const catColor = this._characterGetCategoryColor(part?.category);
-                        const dark = catColor ? (this._characterDarkenHexColor(catColor, 0.45) || catColor) : null;
-                        if (dark) {
-                            pill.classList.add('is-tinted');
-                            pill.style.backgroundColor = dark;
-                        }
-                    } catch { }
-                    wrap.appendChild(pill);
+                const inner = buildTitleAndPillsInner({
+                    titleText: `Auto ${idx + 1}`,
+                    parts,
+                    tintCategoryForPart: (pill, part) => {
+                        try {
+                            const catColor = this._characterGetCategoryColor(part?.category);
+                            const dark = catColor ? (this._characterDarkenHexColor(catColor, 0.45) || catColor) : null;
+                            if (dark) {
+                                pill.classList.add('is-tinted');
+                                pill.style.backgroundColor = dark;
+                            }
+                        } catch { }
+                    },
                 });
-                if (!parts.length) {
-                    const pill = document.createElement('span');
-                    pill.className = 'plugin-album__character-preset-pill';
-                    pill.textContent = 'Auto';
-                    wrap.appendChild(pill);
-                }
-                inner.appendChild(wrap);
                 btn.appendChild(inner);
 
                 const titleParts = parts.length ? parts.map(p => p.name).join(' • ') : 'Auto';

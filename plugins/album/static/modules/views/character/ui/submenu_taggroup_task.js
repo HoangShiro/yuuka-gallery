@@ -11,40 +11,18 @@
             try {
                 if (this.state.viewMode !== 'character') return;
                 const activeMenu = String(this.state.character?.activeMenu || '').trim();
-                if (!activeMenu || activeMenu === 'Preset' || activeMenu === 'StatePreset') return;
+                if (!activeMenu || activeMenu === 'Preset') return;
                 const submenu = this.contentArea?.querySelector('.plugin-album__character-submenu');
                 if (!submenu || submenu.hidden) return;
                 const listEl = submenu.querySelector('.plugin-album__character-submenu-list');
                 if (!listEl) return;
 
-                const stateGroupId = this._characterParseStateGroupIdFromMenuName?.(activeMenu) || '';
-                const isStateGroupMenu = !!stateGroupId;
-                const selectedGroupId = isStateGroupMenu
-                    ? (this.state.character?.state?.selections?.[stateGroupId] || null)
-                    : (this.state.character?.selections?.[activeMenu] || null);
+                const selectedGroupId = (this.state.character?.selections?.[activeMenu] || null);
 
                 // Visual Novel mode: BG category progress is tracked as vn:bg:<groupId>.
                 let progress = null;
                 try {
-                    // VN mode: BG state group submenu uses vn:bg:<tagGroupId> progress.
-                    if (isStateGroupMenu
-                        && typeof this._characterIsVisualNovelModeEnabled === 'function'
-                        && this._characterIsVisualNovelModeEnabled()
-                        && typeof this._characterIsVisualNovelBackgroundStateGroup === 'function'
-                        && this._characterIsVisualNovelBackgroundStateGroup(stateGroupId)) {
-                        const sid = String(selectedGroupId || '').trim();
-                        const bgGid = sid ? (this._characterVNResolveBgGroupIdFromStateId?.(sid) || '') : '';
-                        if (bgGid) {
-                            progress = this._characterGetRunningPresetProgressForPresetId(
-                                allTasksStatus || {},
-                                `vn:bg:${bgGid}`,
-                                { nonAutoOnly: false }
-                            );
-                        }
-                    }
-
-                    if (!isStateGroupMenu
-                        && typeof this._characterIsVisualNovelModeEnabled === 'function'
+                    if (typeof this._characterIsVisualNovelModeEnabled === 'function'
                         && this._characterIsVisualNovelModeEnabled()
                         && typeof this._characterIsVisualNovelBackgroundCategory === 'function'
                         && this._characterIsVisualNovelBackgroundCategory(activeMenu)) {
@@ -92,32 +70,18 @@
             try {
                 if (this.state.viewMode !== 'character') return;
                 const activeMenu = String(this.state.character?.activeMenu || '').trim();
-                if (!activeMenu || activeMenu === 'Preset' || activeMenu === 'StatePreset') return;
+                if (!activeMenu || activeMenu === 'Preset') return;
                 const submenu = this.contentArea?.querySelector('.plugin-album__character-submenu');
                 if (!submenu || submenu.hidden) return;
                 const listEl = submenu.querySelector('.plugin-album__character-submenu-list');
                 if (!listEl) return;
 
-                const stateGroupId = this._characterParseStateGroupIdFromMenuName?.(activeMenu) || '';
-                const isStateGroupMenu = !!stateGroupId;
-                const selectedGroupId = isStateGroupMenu
-                    ? (this.state.character?.state?.selections?.[stateGroupId] || null)
-                    : (this.state.character?.selections?.[activeMenu] || null);
+                const selectedGroupId = (this.state.character?.selections?.[activeMenu] || null);
                 if (!selectedGroupId || String(selectedGroupId) === '__none__') return;
 
                 // VN mode: for BG category, use vn:bg:<groupId> as the identity.
                 try {
-                    if (isStateGroupMenu
-                        && typeof this._characterIsVisualNovelModeEnabled === 'function'
-                        && this._characterIsVisualNovelModeEnabled()
-                        && typeof this._characterIsVisualNovelBackgroundStateGroup === 'function'
-                        && this._characterIsVisualNovelBackgroundStateGroup(stateGroupId)) {
-                        const sid = String(selectedGroupId || '').trim();
-                        const bgGid = sid ? (this._characterVNResolveBgGroupIdFromStateId?.(sid) || '') : '';
-                        const expected = bgGid ? `vn:bg:${bgGid}` : '';
-                        if (!expected || String(expected) !== String(presetId || '')) return;
-                    } else if (!isStateGroupMenu
-                        && typeof this._characterIsVisualNovelModeEnabled === 'function'
+                    if (typeof this._characterIsVisualNovelModeEnabled === 'function'
                         && this._characterIsVisualNovelModeEnabled()
                         && typeof this._characterIsVisualNovelBackgroundCategory === 'function'
                         && this._characterIsVisualNovelBackgroundCategory(activeMenu)) {

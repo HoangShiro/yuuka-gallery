@@ -7,6 +7,45 @@
     const proto = AlbumComponent.prototype;
 
     Object.assign(proto, {
+        _characterNormalizeSoundFxMode(mode, { slot = 1 } = {}) {
+            const v = String(mode || '').trim().toLowerCase();
+            if (v === 'trim' || v === 'parallel' || v === 'continue') return v;
+            // Back-compat: allow boolean-ish (old parallel flag) if callers accidentally pass it.
+            if (typeof mode === 'boolean') return mode ? 'parallel' : 'trim';
+            // Defaults: historically slot 1 was non-parallel, slot 2 parallel.
+            return (Number(slot) === 2) ? 'parallel' : 'trim';
+        },
+
+        _characterLoadSoundFxMode(slot = 1) {
+            try {
+                const s = Number(slot);
+                const key = (s === 2)
+                    ? (this._LS_CHAR_SFX_MODE_2_KEY || 'yuuka.album.character.sfx_mode_2')
+                    : (this._LS_CHAR_SFX_MODE_1_KEY || 'yuuka.album.character.sfx_mode_1');
+                const raw = localStorage.getItem(key);
+                return this._characterNormalizeSoundFxMode(raw, { slot: s });
+            } catch { }
+            return (Number(slot) === 2) ? 'parallel' : 'trim';
+        },
+
+        _characterSaveSoundFxMode(slot = 1) {
+            try {
+                const s = Number(slot);
+                const key = (s === 2)
+                    ? (this._LS_CHAR_SFX_MODE_2_KEY || 'yuuka.album.character.sfx_mode_2')
+                    : (this._LS_CHAR_SFX_MODE_1_KEY || 'yuuka.album.character.sfx_mode_1');
+                const ui = this.state.character?.ui || {};
+                const raw = (s === 2) ? ui.soundFx2Mode : ui.soundFx1Mode;
+                const v = this._characterNormalizeSoundFxMode(raw, { slot: s });
+                localStorage.setItem(key, v);
+            } catch { }
+        },
+
+        _characterSaveSoundFxModes() {
+            try { this._characterSaveSoundFxMode?.(1); } catch { }
+            try { this._characterSaveSoundFxMode?.(2); } catch { }
+        },
+
         _characterLoadMenuBarMode() {
             try {
                 const raw = localStorage.getItem(this._LS_CHAR_MENU_BAR_MODE_KEY);
@@ -20,7 +59,7 @@
             try {
                 const raw = localStorage.getItem(this._LS_CHAR_MAIN_MENU_MODE_KEY);
                 const v = String(raw || '').trim().toLowerCase();
-                if (v === 'category' || v === 'state') return v;
+                if (v === 'category') return v;
             } catch { }
             return 'category';
         },
@@ -36,11 +75,8 @@
         _characterSaveMainMenuMode() {
             try {
                 const v = String(this.state.character?.ui?.menuMode ?? 'category').trim().toLowerCase();
-                if (v === 'category' || v === 'state') {
-                    localStorage.setItem(this._LS_CHAR_MAIN_MENU_MODE_KEY, v);
-                } else {
-                    localStorage.removeItem(this._LS_CHAR_MAIN_MENU_MODE_KEY);
-                }
+                if (v === 'category') localStorage.setItem(this._LS_CHAR_MAIN_MENU_MODE_KEY, v);
+                else localStorage.removeItem(this._LS_CHAR_MAIN_MENU_MODE_KEY);
             } catch { }
         },
 
@@ -100,46 +136,9 @@
             }
         },
 
-        _characterParseStateGroupIdFromMenuName(menuName) {
-            const raw = String(menuName || '').trim();
-            if (!raw.startsWith('state:')) return '';
-            return String(raw.slice('state:'.length) || '').trim();
-        },
-
-        _characterGetStateGroupNameById(stateGroupId) {
-            try {
-                const gid = String(stateGroupId || '').trim();
-                if (!gid) return '';
-                this._characterEnsureStateModeState?.();
-                const groups = Array.isArray(this.state.character?.state?.groups) ? this.state.character.state.groups : [];
-                const hit = groups.find(g => String(g?.id || '').trim() === gid);
-                return hit ? String(hit.name || '').trim() : '';
-            } catch {
-                return '';
-            }
-        },
-
-        _characterGetSelectedStateNameForGroup(stateGroupId) {
-            try {
-                const gid = String(stateGroupId || '').trim();
-                if (!gid) return '';
-                this._characterEnsureStateModeState?.();
-                const selectedId = this.state.character?.state?.selections?.[gid] ?? null;
-                if (!selectedId || String(selectedId) === '__none__') return '';
-                const sid = String(selectedId || '').trim();
-                const states = Array.isArray(this.state.character?.state?.states) ? this.state.character.state.states : [];
-                const hit = states.find(s => String(s?.id || '').trim() === sid);
-                return hit ? String(hit.name || '').trim() : '';
-            } catch {
-                return '';
-            }
-        },
-
         _characterApplyMenuBarModeUI() {
             if (this.state.viewMode !== 'character') return;
             const mode = Number(this.state.character?.ui?.menuBarMode ?? 0);
-            const menuMode = String(this.state.character?.ui?.menuMode || 'category').trim().toLowerCase();
-            const isStateMode = menuMode === 'state';
             const menu = this.contentArea?.querySelector('.plugin-album__character-menu');
             if (!menu) return;
 
@@ -206,44 +205,22 @@
                 }
 
                 // Category buttons: update label based on mode.
-                if (menuName && menuName !== 'Preset' && menuName !== 'StatePreset') {
+                if (menuName && menuName !== 'Preset') {
                     const labelEl = btn.querySelector('.plugin-album__character-menu-btn-label');
                     let labelText = '';
-                    const stateGroupId = isStateMode ? (this._characterParseStateGroupIdFromMenuName?.(menuName) || '') : '';
-                    const isStateGroupBtn = isStateMode && !!stateGroupId;
 
                     if (mode === 1) {
-                        if (isStateGroupBtn) {
-                            labelText = this._characterGetStateGroupNameById(stateGroupId) || '';
-                        } else {
-                            labelText = menuName;
-                        }
+                        labelText = menuName;
                     } else if (mode === 2) {
-                        if (isStateGroupBtn) {
-                            labelText = this._characterGetSelectedStateNameForGroup(stateGroupId) || '';
-                        } else {
-                            labelText = this._characterGetSelectedGroupNameForCategory(menuName);
-                        }
+                        labelText = this._characterGetSelectedGroupNameForCategory(menuName);
                     }
 
                     if (labelEl) labelEl.textContent = labelText || '';
                     btn.classList.toggle('plugin-album__character-menu-btn--labeled', !!labelText);
 
                     // Keep tooltip informative in label modes
-                    if (isStateGroupBtn) {
-                        const gName = this._characterGetStateGroupNameById(stateGroupId) || '';
-                        if (mode === 2 && labelText) {
-                            btn.title = gName ? `${gName}: ${labelText}` : labelText;
-                        } else {
-                            btn.title = gName || btn.title || '';
-                        }
-                    } else {
-                        if (mode === 2 && labelText) {
-                            btn.title = `${menuName}: ${labelText}`;
-                        } else {
-                            btn.title = menuName;
-                        }
-                    }
+                    if (mode === 2 && labelText) btn.title = `${menuName}: ${labelText}`;
+                    else btn.title = menuName;
                 }
             });
 

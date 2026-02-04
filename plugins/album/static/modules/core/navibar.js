@@ -112,13 +112,15 @@
 
         const inGrid = this.state.viewMode === 'grid';
         const inAnimEditor = this.state.viewMode === 'character' && !!(this.state.character?._animEditor?.isOpen);
+        const inSoundEditor = this.state.viewMode === 'character' && !!(this.state.character?._soundEditor?.isOpen);
+        const inEditor = inAnimEditor || inSoundEditor;
 
         // In grid: show mode selector tools; in album/character: show settings+generate
         navibar.registerButton({
             id: 'album-settings',
             type: 'tools',
             pluginId: 'album',
-            order: inGrid ? 99 : (inAnimEditor ? 99 : 1),
+            order: inGrid ? 99 : (inEditor ? 99 : 1),
             icon: 'tune',
             title: 'Cấu hình',
             onClick: () => this.openSettings()
@@ -127,7 +129,7 @@
             id: 'album-generate',
             type: 'tools',
             pluginId: 'album',
-            order: inGrid ? 100 : (inAnimEditor ? 100 : 2),
+            order: inGrid ? 100 : (inEditor ? 100 : 2),
             icon: 'auto_awesome',
             title: 'Tạo ảnh mới',
             onClick: () => this._handleGenerateToolClick()
@@ -138,7 +140,7 @@
             id: 'album-anim-undo',
             type: 'tools',
             pluginId: 'album',
-            order: inAnimEditor ? 1 : 200,
+            order: inEditor ? 1 : 200,
             icon: 'undo',
             title: 'Undo',
             isActive: () => {
@@ -154,7 +156,7 @@
             id: 'album-anim-redo',
             type: 'tools',
             pluginId: 'album',
-            order: inAnimEditor ? 2 : 201,
+            order: inEditor ? 2 : 201,
             icon: 'redo',
             title: 'Redo',
             isActive: () => {

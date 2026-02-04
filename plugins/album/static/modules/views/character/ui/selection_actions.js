@@ -5,60 +5,8 @@
     const proto = AlbumComponent.prototype;
 
     Object.assign(proto, {
-        async _characterSelectState(stateGroupId, stateId) {
-            try {
-                this._characterEnsureStateModeState?.();
-                const gid = String(stateGroupId || '').trim();
-                if (!gid) return;
-
-                const sid = String(stateId || '').trim();
-                this.state.character.state.selections[gid] = sid || null;
-                this._characterSaveStateSelections?.();
-
-                // VN mode: if this state group represents BG, treat selection as background choice.
-                try {
-                    if (typeof this._characterIsVisualNovelModeEnabled === 'function'
-                        && this._characterIsVisualNovelModeEnabled()
-                        && typeof this._characterIsVisualNovelBackgroundStateGroup === 'function'
-                        && this._characterIsVisualNovelBackgroundStateGroup(gid)) {
-                        this._characterEnsureVNState?.();
-                        const vn = this.state.character.vn;
-
-                        const bgGroupId = sid ? (this._characterVNResolveBgGroupIdFromStateId?.(sid) || '') : '';
-                        vn.activeBgGroupId = bgGroupId || null;
-                        vn.activeBgGroupIdOverride = true;
-                        try { this._characterVNSaveBgSelection?.(); } catch { }
-
-                        try { this._characterApplyMenuBarModeUI?.(); } catch { }
-                        try { await this._characterVNApplyBackgroundFromSelection?.({ generateIfMissing: false }); } catch { }
-                        try { this._characterRefreshDisplayedImage?.(); } catch { }
-                        return;
-                    }
-                } catch { }
-
-                // Manual selection should clear any preset override for this group
-                try {
-                    if (this.state.character.state.activePresetByGroup) {
-                        this.state.character.state.activePresetByGroup[gid] = null;
-                        this._characterSaveStateGroupActivePresetIds?.();
-                    }
-                } catch { }
-
-                try { this._characterApplyMenuBarModeUI?.(); } catch { }
-
-                const presetId = this._characterResolveActivePresetId();
-                const imgs = presetId ? this._characterGetImagesForPreset(presetId) : [];
-                if (presetId && !imgs.length) {
-                    await this._characterStartGeneration({ forceNew: true, auto: false, presetId: null });
-                } else {
-                    try { this._characterLoopRequestPlaylistUpdate?.({ reason: 'submenu' }); } catch { }
-                    try { this._characterRequestAutoPlayOnNextCharacterImage?.({ reason: 'submenu' }); } catch { }
-                    this._characterRefreshDisplayedImage?.();
-                }
-            } catch { }
-        },
-
         async _characterSelectAutoPresetKey(key) {
+            const prevActive = String(this.state.character?.activePresetId || '').trim();
             const selMap = this._characterParsePresetKeyToSelectionMap(key);
             this.state.character.activePresetId = `auto:${key}`;
             this._characterSaveActivePresetId();
@@ -84,6 +32,29 @@
                     }
                 }
             } catch { }
+
+            const prevSel = this.state.character?.selections || {};
+            const nextActive = String(this.state.character?.activePresetId || '').trim();
+            const didChange = (() => {
+                try {
+                    if (prevActive !== nextActive) return true;
+                    // Also treat as change if derived selections actually differ.
+                    const keys = Object.keys(nextSel || {});
+                    for (let i = 0; i < keys.length; i += 1) {
+                        const k = keys[i];
+                        if (String(prevSel?.[k] ?? '') !== String(nextSel?.[k] ?? '')) return true;
+                    }
+                    return false;
+                } catch {
+                    return true;
+                }
+            })();
+
+            // Only trim SFX when switching to a DIFFERENT preset/selection context.
+            if (didChange) {
+                try { this._characterSoundTrimAllActive?.({ fadeOutMs: 100 }); } catch { }
+            }
+
             this.state.character.selections = nextSel;
             this._characterSaveSelections();
             try { this._characterApplyMenuBarModeUI(); } catch { }
@@ -102,6 +73,16 @@
 
         async _characterSelectTagGroup(category, groupId) {
             if (!this.state.character.selections) return;
+
+            const prev = String(this.state.character.selections?.[category] ?? '').trim();
+            const next = String(groupId ?? '').trim();
+            const didChange = prev !== next;
+
+            // Only trim SFX when switching to a DIFFERENT group.
+            if (didChange) {
+                try { this._characterSoundTrimAllActive?.({ fadeOutMs: 100 }); } catch { }
+            }
+
             this.state.character.selections[category] = groupId;
             this._characterSaveSelections();
 
@@ -155,6 +136,10 @@
                     await this._characterStartGeneration({ forceNew: true, auto: false });
                 } else {
                     try { this._characterLoopRequestPlaylistUpdate?.({ reason: 'submenu' }); } catch { }
+                    // Only treat as a loop-selection change when group actually changed.
+                    if (didChange) {
+                        try { this._characterSoundOnLoopSelectionChanged?.({ fadeOutMs: 100 }); } catch { }
+                    }
                     try { this._characterRequestAutoPlayOnNextCharacterImage?.({ reason: 'submenu' }); } catch { }
                     this._characterRefreshDisplayedImage();
                 }
@@ -162,6 +147,15 @@
         },
 
         async _characterSelectPreset(presetId) {
+            const prevActive = String(this.state.character?.activePresetId || '').trim();
+            const nextActive = String(presetId || '').trim();
+            const didChange = prevActive !== nextActive;
+
+            // Only trim SFX when switching to a DIFFERENT preset.
+            if (didChange) {
+                try { this._characterSoundTrimAllActive?.({ fadeOutMs: 100 }); } catch { }
+            }
+
             const preset = (this.state.character.presets || []).find(p => p?.id === presetId);
             if (!preset) return;
             this.state.character.activePresetId = presetId;

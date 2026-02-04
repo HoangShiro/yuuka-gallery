@@ -198,52 +198,6 @@
             }
         },
 
-        _characterIsVisualNovelBackgroundStateGroup(stateGroupIdOrName) {
-            try {
-                const gidOrName = String(stateGroupIdOrName || '').trim();
-                if (!gidOrName) return false;
-                this._characterEnsureStateModeState?.();
-                const groups = Array.isArray(this.state.character?.state?.groups) ? this.state.character.state.groups : [];
-                const hit = groups.find(g => {
-                    const gid = String(g?.id || '').trim();
-                    const name = String(g?.name || '').trim();
-                    return gid === gidOrName || name.toLowerCase() === gidOrName.toLowerCase();
-                });
-
-                const name = String(hit?.name || gidOrName).trim();
-                const flagged = !!(hit && (hit.is_bg === true || hit.isBg === true || hit.bg === true));
-                if (flagged) return true;
-
-                // Heuristics: match VN BG category name, or common BG tokens.
-                const bgCat = this._characterGetVisualNovelBackgroundCategoryName?.();
-                if (bgCat && String(bgCat).trim() && String(bgCat).trim().toLowerCase() === name.toLowerCase()) return true;
-
-                const lower = name.toLowerCase();
-                if (lower === 'bg') return true;
-                if (lower.includes('background')) return true;
-                if (lower.startsWith('bg ')) return true;
-                if (lower.startsWith('bg:')) return true;
-                return false;
-            } catch {
-                return false;
-            }
-        },
-
-        _characterVNResolveBgGroupIdFromStateId(stateId) {
-            try {
-                const sid = String(stateId || '').trim();
-                if (!sid || sid === '__none__') return '';
-                this._characterEnsureStateModeState?.();
-                const states = Array.isArray(this.state.character?.state?.states) ? this.state.character.state.states : [];
-                const st = states.find(s => String(s?.id || '').trim() === sid);
-                const tgids = Array.isArray(st?.tag_group_ids) ? st.tag_group_ids : (Array.isArray(st?.tagGroupIds) ? st.tagGroupIds : []);
-                const gid = tgids.map(x => String(x || '').trim()).filter(Boolean)[0] || '';
-                return gid;
-            } catch {
-                return '';
-            }
-        },
-
         async _characterVNEnsureBackgroundCacheLoaded() {
             try {
                 if (!this._characterIsVisualNovelModeEnabled()) return false;

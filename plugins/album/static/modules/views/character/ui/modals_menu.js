@@ -51,21 +51,36 @@
                                 <button type="button" class="plugin-album__mainmenu-settings-iconbtn" data-menu-mode="category" aria-label="Category" title="Category">
                                     <span class="material-symbols-outlined">filter_1</span>
                                 </button>
-                                <button type="button" class="plugin-album__mainmenu-settings-iconbtn" data-menu-mode="state" aria-label="State" title="State">
-                                    <span class="material-symbols-outlined">filter_2</span>
-                                </button>
                             </div>
                         </div>
 
                         <div class="plugin-album__mainmenu-settings-row" data-block="tools">
                             <div class="plugin-album__mainmenu-settings-row-title">Tools</div>
                             <div class="plugin-album__mainmenu-settings-row-buttons" role="group" aria-label="Tools">
-                                <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-action="open-sound-manager" aria-label="Sound manager" title="Sound manager">
-                                    Sound manager
-                                </button>
                                 <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-action="open-animation-editor" aria-label="Animation editor" title="Animation editor">
                                     Animation editor
                                 </button>
+                                <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-action="open-sound-manager" aria-label="Sound manager" title="Sound manager">
+                                    Sound manager
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="plugin-album__mainmenu-settings-row" data-block="sfx1">
+                            <div class="plugin-album__mainmenu-settings-row-title">Sound Fx 1</div>
+                            <div class="plugin-album__mainmenu-settings-row-buttons" role="group" aria-label="Sound Fx 1 mode">
+                                <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-sfx1-mode="trim" aria-label="Trim" title="Trim">Trim</button>
+                                <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-sfx1-mode="parallel" aria-label="Parallel" title="Parallel">Parallel</button>
+                                <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-sfx1-mode="continue" aria-label="Continue" title="Continue">Continue</button>
+                            </div>
+                        </div>
+
+                        <div class="plugin-album__mainmenu-settings-row" data-block="sfx2">
+                            <div class="plugin-album__mainmenu-settings-row-title">Sound Fx 2</div>
+                            <div class="plugin-album__mainmenu-settings-row-buttons" role="group" aria-label="Sound Fx 2 mode">
+                                <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-sfx2-mode="trim" aria-label="Trim" title="Trim">Trim</button>
+                                <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-sfx2-mode="parallel" aria-label="Parallel" title="Parallel">Parallel</button>
+                                <button type="button" class="plugin-album__mainmenu-settings-actionbtn" data-sfx2-mode="continue" aria-label="Continue" title="Continue">Continue</button>
                             </div>
                         </div>
                     </div>
@@ -86,12 +101,24 @@
                 };
                 const MENU_MODE_LABELS = {
                     category: 'Category',
-                    state: 'State',
+                };
+
+                const normalizeSfxMode = (raw, slot) => {
+                    try {
+                        if (typeof this._characterNormalizeSoundFxMode === 'function') {
+                            return this._characterNormalizeSoundFxMode(raw, { slot: Number(slot) });
+                        }
+                    } catch { }
+                    const v = String(raw || '').trim().toLowerCase();
+                    if (v === 'trim' || v === 'parallel' || v === 'continue') return v;
+                    return (Number(slot) === 2) ? 'parallel' : 'trim';
                 };
 
                 const applySelected = () => {
                     const displayMode = Number(this.state.character?.ui?.menuBarMode ?? 0);
-                    const menuMode = String(this.state.character?.ui?.menuMode ?? 'category').trim().toLowerCase();
+                    const menuMode = 'category';
+                    const sfx1Mode = normalizeSfxMode(this.state.character?.ui?.soundFx1Mode, 1);
+                    const sfx2Mode = normalizeSfxMode(this.state.character?.ui?.soundFx2Mode, 2);
 
                     const displayTitleEl = dialog.querySelector('[data-role="display-title"]');
                     if (displayTitleEl) {
@@ -110,6 +137,15 @@
                     dialog.querySelectorAll('[data-menu-mode]')?.forEach(btn => {
                         const v = String(btn.dataset.menuMode || '').trim().toLowerCase();
                         btn.classList.toggle('is-selected', v && v === menuMode);
+                    });
+
+                    dialog.querySelectorAll('[data-sfx1-mode]')?.forEach(btn => {
+                        const v = String(btn.dataset.sfx1Mode || '').trim().toLowerCase();
+                        btn.classList.toggle('is-selected', v && v === sfx1Mode);
+                    });
+                    dialog.querySelectorAll('[data-sfx2-mode]')?.forEach(btn => {
+                        const v = String(btn.dataset.sfx2Mode || '').trim().toLowerCase();
+                        btn.classList.toggle('is-selected', v && v === sfx2Mode);
                     });
                 };
 
@@ -138,6 +174,35 @@
                     } catch { }
                 });
 
+                // Wire Sound Fx mode buttons (auto-save)
+                dialog.querySelectorAll('[data-sfx1-mode]')?.forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const v = normalizeSfxMode(String(btn.dataset.sfx1Mode || '').trim().toLowerCase(), 1);
+                        try {
+                            if (!this.state.character.ui) this.state.character.ui = {};
+                            this.state.character.ui.soundFx1Mode = v;
+                            this._characterSaveSoundFxMode?.(1);
+                        } catch { }
+                        applySelected();
+                    });
+                });
+
+                dialog.querySelectorAll('[data-sfx2-mode]')?.forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const v = normalizeSfxMode(String(btn.dataset.sfx2Mode || '').trim().toLowerCase(), 2);
+                        try {
+                            if (!this.state.character.ui) this.state.character.ui = {};
+                            this.state.character.ui.soundFx2Mode = v;
+                            this._characterSaveSoundFxMode?.(2);
+                        } catch { }
+                        applySelected();
+                    });
+                });
+
                 // Wire display mode clicks (auto-save)
                 dialog.querySelectorAll('[data-display]')?.forEach(btn => {
                     btn.addEventListener('click', (e) => {
@@ -161,52 +226,14 @@
                         e.preventDefault();
                         e.stopPropagation();
                         const v = String(btn.dataset.menuMode || '').trim().toLowerCase();
-                        if (!['category', 'state'].includes(v)) return;
+                        if (v !== 'category') return;
                         try {
                             if (!this.state.character.ui) this.state.character.ui = {};
-                            this.state.character.ui.menuMode = v;
+                            this.state.character.ui.menuMode = 'category';
                             this._characterSaveMainMenuMode?.();
 
-                            // Apply immediately: close submenu, ensure state-mode data exists, then rerender.
+                            // Apply immediately: close submenu, then rerender.
                             try { this._characterCloseSubmenu?.(); } catch { }
-
-                            if (v === 'state') {
-                                try { this._characterEnsureStateModeState?.(); } catch { }
-                                // Lazy-load state groups/states if missing (e.g., modal opened early / after partial init)
-                                try {
-                                    const s = this.state.character?.state;
-                                    const needsGroups = !(Array.isArray(s?.groups) && s.groups.length);
-                                    const needsStates = !(Array.isArray(s?.states) && s.states.length);
-                                    if ((needsGroups || needsStates) && this.api?.album) {
-                                        Promise.all([
-                                            needsGroups ? this.api.album.get('/character/state_groups') : Promise.resolve(s.groups),
-                                            needsStates ? this.api.album.get('/character/states') : Promise.resolve(s.states),
-                                        ]).then(([groups, states]) => {
-                                            try {
-                                                this._characterEnsureStateModeState?.();
-                                                if (Array.isArray(groups)) this.state.character.state.groups = groups;
-                                                if (Array.isArray(states)) this.state.character.state.states = states;
-
-                                                // Restore persisted state selections/active presets (per character)
-                                                const ch = String(this.state?.selectedCharacter?.hash || '').trim();
-                                                if (ch) {
-                                                    try { this.state.character.state.selections = this._characterLoadStateSelections?.(ch, this.state.character.state.groups) || {}; } catch { }
-                                                    try { this.state.character.state.activePresetByGroup = this._characterLoadStateGroupActivePresetIds?.(ch, this.state.character.state.groups) || {}; } catch { }
-                                                }
-                                            } catch { }
-
-                                            try { this._characterRender?.(); } catch { }
-                                            try { this._characterRefreshDisplayedImage?.(); } catch { }
-                                        }).catch(() => {
-                                            try { this._characterRender?.(); } catch { }
-                                            try { this._characterRefreshDisplayedImage?.(); } catch { }
-                                        });
-                                        // Avoid double-render below; the async render will run.
-                                        applySelected();
-                                        return;
-                                    }
-                                } catch { }
-                            }
 
                             try { this._characterRender?.(); } catch { }
                             try { this._characterRefreshDisplayedImage?.(); } catch { }
@@ -315,86 +342,6 @@
                     showError(`Lỗi lưu sắp xếp: ${err.message}`);
                 }
             };
-        },
-
-        async _characterOpenStateGroupReorderModal() {
-            try {
-                if (this.state.viewMode !== 'character') return;
-                this._characterEnsureStateModeState?.();
-
-                const groups = Array.isArray(this.state.character?.state?.groups) ? this.state.character.state.groups : [];
-                if (!groups.length) return;
-
-                const rows = groups.map(g => {
-                    const gid = String(g?.id || '').trim();
-                    const name = String(g?.name || '').trim();
-                    const icon = String(g?.icon || 'label').trim() || 'label';
-                    const safeName = name.replace(/"/g, '&quot;');
-                    const safeId = gid.replace(/"/g, '&quot;');
-                    if (!gid || !name) return '';
-                    return `
-                        <div class="plugin-album__category-reorder-row" data-id="${safeId}">
-                            <button type="button" class="plugin-album__category-reorder-handle" title="Kéo để sắp xếp">
-                                <span class="material-symbols-outlined">drag_indicator</span>
-                            </button>
-                            <span class="plugin-album__category-reorder-icon material-symbols-outlined">${icon}</span>
-                            <span class="plugin-album__category-reorder-name">${safeName}</span>
-                        </div>
-                    `;
-                }).join('');
-
-                const modalHtml = `
-                    <h3>Sắp xếp state group</h3>
-                    <div class="plugin-album__category-reorder-list">${rows}</div>
-                    <div class="modal-actions">
-                        <div style="flex-grow:1"></div>
-                        <button id="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button>
-                        <button id="btn-save" title="Save"><span class="material-symbols-outlined">check</span></button>
-                    </div>
-                `;
-
-                const modal = document.createElement('div');
-                modal.className = 'modal-backdrop plugin-album__character-modal plugin-album__category-reorder-modal';
-                modal.innerHTML = `<div class="modal-dialog">${modalHtml}</div>`;
-                const close = () => { try { modal.remove(); } catch { } };
-                modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
-                document.body.appendChild(modal);
-
-                const dialog = modal.querySelector('.modal-dialog');
-                const listEl = dialog?.querySelector('.plugin-album__category-reorder-list');
-                if (!dialog || !listEl) return;
-
-                try {
-                    const Sortable = await this._ensureSortable();
-                    new Sortable(listEl, {
-                        animation: 150,
-                        handle: '.plugin-album__category-reorder-handle',
-                        draggable: '.plugin-album__category-reorder-row',
-                        ghostClass: 'sortable-ghost',
-                        chosenClass: 'sortable-chosen',
-                    });
-                } catch (err) {
-                    console.warn('[Album] Failed to enable state-group reordering:', err);
-                }
-
-                dialog.querySelector('#btn-cancel').onclick = close;
-                dialog.querySelector('#btn-save').onclick = async () => {
-                    try {
-                        const orderedIds = Array.from(listEl.querySelectorAll('.plugin-album__category-reorder-row'))
-                            .map(el => String(el.dataset.id || '').trim())
-                            .filter(Boolean);
-
-                        await this.api.album.post('/character/state_groups/reorder', { ordered_ids: orderedIds });
-                        try { this.state.character.state.groups = await this.api.album.get('/character/state_groups'); } catch { }
-                        try { this._characterRender?.(); } catch { }
-                        close();
-                    } catch (err) {
-                        showError(`Lỗi lưu sắp xếp: ${err.message || err}`);
-                    }
-                };
-            } catch (err) {
-                console.warn('[Album] _characterOpenStateGroupReorderModal error:', err);
-            }
         },
 
         async _characterOpenCategoryIconEditor({ mode = 'create', categoryName = null } = {}) {

@@ -123,6 +123,34 @@
         return await res.text();
     };
 
+    const normalizeId = (value) => String(value || '').trim();
+
+    const toLower = (value) => String(value || '').toLowerCase();
+
+    const getPresetDefaultName = (existingGroups) => {
+        const groups = Array.isArray(existingGroups) ? existingGroups : [];
+        let maxN = 0;
+        for (const g of groups) {
+            const name = String(g?.name || '').trim();
+            const m = name.match(/^Preset\s+(\d+)$/i);
+            if (m) {
+                const n = Number(m[1]);
+                if (Number.isFinite(n) && n > maxN) maxN = n;
+            }
+        }
+        return `Preset ${maxN + 1}`;
+    };
+
+    const debounce = (fn, delayMs) => {
+        let t = 0;
+        return (...args) => {
+            try { clearTimeout(t); } catch { }
+            t = setTimeout(() => {
+                try { fn(...args); } catch { }
+            }, Math.max(0, Number(delayMs) || 0));
+        };
+    };
+
     Object.assign(proto, {
         async _characterOpenSoundManagerPage() {
             try {
@@ -158,6 +186,12 @@
                             <div class="plugin-album__soundmgr-header" aria-label="Sound manager header">
                                 <div class="plugin-album__soundmgr-title">Sound manager</div>
                                 <div class="plugin-album__soundmgr-spacer"></div>
+                                <button type="button" class="plugin-album__soundmgr-new-preset" data-action="open-editor" title="Open editor">
+                                    Open editor
+                                </button>
+                                <button type="button" class="plugin-album__soundmgr-new-preset" data-action="new-preset" title="New preset">
+                                    New preset
+                                </button>
                                 <button type="button" class="plugin-album__soundmgr-close" data-action="close" title="Close">
                                     <span class="material-symbols-outlined">close</span>
                                 </button>
@@ -206,35 +240,90 @@
                     close();
                 });
 
-                const renderList = (presets) => {
-                    const safe = Array.isArray(presets) ? presets : [];
-                    const sorted = safe
-                        .filter(p => p && typeof p === 'object')
+                const VIRTUAL_UPLOADED_ID = '__uploaded__';
+                const searchState = new Map(); // groupId -> query
+
+                let lastActiveSoundId = '';
+
+                let cachedGroups = []; // [{id,name}]
+                let cachedSounds = []; // sound presets: [{id,name,ext,url,group_id,...}]
+
+                const getSoundGroupIds = (p) => {
+                    try {
+                        const raw = p?.group_ids;
+                        if (Array.isArray(raw)) {
+                            return raw
+                                .map(x => String(x || '').trim())
+                                .filter(Boolean);
+                        }
+                    } catch { }
+                    const legacy = String(p?.group_id || '').trim();
+                    return legacy ? [legacy] : [];
+                };
+
+                const buildSoundLabel = (p) => {
+                    const name = String(p?.name || '').trim();
+                    const ext = String(p?.ext || '').trim().toLowerCase();
+                    return ext ? `${name}.${ext}` : name;
+                };
+
+                const getGroupNameById = (id) => {
+                    const gid = normalizeId(id);
+                    if (!gid) return '';
+                    const g = (cachedGroups || []).find(x => normalizeId(x?.id) === gid);
+                    return String(g?.name || '').trim();
+                };
+
+                const sortGroupsWithUploadedLast = (groups) => {
+                    const safe = Array.isArray(groups) ? groups : [];
+                    return safe
+                        .filter(g => g && typeof g === 'object')
                         .slice()
                         .sort((a, b) => {
                             const an = String(a?.name || '').trim();
                             const bn = String(b?.name || '').trim();
                             return an.localeCompare(bn, undefined, { sensitivity: 'base' });
                         });
+                };
 
+                const renderPresets = (groups, sounds) => {
                     if (!listEl) return;
+                    const gs = sortGroupsWithUploadedLast(groups);
+                    const ss = Array.isArray(sounds) ? sounds : [];
 
-                    if (!sorted.length) {
-                        listEl.innerHTML = `<div class="plugin-album__character-hint" style="padding: var(--spacing-3); color: var(--color-secondary-text);">Chưa có sound nào.</div>`;
+                    const allPresetCards = [
+                        ...gs.map(g => ({
+                            id: normalizeId(g?.id),
+                            name: String(g?.name || '').trim(),
+                            isUploaded: false,
+                        })),
+                        { id: VIRTUAL_UPLOADED_ID, name: 'Uploaded', isUploaded: true },
+                    ].filter(x => x.id);
+
+                    if (!ss.length) {
+                        listEl.innerHTML = `
+                            <div class="plugin-album__soundmgr-empty">
+                                <div class="plugin-album__character-hint" style="padding: var(--spacing-3); color: var(--color-secondary-text);">Chưa có sound nào.</div>
+                            </div>
+                        `;
                         return;
                     }
 
-                    listEl.innerHTML = sorted.map(p => {
-                        const id = String(p?.id || '').trim();
-                        const name = String(p?.name || '').trim();
-                        const ext = String(p?.ext || '').trim().toLowerCase();
+                    const soundsSorted = ss
+                        .filter(p => p && typeof p === 'object')
+                        .slice()
+                        .sort((a, b) => buildSoundLabel(a).localeCompare(buildSoundLabel(b), undefined, { sensitivity: 'base' }));
+
+                    const makeSoundRow = (p, groupIdForRow, { allowEditDelete = true } = {}) => {
+                        const id = normalizeId(p?.id);
                         const url = String(p?.url || '').trim();
-                        const label = ext ? `${name}.${ext}` : name;
+                        const label = buildSoundLabel(p);
                         const safeLabel = escapeText(label || '(Unnamed)');
                         const safeId = escapeText(id);
                         const safeUrl = escapeText(url);
+                        const safeGroup = escapeText(normalizeId(groupIdForRow));
                         return `
-                            <div class="plugin-album__soundmgr-item" data-id="${safeId}" data-url="${safeUrl}" style="--fill:0%">
+                            <div class="plugin-album__soundmgr-item" data-id="${safeId}" data-url="${safeUrl}" data-group="${safeGroup}" style="--fill:0%">
                                 <div class="plugin-album__soundmgr-item-main">
                                     <div class="plugin-album__soundmgr-item-name" title="${safeLabel}">${safeLabel}</div>
                                     <div class="plugin-album__soundmgr-item-duration" data-role="duration">--:--</div>
@@ -243,36 +332,96 @@
                                     <button type="button" class="plugin-album__soundmgr-iconbtn" data-action="play" title="Play">
                                         <span class="material-symbols-outlined">play_arrow</span>
                                     </button>
-                                    <button type="button" class="plugin-album__soundmgr-iconbtn" data-action="edit" title="Edit">
-                                        <span class="material-symbols-outlined">edit</span>
-                                    </button>
-                                    <button type="button" class="plugin-album__soundmgr-iconbtn" data-action="delete" title="Delete">
-                                        <span class="material-symbols-outlined">delete</span>
-                                    </button>
+                                    ${allowEditDelete ? `
+                                        <button type="button" class="plugin-album__soundmgr-iconbtn" data-action="edit" title="Edit">
+                                            <span class="material-symbols-outlined">edit</span>
+                                        </button>
+                                        <button type="button" class="plugin-album__soundmgr-iconbtn" data-action="delete" title="Delete">
+                                            <span class="material-symbols-outlined">delete</span>
+                                        </button>
+                                    ` : ''}
                                 </div>
                             </div>
                         `;
-                    }).join('');
+                    };
+
+                    const makePresetCard = (card) => {
+                        const groupId = normalizeId(card?.id);
+                        const isUploaded = !!card?.isUploaded;
+                        const name = String(card?.name || '').trim() || 'Preset';
+                        const safeGroupId = escapeText(groupId);
+                        const safeName = escapeText(name);
+                        const q = String(searchState.get(groupId) || '');
+                        const safeQ = escapeText(q);
+
+                        const items = isUploaded
+                            ? soundsSorted
+                            : soundsSorted.filter(p => getSoundGroupIds(p).includes(groupId));
+
+                        const itemsHtml = items.length
+                            ? items.map(p => makeSoundRow(p, groupId, { allowEditDelete: isUploaded })).join('')
+                            : `<div class="plugin-album__soundmgr-preset-empty">(Empty)</div>`;
+
+                        return `
+                            <div class="plugin-album__soundmgr-preset" data-preset-id="${safeGroupId}" data-uploaded="${isUploaded ? '1' : '0'}">
+                                <div class="plugin-album__soundmgr-preset-header">
+                                    <div class="plugin-album__soundmgr-preset-name" data-role="preset-name" title="${safeName}">${safeName}</div>
+                                    <input class="plugin-album__soundmgr-preset-name-input" data-role="preset-name-input" value="${safeName}" aria-label="Preset name" style="display:none" />
+                                    <button type="button" class="plugin-album__soundmgr-preset-delete" data-action="delete-preset" title="Delete preset" ${isUploaded ? 'disabled' : ''}>
+                                        <span class="material-symbols-outlined">delete</span>
+                                    </button>
+                                    <div class="plugin-album__soundmgr-preset-spacer"></div>
+                                    <input class="plugin-album__soundmgr-preset-search" data-role="preset-search" placeholder="Search sound..." value="${safeQ}" ${isUploaded ? 'disabled' : ''} />
+                                </div>
+
+                                <div class="plugin-album__soundmgr-preset-search-results" data-role="preset-search-results" aria-label="Search results"></div>
+
+                                <div class="plugin-album__soundmgr-preset-items" data-role="preset-items">
+                                    ${itemsHtml}
+                                </div>
+                            </div>
+                        `;
+                    };
+
+                    listEl.innerHTML = allPresetCards.map(makePresetCard).join('');
+
+                    // Render initial search results for each card
+                    try {
+                        const cards = Array.from(listEl.querySelectorAll('.plugin-album__soundmgr-preset') || []);
+                        for (const card of cards) {
+                            try {
+                                const gid = String(card.dataset.presetId || '').trim();
+                                renderSearchResultsForCard(card, gid);
+                            } catch { }
+                        }
+                    } catch { }
                 };
 
-                const loadList = async () => {
+                const resolveDurationsInView = async () => {
                     try {
-                        const presets = await this.api.album.get('/sound_fx/presets');
-                        renderList(presets);
+                        const rows = Array.from(listEl?.querySelectorAll?.('.plugin-album__soundmgr-item') || []);
+                        rows.forEach(async (row) => {
+                            try {
+                                const durEl = row.querySelector('[data-role="duration"]');
+                                if (!durEl) return;
+                                const u = String(row.dataset.url || '').trim();
+                                const d = await getAudioDurationFromUrl(u);
+                                durEl.textContent = formatDurationSSTT(d);
+                            } catch { }
+                        });
+                    } catch { }
+                };
 
-                        // Async: resolve durations and patch DOM
-                        try {
-                            const rows = Array.from(listEl?.querySelectorAll?.('.plugin-album__soundmgr-item') || []);
-                            rows.forEach(async (row) => {
-                                try {
-                                    const durEl = row.querySelector('[data-role="duration"]');
-                                    if (!durEl) return;
-                                    const u = String(row.dataset.url || '').trim();
-                                    const d = await getAudioDurationFromUrl(u);
-                                    durEl.textContent = formatDurationSSTT(d);
-                                } catch { }
-                            });
-                        } catch { }
+                const loadAll = async () => {
+                    try {
+                        const [groups, sounds] = await Promise.all([
+                            this.api.album.get('/sound_fx/groups'),
+                            this.api.album.get('/sound_fx/presets'),
+                        ]);
+                        cachedGroups = Array.isArray(groups) ? groups : [];
+                        cachedSounds = Array.isArray(sounds) ? sounds : [];
+                        renderPresets(cachedGroups, cachedSounds);
+                        await resolveDurationsInView();
                     } catch (err) {
                         try { showError?.(`Lỗi tải sound: ${err.message || err}`); } catch { }
                         if (listEl) {
@@ -280,6 +429,90 @@
                         }
                     }
                 };
+
+                const renderSearchResultsForCard = (cardEl, groupId) => {
+                    try {
+                        const gid = normalizeId(groupId);
+                        if (!cardEl || !gid) return;
+                        const resultsEl = cardEl.querySelector('[data-role="preset-search-results"]');
+                        const inputEl = cardEl.querySelector('[data-role="preset-search"]');
+                        if (!resultsEl || !inputEl) return;
+
+                        if (gid === VIRTUAL_UPLOADED_ID) {
+                            resultsEl.innerHTML = '';
+                            return;
+                        }
+
+                        const q = String(searchState.get(gid) || '').trim();
+                        if (!q) {
+                            resultsEl.innerHTML = '';
+                            return;
+                        }
+
+                        const qLower = q.toLowerCase();
+                        const inThisGroup = new Set(
+                            (cachedSounds || [])
+                                .filter(s => getSoundGroupIds(s).includes(gid))
+                                .map(s => normalizeId(s?.id))
+                        );
+
+                        const matches = (cachedSounds || [])
+                            .filter(s => s && typeof s === 'object')
+                            .filter(s => {
+                                const sid = normalizeId(s?.id);
+                                if (!sid) return false;
+                                if (inThisGroup.has(sid)) return false;
+                                const label = buildSoundLabel(s);
+                                return toLower(label).includes(qLower);
+                            })
+                            .slice(0, 30);
+
+                        if (!matches.length) {
+                            resultsEl.innerHTML = `<div class="plugin-album__soundmgr-pills-empty">No match</div>`;
+                            return;
+                        }
+
+                        const items = matches.map(s => {
+                            const sid = normalizeId(s?.id);
+                            const url = String(s?.url || '').trim();
+                            const label = buildSoundLabel(s);
+                            const safeSid = escapeText(sid);
+                            const safeGid = escapeText(gid);
+                            const safeUrl = escapeText(url);
+                            const safeLabel = escapeText(label || '(Unnamed)');
+                            return `
+                                <div class="plugin-album__soundmgr-item plugin-album__soundmgr-item--search" data-search="1" data-id="${safeSid}" data-url="${safeUrl}" data-target-group="${safeGid}" style="--fill:0%">
+                                    <div class="plugin-album__soundmgr-item-main">
+                                        <div class="plugin-album__soundmgr-item-name" title="${safeLabel}">${safeLabel}</div>
+                                        <div class="plugin-album__soundmgr-item-duration" data-role="duration">--:--</div>
+                                    </div>
+                                    <div class="plugin-album__soundmgr-item-actions">
+                                        <button type="button" class="plugin-album__soundmgr-iconbtn" data-action="search-play" title="Play">
+                                            <span class="material-symbols-outlined">play_arrow</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+
+                        resultsEl.innerHTML = items;
+                    } catch {
+                        try { cardEl.querySelector('[data-role="preset-search-results"]').innerHTML = ''; } catch { }
+                    }
+                };
+
+                root?.querySelector('[data-action="new-preset"]')?.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    stopPlayback();
+                    try {
+                        const name = getPresetDefaultName(cachedGroups);
+                        await this.api.album.post('/sound_fx/groups', { name });
+                        await loadAll();
+                    } catch (err) {
+                        try { showError?.(`Không thể tạo preset: ${err.message || err}`); } catch { }
+                    }
+                });
 
                 let playState = null; // { row, audio, raf }
 
@@ -295,7 +528,11 @@
                         if (playState?.row) {
                             playState.row.classList.remove('is-playing');
                             playState.row.style.setProperty('--fill', '0%');
-                            const icon = playState.row.querySelector('button[data-action="play"] .material-symbols-outlined');
+                            let icon = null;
+                            try { icon = playState.row.querySelector('button[data-action="play"] .material-symbols-outlined'); } catch { }
+                            if (!icon) {
+                                try { icon = playState.row.querySelector('.material-symbols-outlined'); } catch { }
+                            }
                             if (icon) icon.textContent = 'play_arrow';
                         }
                     } catch { }
@@ -317,98 +554,293 @@
                     playState.raf = requestAnimationFrame(tickFill);
                 };
 
-                listEl?.addEventListener('click', async (e) => {
-                    const btn = e.target?.closest?.('button[data-action]');
-                    if (!btn) return;
-                    e.preventDefault();
-                    e.stopPropagation();
+                const playUrlOnRow = (rowEl, url) => {
+                    const u = String(url || '').trim();
+                    if (!u || !rowEl) return;
+                    const uAuth = withAuthTokenQuery(u);
 
-                    const row = btn.closest('.plugin-album__soundmgr-item');
-                    const presetId = String(row?.dataset?.id || '').trim();
-                    if (!presetId) return;
+                    try {
+                        const sid = normalizeId(rowEl?.dataset?.id);
+                        if (sid) lastActiveSoundId = sid;
+                    } catch { }
 
-                    const action = String(btn.dataset.action || '').trim().toLowerCase();
+                    // toggle
+                    if (playState?.row === rowEl) {
+                        stopPlayback();
+                        return;
+                    }
 
-                    if (action === 'play') {
-                        const u = String(row?.dataset?.url || '').trim();
-                        if (!u) return;
+                    stopPlayback();
 
-                        const uAuth = withAuthTokenQuery(u);
+                    try {
+                        const eng = getEngine();
+                        const audio = eng?.play?.(uAuth);
+                        if (!audio) return;
 
-                        // toggle
-                        if (playState?.row === row) {
+                        playState = { row: rowEl, audio, raf: 0 };
+                        rowEl.classList.add('is-playing');
+
+                        const icon = rowEl.querySelector('.material-symbols-outlined');
+                        if (icon) icon.textContent = 'pause';
+
+                        audio.onended = () => {
                             stopPlayback();
+                        };
+                        audio.onerror = () => {
+                            stopPlayback();
+                        };
+
+                        playState.raf = requestAnimationFrame(tickFill);
+                    } catch (err) {
+                        stopPlayback();
+                        try { showError?.(`Không thể play sound: ${err.message || err}`); } catch { }
+                    }
+                };
+
+                const savePresetNameDebounced = debounce(async (groupId, nextName) => {
+                    const gid = normalizeId(groupId);
+                    const name = String(nextName || '').trim();
+                    if (!gid || gid === VIRTUAL_UPLOADED_ID) return;
+                    if (!name) return;
+                    try {
+                        await this.api.album.put(`/sound_fx/groups/${encodeURIComponent(gid)}`, { name });
+                    } catch (err) {
+                        try { showError?.(`Lỗi đổi tên preset: ${err.message || err}`); } catch { }
+                    }
+                }, 600);
+
+                listEl?.addEventListener('click', async (e) => {
+                    const searchPlayBtn = e.target?.closest?.('button[data-action="search-play"]');
+                    if (searchPlayBtn) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const row = searchPlayBtn.closest('.plugin-album__soundmgr-item--search');
+                        const u = String(row?.dataset?.url || '').trim();
+                        playUrlOnRow(row, u);
+                        return;
+                    }
+
+                    const searchRow = e.target?.closest?.('.plugin-album__soundmgr-item--search');
+                    if (searchRow && String(searchRow.dataset.search || '') === '1') {
+                        // Click search row to add sound to preset (do not reset search)
+                        e.preventDefault();
+                        e.stopPropagation();
+                        stopPlayback();
+                        const soundId = normalizeId(searchRow?.dataset?.id);
+                        const groupId = normalizeId(searchRow?.dataset?.targetGroup);
+                        if (!soundId || !groupId || groupId === VIRTUAL_UPLOADED_ID) return;
+                        try {
+                            await this.api.album.put(`/sound_fx/presets/${encodeURIComponent(soundId)}`, { add_group_id: groupId });
+                            await loadAll();
+                        } catch (err) {
+                            try { showError?.(`Không thể add sound: ${err.message || err}`); } catch { }
+                        }
+                        return;
+                    }
+
+                    const presetName = e.target?.closest?.('[data-role="preset-name"]');
+                    if (presetName) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const card = presetName.closest('.plugin-album__soundmgr-preset');
+                        const gid = normalizeId(card?.dataset?.presetId);
+                        const isUploaded = String(card?.dataset?.uploaded || '') === '1';
+                        if (!card || !gid || isUploaded) return;
+                        const input = card.querySelector('[data-role="preset-name-input"]');
+                        if (!input) return;
+                        try {
+                            presetName.style.display = 'none';
+                            input.style.display = '';
+                            input.focus();
+                            input.select?.();
+                        } catch { }
+                        return;
+                    }
+
+                    const presetDeleteBtn = e.target?.closest?.('button[data-action="delete-preset"]');
+                    if (presetDeleteBtn) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        stopPlayback();
+                        const card = presetDeleteBtn.closest('.plugin-album__soundmgr-preset');
+                        const gid = normalizeId(card?.dataset?.presetId);
+                        const isUploaded = String(card?.dataset?.uploaded || '') === '1';
+                        if (!gid || isUploaded) return;
+                        const ok = (typeof Yuuka?.ui?.confirm === 'function')
+                            ? await Yuuka.ui.confirm('Bạn có chắc muốn xoá preset này?')
+                            : window.confirm('Bạn có chắc muốn xoá preset này?');
+                        if (!ok) return;
+                        try {
+                            await this.api.album.delete(`/sound_fx/groups/${encodeURIComponent(gid)}`);
+                            await loadAll();
+                        } catch (err) {
+                            try { showError?.(`Lỗi xoá preset: ${err.message || err}`); } catch { }
+                        }
+                        return;
+                    }
+
+                    const btn = e.target?.closest?.('button[data-action]');
+                    if (btn) {
+                        // Sound row buttons (play/edit/delete)
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        const row = btn.closest('.plugin-album__soundmgr-item');
+                        const soundId = normalizeId(row?.dataset?.id);
+                        if (!soundId) return;
+
+                        lastActiveSoundId = soundId;
+
+                        const action = String(btn.dataset.action || '').trim().toLowerCase();
+
+                        if (action === 'play') {
+                            const u = String(row?.dataset?.url || '').trim();
+                            if (!u) return;
+                            playUrlOnRow(row, u);
                             return;
                         }
 
-                        stopPlayback();
-
-                        try {
-                            const eng = getEngine();
-                            const audio = eng?.play?.(uAuth);
-                            if (!audio) return;
-
-                            playState = { row, audio, raf: 0 };
-                            row.classList.add('is-playing');
-                            const icon = row.querySelector('button[data-action="play"] .material-symbols-outlined');
-                            if (icon) icon.textContent = 'pause';
-
-                            audio.onended = () => {
-                                stopPlayback();
-                            };
-                            audio.onerror = () => {
-                                stopPlayback();
-                            };
-
-                            // Start fill animation
-                            playState.raf = requestAnimationFrame(tickFill);
-                        } catch (err) {
+                        if (action === 'delete') {
                             stopPlayback();
-                            try { showError?.(`Không thể play sound: ${err.message || err}`); } catch { }
+                            const ok = (typeof Yuuka?.ui?.confirm === 'function')
+                                ? await Yuuka.ui.confirm('Bạn có chắc muốn xoá sound này?')
+                                : window.confirm('Bạn có chắc muốn xoá sound này?');
+                            if (!ok) return;
+
+                            try {
+                                await this.api.album.delete(`/sound_fx/presets/${encodeURIComponent(soundId)}`);
+                                await loadAll();
+                            } catch (err) {
+                                try { showError?.(`Lỗi xoá sound: ${err.message || err}`); } catch { }
+                            }
+                            return;
+                        }
+
+                        if (action === 'edit') {
+                            stopPlayback();
+                            try {
+                                // Open editor for uploaded sound
+                                const found = (cachedSounds || []).find(s => normalizeId(s?.id) === soundId) || null;
+                                if (typeof this._characterOpenSoundEditorPage === 'function') {
+                                    await this._characterOpenSoundEditorPage(found || soundId);
+                                    return;
+                                }
+                                throw new Error('Sound editor module not loaded.');
+                            } catch (err) {
+                                try { showError?.(`Không thể mở editor: ${err.message || err}`); } catch { }
+                            }
                         }
                         return;
                     }
 
-                    if (action === 'delete') {
+                    // Click-to-remove: click a sound row body inside non-Uploaded preset
+                    const row = e.target?.closest?.('.plugin-album__soundmgr-item');
+                    if (row) {
+                        if (String(row.dataset.search || '') === '1') return;
+                        const soundId = normalizeId(row?.dataset?.id);
+                        const groupId = normalizeId(row?.dataset?.group);
+                        if (!soundId) return;
+                        if (!groupId || groupId === VIRTUAL_UPLOADED_ID) return;
+                        // Uploaded preset: do nothing
+                        const card = row.closest('.plugin-album__soundmgr-preset');
+                        const isUploaded = String(card?.dataset?.uploaded || '') === '1';
+                        if (isUploaded) return;
                         stopPlayback();
-                        const ok = (typeof Yuuka?.ui?.confirm === 'function')
-                            ? await Yuuka.ui.confirm('Bạn có chắc muốn xoá sound này?')
-                            : window.confirm('Bạn có chắc muốn xoá sound này?');
-                        if (!ok) return;
-
                         try {
-                            await this.api.album.delete(`/sound_fx/presets/${encodeURIComponent(presetId)}`);
-                            await loadList();
+                            await this.api.album.put(`/sound_fx/presets/${encodeURIComponent(soundId)}`, { remove_group_id: groupId });
+                            await loadAll();
                         } catch (err) {
-                            try { showError?.(`Lỗi xoá sound: ${err.message || err}`); } catch { }
-                        }
-                        return;
-                    }
-
-                    if (action === 'edit') {
-                        stopPlayback();
-                        let next = '';
-                        try {
-                            // Try to read current label text
-                            const currentLabel = String(row?.querySelector('.plugin-album__soundmgr-item-name')?.textContent || '').trim();
-                            next = window.prompt('Đổi tên sound:', currentLabel) || '';
-                        } catch {
-                            next = window.prompt('Đổi tên sound:', '') || '';
-                        }
-                        next = String(next || '').trim();
-                        if (!next) return;
-
-                        // If user typed "name.ext", strip extension for backend's name field.
-                        next = next.replace(/\.(wav|mp3|ogg)$/i, '').trim();
-                        if (!next) return;
-
-                        try {
-                            await this.api.album.put(`/sound_fx/presets/${encodeURIComponent(presetId)}`, { name: next });
-                            await loadList();
-                        } catch (err) {
-                            try { showError?.(`Lỗi đổi tên: ${err.message || err}`); } catch { }
+                            try { showError?.(`Không thể remove sound: ${err.message || err}`); } catch { }
                         }
                     }
+                });
+
+                root?.querySelector('[data-action="open-editor"]')?.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    stopPlayback();
+                    try {
+                        if (typeof this._characterOpenSoundEditorPage === 'function') {
+                            // Open an empty editor. User can drop a file onto the timeline and Save as.
+                            await this._characterOpenSoundEditorPage(null);
+                            return;
+                        }
+                        throw new Error('Sound editor module not loaded.');
+                    } catch (err) {
+                        try { showError?.(`Không thể mở editor: ${err.message || err}`); } catch { }
+                    }
+                });
+
+                // Preset name input handling (autosave)
+                listEl?.addEventListener('input', (e) => {
+                    const input = e.target?.closest?.('[data-role="preset-name-input"]');
+                    if (!input) return;
+                    const card = input.closest('.plugin-album__soundmgr-preset');
+                    const gid = normalizeId(card?.dataset?.presetId);
+                    const isUploaded = String(card?.dataset?.uploaded || '') === '1';
+                    if (!gid || isUploaded) return;
+                    const next = String(input.value || '').trim();
+                    if (!next) return;
+                    savePresetNameDebounced(gid, next);
+                    try {
+                        const label = card.querySelector('[data-role="preset-name"]');
+                        if (label) label.textContent = next;
+                    } catch { }
+                });
+
+                listEl?.addEventListener('keydown', (e) => {
+                    const input = e.target?.closest?.('[data-role="preset-name-input"]');
+                    if (input) {
+                        const card = input.closest('.plugin-album__soundmgr-preset');
+                        const gid = normalizeId(card?.dataset?.presetId);
+                        const isUploaded = String(card?.dataset?.uploaded || '') === '1';
+                        if (!gid || isUploaded) return;
+                        if (e.key === 'Escape') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const label = card.querySelector('[data-role="preset-name"]');
+                            const currentName = String(label?.textContent || '').trim();
+                            input.value = currentName;
+                            input.style.display = 'none';
+                            if (label) label.style.display = '';
+                            return;
+                        }
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            input.blur();
+                            return;
+                        }
+                    }
+                });
+
+                listEl?.addEventListener('blur', (e) => {
+                    const input = e.target?.closest?.('[data-role="preset-name-input"]');
+                    if (!input) return;
+                    const card = input.closest('.plugin-album__soundmgr-preset');
+                    const gid = normalizeId(card?.dataset?.presetId);
+                    const isUploaded = String(card?.dataset?.uploaded || '') === '1';
+                    if (!gid || isUploaded) return;
+                    const label = card.querySelector('[data-role="preset-name"]');
+                    try {
+                        input.style.display = 'none';
+                        if (label) label.style.display = '';
+                    } catch { }
+                    const next = String(input.value || '').trim();
+                    if (!next) return;
+                    savePresetNameDebounced(gid, next);
+                }, true);
+
+                // Search inputs
+                listEl?.addEventListener('input', (e) => {
+                    const input = e.target?.closest?.('[data-role="preset-search"]');
+                    if (!input) return;
+                    const card = input.closest('.plugin-album__soundmgr-preset');
+                    const gid = normalizeId(card?.dataset?.presetId);
+                    if (!gid) return;
+                    const q = String(input.value || '');
+                    searchState.set(gid, q);
+                    renderSearchResultsForCard(card, gid);
                 });
 
                 const uploadFiles = async (files) => {
@@ -430,7 +862,7 @@
                         }
                     }
 
-                    await loadList();
+                    await loadAll();
                 };
 
                 uploadEl?.addEventListener('click', (e) => {
@@ -479,7 +911,7 @@
                     await uploadFiles(files);
                 });
 
-                await loadList();
+                await loadAll();
             } catch (err) {
                 console.warn('[Album] _characterOpenSoundManagerPage error:', err);
             }

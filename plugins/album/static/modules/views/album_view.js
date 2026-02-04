@@ -62,9 +62,39 @@
                 const payload = { ...last_config, ...configOverrides, character: this.state.selectedCharacter.name };
                 this._normalizeGenerationPayload(payload, configOverrides);
 
-                const wantsAlpha = !!(this._shouldUseAlphaGenerationRoute && this._shouldUseAlphaGenerationRoute(payload, configOverrides));
-                const startFn = (wantsAlpha && this.api?.generation?.startAlpha) ? this.api.generation.startAlpha : this.api.generation.start;
-                const response = await startFn(this.state.selectedCharacter.hash, payload);
+                // Album grid view must never request alpha/transparent output.
+                // The backend's /comfyui/info merges the latest image's generationConfig.
+                // If the latest image was generated in Character/VN mode, it may include Alpha=true
+                // and/or workflow identifiers containing "alpha", which would incorrectly route
+                // album generation into the alpha workflow/endpoint.
+                try {
+                    const stripAlphaHints = (obj) => {
+                        if (!obj || typeof obj !== 'object') return;
+                        // Common alpha flags
+                        ['Alpha', 'alpha', 'is_alpha', 'isAlpha', 'use_alpha', 'useAlpha'].forEach((k) => {
+                            try { delete obj[k]; } catch { }
+                        });
+                        // If stale workflow identifiers include "alpha", drop them.
+                        try {
+                            const wt = String(obj.workflow_type || obj._workflow_type || '').trim().toLowerCase();
+                            if (wt && wt.includes('alpha')) {
+                                obj.workflow_type = 'standard';
+                                try { delete obj._workflow_type; } catch { }
+                            }
+                        } catch { }
+                        try {
+                            const wft = String(obj.workflow_template || obj._workflow_template || '').trim().toLowerCase();
+                            if (wft && wft.includes('alpha')) {
+                                try { delete obj.workflow_template; } catch { }
+                                try { delete obj._workflow_template; } catch { }
+                            }
+                        } catch { }
+                    };
+                    stripAlphaHints(payload);
+                } catch { }
+
+                // Album grid view must never use the alpha generation API.
+                const response = await this.api.generation.start(this.state.selectedCharacter.hash, payload);
 
                 const tempPlaceholder = document.getElementById(tempTaskId);
                 if (tempPlaceholder) {

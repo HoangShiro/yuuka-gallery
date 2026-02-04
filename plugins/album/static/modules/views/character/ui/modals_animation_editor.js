@@ -8,6 +8,61 @@
 
     const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
+    // Keep editor-side sampling consistent with the CSS engine's graph types.
+    // This is critical for syncing the anchor overlay with the animated layer.
+    const sanitizeGraphType = (v) => {
+        const s = String(v || '').trim();
+        if (!s) return 'linear';
+        const allowed = new Set([
+            'linear',
+            'ease',
+            'ease-in',
+            'ease-out',
+            'ease-in-out',
+            'step-start',
+            'step-end',
+        ]);
+        return allowed.has(s) ? s : 'linear';
+    };
+
+    const cubicBezierYForX = (x, p1x, p1y, p2x, p2y) => {
+        const cx = clamp(Number(x), 0, 1);
+
+        const sampleX = (t) => {
+            const u = 1 - t;
+            return (3 * u * u * t * p1x) + (3 * u * t * t * p2x) + (t * t * t);
+        };
+
+        const sampleY = (t) => {
+            const u = 1 - t;
+            return (3 * u * u * t * p1y) + (3 * u * t * t * p2y) + (t * t * t);
+        };
+
+        let lo = 0;
+        let hi = 1;
+        let t = cx;
+        for (let i = 0; i < 14; i += 1) {
+            const sx = sampleX(t);
+            if (sx > cx) hi = t;
+            else lo = t;
+            t = (lo + hi) / 2;
+        }
+        return clamp(sampleY(t), 0, 1);
+    };
+
+    const easeRatio = (ratio, graphType) => {
+        const r = clamp(Number(ratio), 0, 1);
+        const g = sanitizeGraphType(graphType);
+        if (g === 'linear') return r;
+        if (g === 'step-start') return (r <= 0 ? 0 : 1);
+        if (g === 'step-end') return (r < 1 ? 0 : 1);
+        if (g === 'ease') return cubicBezierYForX(r, 0.25, 0.1, 0.25, 1.0);
+        if (g === 'ease-in') return cubicBezierYForX(r, 0.42, 0.0, 1.0, 1.0);
+        if (g === 'ease-out') return cubicBezierYForX(r, 0.0, 0.0, 0.58, 1.0);
+        if (g === 'ease-in-out') return cubicBezierYForX(r, 0.42, 0.0, 0.58, 1.0);
+        return r;
+    };
+
     const escapeText = (value) => {
         if (value === null || value === undefined) return '';
         return String(value).replace(/[&<>"']/g, (ch) => {
@@ -93,6 +148,9 @@
 
                             <div class="plugin-album__anim-editor-main" aria-label="Animation editor main">
                                 <div class="plugin-album__anim-editor-anchor" data-role="anchor" aria-label="Layer anchor">
+                                    <button type="button" class="plugin-album__anim-editor-anchor-rotate" data-role="anchor-rotate" title="Rotate (drag up/down, double click to reset)">
+                                        <span class="material-symbols-outlined" aria-hidden="true">rotate_right</span>
+                                    </button>
                                     <div class="plugin-album__anim-editor-anchor-dot" aria-hidden="true"></div>
 
                                     <div class="plugin-album__anim-editor-anchor-opacity" data-role="anchor-opacity" aria-label="Opacity slider">
@@ -112,7 +170,9 @@
                                         </div>
                                         <div class="plugin-album__anim-editor-track-title" data-track="position">Position</div>
                                         <div class="plugin-album__anim-editor-track-title" data-track="scale">Scale</div>
+                                        <div class="plugin-album__anim-editor-track-title" data-track="rotation">Rotation</div>
                                         <div class="plugin-album__anim-editor-track-title" data-track="opacity">Opacity</div>
+                                        <div class="plugin-album__anim-editor-track-title" data-track="sound"><button type="button" class="plugin-album__anim-editor-track-titlebtn" data-action="sound">Sound</button></div>
                                     </div>
 
                                     <div class="plugin-album__anim-editor-timeline-col plugin-album__anim-editor-timeline-col--timeline" aria-label="Timeline">
@@ -149,7 +209,9 @@
 
                                                 <div class="plugin-album__anim-editor-track" data-role="track" data-track="position" title="Position keys"></div>
                                                 <div class="plugin-album__anim-editor-track" data-role="track" data-track="scale" title="Scale keys"></div>
+                                                <div class="plugin-album__anim-editor-track" data-role="track" data-track="rotation" title="Rotation keys"></div>
                                                 <div class="plugin-album__anim-editor-track" data-role="track" data-track="opacity" title="Opacity keys"></div>
+                                                <div class="plugin-album__anim-editor-track" data-role="track" data-track="sound" title="Sound preview"></div>
                                             </div>
                                         </div>
                                     </div>
@@ -197,6 +259,10 @@
                             }
                         } catch { }
 
+                        // Stop preview sound (editor only)
+                        try { stopSoundPreview({ resetTime: true }); } catch { }
+                        try { state._soundAudio = null; } catch { }
+
                         // Cleanup key handler + navibar hooks
                         try {
                             if (state?._keyHandler) document.removeEventListener('keydown', state._keyHandler, true);
@@ -231,8 +297,21 @@
                     tracks: {
                         position: [], // { t, x, y }
                         scale: [], // { t, s }
+                        rotation: [], // { t, r }
                         opacity: [], // { t, o }
                     },
+
+                    // Sound track (preview only; persisted only in auto-save preset)
+                    sound: {
+                        presetId: '',
+                        url: '',
+                        durationMs: 0,
+                    },
+                    _soundAudio: null,
+                    _soundPendingSeekMs: null,
+                    _soundShouldPlay: false,
+                    _soundWasPlaying: false,
+                    _soundLastT: 0,
                     selected: null, // { track, i }
                     // cache of presets for load/clone
                     presets: [],
@@ -357,7 +436,20 @@
                         state.durationMs = parsed.durationMs;
                         // Loop is always enabled (UI removed).
                         state.loop = true;
-                        state.tracks = parsed.tracks || { position: [], scale: [], opacity: [] };
+                        state.tracks = parsed.tracks || { position: [], scale: [], rotation: [], opacity: [] };
+                        try {
+                            const snd = parsed.sound || {};
+                            state.sound = {
+                                presetId: String(snd.presetId || '').trim(),
+                                url: '',
+                                durationMs: Math.max(0, Math.round(Number(snd.durationMs || 0))),
+                            };
+                            // Best-effort: resolve URL + duration in the background
+                            Promise.resolve().then(() => {
+                                try { return loadSoundByPresetId(state.sound?.presetId); } catch { }
+                                return null;
+                            });
+                        } catch { }
                         state.selected = null;
                         state.playheadMs = clampMs(state.playheadMs);
                         try { pushHistory(); } catch { }
@@ -380,7 +472,7 @@
                         if (!key) return;
                         const payload = {
                             key,
-                            timeline: buildTimelinePayload(),
+                            timeline: buildTimelinePayload({ includeSound: true }),
                             graph_type: String(state.graphType || 'linear').trim() || 'linear',
                         };
 
@@ -525,6 +617,7 @@
                 const snapshotEditorState = () => {
                     const pos = Array.isArray(state.tracks?.position) ? state.tracks.position : [];
                     const sc = Array.isArray(state.tracks?.scale) ? state.tracks.scale : [];
+                    const rot = Array.isArray(state.tracks?.rotation) ? state.tracks.rotation : [];
                     const op = Array.isArray(state.tracks?.opacity) ? state.tracks.opacity : [];
                     return {
                         durationMs: Math.max(1, Math.round(Number(state.durationMs || 1))),
@@ -533,6 +626,7 @@
                         tracks: {
                             position: cloneTrack(pos),
                             scale: cloneTrack(sc),
+                            rotation: cloneTrack(rot),
                             opacity: cloneTrack(op),
                         },
                     };
@@ -560,6 +654,7 @@
                                     const t = Math.round(Number(k?.t) || 0);
                                     if (tr === 'position') return `${t}:${Number(k?.x ?? 0)}:${Number(k?.y ?? 0)}`;
                                     if (tr === 'scale') return `${t}:${Number(k?.s ?? 1)}`;
+                                    if (tr === 'rotation') return `${t}:${Number(k?.r ?? 0)}`;
                                     if (tr === 'opacity') return `${t}:${Number(k?.o ?? 1)}`;
                                     return `${t}`;
                                 };
@@ -574,6 +669,7 @@
                                 };
                                 if (!listEq('position')) return false;
                                 if (!listEq('scale')) return false;
+                                if (!listEq('rotation')) return false;
                                 if (!listEq('opacity')) return false;
                                 return true;
                             } catch {
@@ -611,6 +707,7 @@
                         state.tracks = {
                             position: sortUniqByT(cloneTrack(snap.tracks?.position || [])),
                             scale: sortUniqByT(cloneTrack(snap.tracks?.scale || [])),
+                            rotation: sortUniqByT(cloneTrack(snap.tracks?.rotation || [])),
                             opacity: sortUniqByT(cloneTrack(snap.tracks?.opacity || [])),
                         };
                         state.selected = null;
@@ -700,6 +797,7 @@
                     const defaults = (() => {
                         if (tr === 'position') return { x: 0, y: 0 };
                         if (tr === 'scale') return { s: 1 };
+                        if (tr === 'rotation') return { r: 0 };
                         if (tr === 'opacity') return { o: 1 };
                         return {};
                     })();
@@ -713,7 +811,8 @@
                     const a = keys[i];
                     const b = keys[i + 1];
                     const span = Math.max(1, (Number(b.t) || 0) - (Number(a.t) || 0));
-                    const ratio = clamp((time - a.t) / span, 0, 1);
+                    const raw = clamp((time - a.t) / span, 0, 1);
+                    const ratio = easeRatio(raw, state.graphType);
 
                     if (tr === 'position') {
                         const ax = Number(a.x ?? 0);
@@ -738,6 +837,12 @@
                         const o = (Number.isFinite(ao) ? ao : 1) + ((Number.isFinite(bo) ? bo : 1) - (Number.isFinite(ao) ? ao : 1)) * ratio;
                         return { t: time, o: clamp(Number.isFinite(o) ? o : 1, 0, 1) };
                     }
+                    if (tr === 'rotation') {
+                        const ar = Number(a.r ?? 0);
+                        const br = Number(b.r ?? 0);
+                        const r = (Number.isFinite(ar) ? ar : 0) + ((Number.isFinite(br) ? br : 0) - (Number.isFinite(ar) ? ar : 0)) * ratio;
+                        return { t: time, r: Number.isFinite(r) ? r : 0 };
+                    }
                     return { t: time, ...defaults };
                 };
 
@@ -752,6 +857,192 @@
                             if (preview) applyPreview();
                         } catch { }
                     });
+                };
+
+                // --- Sound preview (editor-only) ---
+                const withAuthTokenQuery = (url) => {
+                    try {
+                        const u0 = String(url || '').trim();
+                        if (!u0) return '';
+                        const token = String(localStorage.getItem('yuuka-auth-token') || '').trim();
+                        if (!token) return u0;
+                        const u = new URL(u0, window.location.origin);
+                        if (!u.searchParams.get('token')) u.searchParams.set('token', token);
+                        return u.toString();
+                    } catch {
+                        return String(url || '').trim();
+                    }
+                };
+
+                const stopSoundPreview = ({ resetTime = false } = {}) => {
+                    try {
+                        const a = state._soundAudio;
+                        if (!a) return;
+                        try { a.pause(); } catch { }
+                        if (resetTime) {
+                            try { a.currentTime = 0; } catch { }
+                        }
+                    } catch { }
+                };
+
+                const ensureSoundAudio = () => {
+                    try {
+                        if (state._soundAudio && typeof state._soundAudio.play === 'function') return state._soundAudio;
+                        const a = new Audio();
+                        a.preload = 'auto';
+
+                        const applyPendingSeek = () => {
+                            try {
+                                if (state._soundPendingSeekMs === null || state._soundPendingSeekMs === undefined) return;
+                                const t = Math.max(0, Number(state._soundPendingSeekMs) || 0);
+                                const targetS = t / 1000;
+                                try { a.currentTime = targetS; } catch { return; }
+
+                                // Clear pending only when it looks applied.
+                                try {
+                                    const cur = Number(a.currentTime || 0);
+                                    if (Number.isFinite(cur) && Math.abs(cur - targetS) <= 0.2) {
+                                        state._soundPendingSeekMs = null;
+                                    }
+                                } catch { }
+                            } catch { }
+                        };
+
+                        a.addEventListener('loadedmetadata', () => {
+                            try {
+                                applyPendingSeek();
+                                if (state._soundShouldPlay) {
+                                    try {
+                                        const p = a.play();
+                                        if (p && typeof p.catch === 'function') p.catch(() => { });
+                                    } catch { }
+                                }
+                            } catch { }
+                        });
+                        a.addEventListener('canplay', () => {
+                            try {
+                                applyPendingSeek();
+                                if (state._soundShouldPlay) {
+                                    try {
+                                        const p = a.play();
+                                        if (p && typeof p.catch === 'function') p.catch(() => { });
+                                    } catch { }
+                                }
+                            } catch { }
+                        });
+
+                        // Critical: some browsers reset currentTime to 0 right when play() starts.
+                        // Re-apply the target seek on play/playing/seeked.
+                        ['play', 'playing', 'seeked'].forEach((evt) => {
+                            a.addEventListener(evt, () => {
+                                try { applyPendingSeek(); } catch { }
+                            });
+                        });
+
+                        state._soundAudio = a;
+                        return a;
+                    } catch {
+                        state._soundAudio = null;
+                        return null;
+                    }
+                };
+
+                const loadSoundByPresetId = async (presetId) => {
+                    const pid = String(presetId || '').trim();
+                    if (!pid) {
+                        state.sound = { presetId: '', url: '', durationMs: 0 };
+                        state._soundPendingSeekMs = null;
+                        state._soundShouldPlay = false;
+                        stopSoundPreview({ resetTime: true });
+                        try { queueAutoSave(); } catch { }
+                        scheduleUiUpdate({ preview: false, timeline: true });
+                        return;
+                    }
+
+                    try {
+                        const all = await this.api.album.get('/sound_fx/presets');
+                        const arr = Array.isArray(all) ? all : [];
+                        const found = arr.find(p => String(p?.id || '').trim() === pid) || null;
+                        const urlRaw = String(found?.url || '').trim();
+                        const url = urlRaw ? withAuthTokenQuery(urlRaw) : '';
+
+                        state.sound = {
+                            presetId: pid,
+                            url,
+                            durationMs: Math.max(0, Math.round(Number(state.sound?.durationMs || 0))),
+                        };
+
+                        const a = ensureSoundAudio();
+                        if (a && url) {
+                            a.src = url;
+                            try { a.load(); } catch { }
+                            // Ensure that next playback starts from current playhead.
+                            try { state._soundPendingSeekMs = clampMs(state.playheadMs); } catch { }
+                            a.onloadedmetadata = () => {
+                                try {
+                                    const durS = Number(a.duration || 0);
+                                    const durMs = (Number.isFinite(durS) && durS > 0) ? Math.round(durS * 1000) : 0;
+                                    state.sound.durationMs = durMs;
+                                    try { queueAutoSave(); } catch { }
+                                    try { updateTrackTitles(); } catch { }
+                                    scheduleUiUpdate({ preview: false, timeline: true });
+                                } catch { }
+                            };
+                        } else {
+                            // Stale preset id: don't hit /sound_fx/file/<id>, just stop preview.
+                            try { state._soundPendingSeekMs = null; } catch { }
+                            try { state._soundShouldPlay = false; } catch { }
+                            try { stopSoundPreview({ resetTime: true }); } catch { }
+                            try { scheduleUiUpdate({ preview: false, timeline: true }); } catch { }
+                        }
+
+                        try { queueAutoSave(); } catch { }
+                        scheduleUiUpdate({ preview: false, timeline: true });
+                    } catch {
+                        // Best-effort: still set id and fallback url
+                        const url = withAuthTokenQuery(`/api/plugin/album/sound_fx/file/${encodeURIComponent(pid)}`);
+                        state.sound = { presetId: pid, url, durationMs: 0 };
+                        const a = ensureSoundAudio();
+                        if (a) {
+                            a.src = url;
+                            try { a.load(); } catch { }
+                        }
+                        try { queueAutoSave(); } catch { }
+                        scheduleUiUpdate({ preview: false, timeline: true });
+                    }
+                };
+
+                const seekSoundToMs = (ms, { play = false } = {}) => {
+                    try {
+                        const a = state._soundAudio;
+                        const pid = String(state.sound?.presetId || '').trim();
+                        if (!a || !pid) return;
+                        const t = Math.max(0, Number(ms) || 0);
+                        const sndDur = Math.max(0, Math.round(Number(state.sound?.durationMs || 0)));
+                        const clamped = sndDur > 0 ? clamp(t, 0, sndDur) : t;
+                        const targetS = clamped / 1000;
+                        state._soundShouldPlay = !!play;
+
+                        // Always remember the desired seek; events will enforce it if the browser resets to 0.
+                        state._soundPendingSeekMs = clamped;
+                        try {
+                            const cur = Number(a.currentTime || 0);
+                            // Avoid micro-seeks; only jump when scrubbed or drift is large.
+                            if (!Number.isFinite(cur) || Math.abs(cur - targetS) > 0.12) {
+                                a.currentTime = targetS;
+                            }
+                        } catch { }
+
+                        if (play) {
+                            try {
+                                const p = a.play();
+                                // Ignore autoplay errors.
+                                if (p && typeof p.catch === 'function') p.catch(() => { });
+                            } catch { }
+                        } else {
+                            try { a.pause(); } catch { }
+                        }
+                    } catch { }
                 };
 
                 const seekPreviewToMs = (ms) => {
@@ -781,8 +1072,12 @@
                         state.isPlaying = false;
                         try { cancelAnimationFrame(state._playRaf); } catch { }
                         state._playRaf = 0;
+                        try { stopSoundPreview(); } catch { }
                     }
                     if (seek) seekPreviewToMs(state.playheadMs);
+                    if (seek) {
+                        try { seekSoundToMs(state.playheadMs, { play: false }); } catch { }
+                    }
                     try { updateTrackTitles(); } catch { }
                     try {
                         const el = dialog.querySelector('[data-role="current-time"]');
@@ -794,6 +1089,7 @@
                     try {
                         const pos = evalAt('position', state.playheadMs);
                         const sc = evalAt('scale', state.playheadMs);
+                        const rot = evalAt('rotation', state.playheadMs);
                         const op = evalAt('opacity', state.playheadMs);
 
                         // Keep anchor stuck to the same animated transform as the character layer.
@@ -802,17 +1098,29 @@
                                 const x = Number(pos.x || 0);
                                 const y = Number(pos.y || 0);
                                 const s = Math.max(0.01, Number(sc.s ?? 1));
-                                anchorEl.style.transform = `translate(-50%, -50%) translate(${x.toFixed(3)}px, ${y.toFixed(3)}px) scale(${s.toFixed(4)})`;
+                                const r = Number(rot.r ?? 0);
+                                anchorEl.style.transform = `translate(-50%, -50%) translate(${x.toFixed(3)}px, ${y.toFixed(3)}px) rotate(${r.toFixed(3)}deg) scale(${s.toFixed(4)})`;
                             }
                         } catch { }
 
                         const posTitle = dialog.querySelector('.plugin-album__anim-editor-track-title[data-track="position"]');
                         const scTitle = dialog.querySelector('.plugin-album__anim-editor-track-title[data-track="scale"]');
+                        const rotTitle = dialog.querySelector('.plugin-album__anim-editor-track-title[data-track="rotation"]');
                         const opTitle = dialog.querySelector('.plugin-album__anim-editor-track-title[data-track="opacity"]');
+                        const sndTitleBtn = dialog.querySelector('.plugin-album__anim-editor-track-title[data-track="sound"] [data-action="sound"]');
 
                         if (posTitle) posTitle.textContent = `Position X${Math.round(Number(pos.x || 0))} Y${Math.round(Number(pos.y || 0))}`;
                         if (scTitle) scTitle.textContent = `Scale ${Number(sc.s ?? 1).toFixed(2)}`;
+                        if (rotTitle) rotTitle.textContent = `Rotation ${Number(rot.r ?? 0).toFixed(1)}°`;
                         if (opTitle) opTitle.textContent = `Opacity ${Number(op.o ?? 1).toFixed(2)}`;
+
+                        try {
+                            if (sndTitleBtn) {
+                                const pid = String(state.sound?.presetId || '').trim();
+                                const dur = Math.max(0, Math.round(Number(state.sound?.durationMs || 0)));
+                                sndTitleBtn.textContent = pid ? `Sound ${dur ? `${dur}ms` : ''}`.trim() : 'Sound';
+                            }
+                        } catch { }
 
                         // Sync opacity slider with evaluated value (avoid fighting while dragging).
                         try {
@@ -846,6 +1154,11 @@
                             layerChar.style.animationPlayState = 'running';
                         } catch { }
 
+                        try {
+                            state._soundLastT = clampMs(state._playStartMs);
+                            seekSoundToMs(state._soundLastT, { play: true });
+                        } catch { }
+
                         const tick = () => {
                             if (!state.isPlaying) return;
                             const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -862,8 +1175,19 @@
                             }
                             setPlayheadMs(t, { seek: false });
                             seekPreviewToMs(t);
+                            try {
+                                // If looping and wrapped around, restart sound at 0.
+                                const prev = Math.max(0, Number(state._soundLastT) || 0);
+                                if (state.loop && Number(t) < prev) {
+                                    seekSoundToMs(0, { play: true });
+                                }
+                                state._soundLastT = Number(t) || 0;
+                            } catch { }
                             if (state.isPlaying) state._playRaf = requestAnimationFrame(tick);
                             setPlayingUi();
+                            if (!state.isPlaying) {
+                                try { stopSoundPreview(); } catch { }
+                            }
                         };
                         state._playRaf = requestAnimationFrame(tick);
                     } catch { }
@@ -976,11 +1300,12 @@
                 const parseTimeline = (timelineRaw) => {
                     // Accept:
                     // - legacy list: [t1, t2, ...]
-                    // - dict: { duration_ms, loop, tracks: { position/scale/opacity } }
+                    // - dict: { duration_ms, loop, tracks: { position/scale/rotation/opacity }, sound? }
                     const out = {
                         durationMs: 500,
                         loop: true,
-                        tracks: { position: [], scale: [], opacity: [] },
+                        tracks: { position: [], scale: [], rotation: [], opacity: [] },
+                        sound: { presetId: '', durationMs: 0 },
                     };
 
                     const toMs = (v) => {
@@ -1001,6 +1326,7 @@
                         const uniq = Array.from(new Set(times)).sort((a, b) => a - b);
                         out.tracks.position = uniq.map(t => ({ t, x: 0, y: 0 }));
                         out.tracks.scale = uniq.map(t => ({ t, s: 1 }));
+                        out.tracks.rotation = uniq.map(t => ({ t, r: 0 }));
                         out.tracks.opacity = uniq.map(t => ({ t, o: 1 }));
                         return out;
                     }
@@ -1038,6 +1364,18 @@
                         return { t, s: Number.isFinite(s) ? s : 1 };
                     }).filter(Boolean);
 
+                    const rotationKeys = readTrackKeys('rotation').map(it => {
+                        const t = readT(it);
+                        if (!Number.isFinite(t)) return null;
+                        const obj = (it && typeof it === 'object') ? it : {};
+                        const r = Number(
+                            obj.r_deg ?? obj.rDeg ?? obj.r ??
+                            obj.rotation_deg ?? obj.rotationDeg ?? obj.rotation ??
+                            obj.deg ?? obj.value ?? 0
+                        );
+                        return { t, r: Number.isFinite(r) ? r : 0 };
+                    }).filter(Boolean);
+
                     const opacityKeys = readTrackKeys('opacity').map(it => {
                         const t = readT(it);
                         if (!Number.isFinite(t)) return null;
@@ -1058,24 +1396,42 @@
 
                     out.tracks.position = sortUniqByT(posKeys);
                     out.tracks.scale = sortUniqByT(scaleKeys);
+                    out.tracks.rotation = sortUniqByT(rotationKeys);
                     out.tracks.opacity = sortUniqByT(opacityKeys);
 
                     // Backward compat: if only generic keys exist, hydrate them into all tracks.
                     const legacyKeys = timelineRaw.keys ?? timelineRaw.keys_ms ?? timelineRaw.keysMs;
-                    if ((!out.tracks.position.length && !out.tracks.scale.length && !out.tracks.opacity.length) && Array.isArray(legacyKeys)) {
+                    if ((!out.tracks.position.length && !out.tracks.scale.length && !out.tracks.rotation.length && !out.tracks.opacity.length) && Array.isArray(legacyKeys)) {
                         const uniq = Array.from(new Set(legacyKeys.map(readT).filter(n => Number.isFinite(n)))).sort((a, b) => a - b);
                         out.tracks.position = uniq.map(t => ({ t, x: 0, y: 0 }));
                         out.tracks.scale = uniq.map(t => ({ t, s: 1 }));
+                        out.tracks.rotation = uniq.map(t => ({ t, r: 0 }));
                         out.tracks.opacity = uniq.map(t => ({ t, o: 1 }));
                     }
+
+                    // Optional sound metadata (editor preview only)
+                    try {
+                        const s0 = timelineRaw.sound ?? timelineRaw.sound_fx ?? timelineRaw.soundFx ?? root?.sound;
+                        const s1 = root?.sound ?? root?.sound_fx ?? root?.soundFx;
+                        const s = (s0 && typeof s0 === 'object') ? s0 : ((s1 && typeof s1 === 'object') ? s1 : null);
+                        if (s) {
+                            const pid = String(s.preset_id ?? s.presetId ?? s.id ?? s.preset ?? s.key ?? '').trim();
+                            const dur = Number(s.duration_ms ?? s.durationMs ?? s.duration ?? 0);
+                            out.sound = {
+                                presetId: pid,
+                                durationMs: (Number.isFinite(dur) && dur > 0) ? Math.round(dur) : 0,
+                            };
+                        }
+                    } catch { }
 
                     return out;
                 };
 
-                const buildTimelinePayload = () => {
+                const buildTimelinePayload = ({ includeSound = false } = {}) => {
                     const durationMs = Math.max(1, Math.round(state.durationMs || 1000));
                     const pos = Array.isArray(state.tracks?.position) ? state.tracks.position : [];
                     const sc = Array.isArray(state.tracks?.scale) ? state.tracks.scale : [];
+                    const rot = Array.isArray(state.tracks?.rotation) ? state.tracks.rotation : [];
                     const op = Array.isArray(state.tracks?.opacity) ? state.tracks.opacity : [];
 
                     const cleanT = (t) => Math.max(0, Math.round(Number(t) || 0));
@@ -1084,7 +1440,7 @@
                         return Number.isFinite(n) ? n : fallback;
                     };
 
-                    return {
+                    const out = {
                         duration_ms: durationMs,
                         loop: true,
                         tracks: {
@@ -1101,6 +1457,12 @@
                                     s: Math.max(0, cleanN(k?.s, 1)),
                                 })),
                             },
+                            rotation: {
+                                keys: rot.map(k => ({
+                                    t_ms: cleanT(k?.t),
+                                    r_deg: cleanN(k?.r, 0),
+                                })),
+                            },
                             opacity: {
                                 keys: op.map(k => ({
                                     t_ms: cleanT(k?.t),
@@ -1109,6 +1471,21 @@
                             },
                         },
                     };
+
+                    if (includeSound) {
+                        try {
+                            const pid = String(state.sound?.presetId || '').trim();
+                            const dur = Math.max(0, Math.round(Number(state.sound?.durationMs || 0)));
+                            if (pid) {
+                                out.sound = { preset_id: pid, duration_ms: dur };
+                            } else {
+                                // Explicitly clear sound data if present (avoid stale auto-save)
+                                out.sound = { preset_id: '', duration_ms: 0 };
+                            }
+                        } catch { }
+                    }
+
+                    return out;
                 };
 
                 const applyPreview = () => {
@@ -1118,7 +1495,7 @@
                         if (!engine || typeof engine.applyPresetOnElement !== 'function') return;
                         engine.applyPresetOnElement(layerChar, {
                             timeline: buildTimelinePayload(),
-                            graphType: String(state.graphType || 'linear').trim() || 'linear',
+                            graphType: String(state.graphType || 'ease-in-out').trim() || 'ease-in-out',
                         }, {
                             loop: !!state.loop,
                             seamless: false,
@@ -1153,6 +1530,15 @@
 
                     const renderTrack = (trackEl, trackName) => {
                         if (!trackEl) return;
+                        if (trackName === 'sound') {
+                            const dur = getDurationMs();
+                            const sndDur = Math.max(0, Math.round(Number(state.sound?.durationMs || 0)));
+                            const pct = (dur > 0 && sndDur > 0) ? (clamp(Math.min(sndDur, dur), 0, dur) / dur) * 100 : 0;
+                            trackEl.innerHTML = `
+                                <div class="plugin-album__anim-editor-soundbar" style="width:${pct}%" title="${sndDur ? `${sndDur}ms` : 'No sound'}"></div>
+                            `;
+                            return;
+                        }
                         const keys = Array.isArray(state.tracks?.[trackName]) ? state.tracks[trackName] : [];
                         trackEl.innerHTML = keys.map((k, i) => {
                             const t = Number(k?.t);
@@ -1163,6 +1549,7 @@
                                 const tt = `${Math.max(0, Math.round(Number.isFinite(t) ? t : 0))}ms`;
                                 if (trackName === 'position') return `${tt} (x=${Number(k?.x ?? 0)}, y=${Number(k?.y ?? 0)})`;
                                 if (trackName === 'scale') return `${tt} (s=${Number(k?.s ?? 1)})`;
+                                if (trackName === 'rotation') return `${tt} (r=${Number(k?.r ?? 0)}deg)`;
                                 if (trackName === 'opacity') return `${tt} (o=${Number(k?.o ?? 1)})`;
                                 return tt;
                             })();
@@ -1342,6 +1729,7 @@
                                     const t2 = clampMs(needle + offset);
                                     if (it.tr === 'position') upsertKey('position', { t: t2, x: Number(it.data.x ?? 0), y: Number(it.data.y ?? 0) });
                                     if (it.tr === 'scale') upsertKey('scale', { t: t2, s: Math.max(0, Number(it.data.s ?? 1)) });
+                                    if (it.tr === 'rotation') upsertKey('rotation', { t: t2, r: Number(it.data.r ?? 0) });
                                     if (it.tr === 'opacity') upsertKey('opacity', { t: t2, o: clamp(Number(it.data.o ?? 1), 0, 1) });
                                     newSel.add(keyId(it.tr, t2));
                                 });
@@ -1645,6 +2033,7 @@
                             try { cancelAnimationFrame(state._playRaf); } catch { }
                             state._playRaf = 0;
                             try { if (layerChar) layerChar.style.animationPlayState = 'paused'; } catch { }
+                            try { stopSoundPreview(); } catch { }
                             setPlayingUi();
                             return;
                         }
@@ -1658,6 +2047,150 @@
                         } catch { }
                         playFromPlayhead();
                     } catch { }
+                });
+
+                dialog.querySelector('[data-action="sound"]')?.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    try {
+                        // Stop playback while choosing.
+                        try {
+                            if (state.isPlaying) {
+                                state.isPlaying = false;
+                                try { cancelAnimationFrame(state._playRaf); } catch { }
+                                state._playRaf = 0;
+                                try { if (layerChar) layerChar.style.animationPlayState = 'paused'; } catch { }
+                                try { stopSoundPreview(); } catch { }
+                                try { setPlayingUi(); } catch { }
+                            }
+                        } catch { }
+
+                        const openSoundPicker = async () => {
+                            const modal = document.createElement('div');
+                            modal.className = 'modal-backdrop plugin-album__character-modal plugin-album__character-soundfx-picker-modal';
+                            const previewEngine = (() => {
+                                try {
+                                    if (window.Yuuka?.AlbumSoundEngine) return new window.Yuuka.AlbumSoundEngine({ api: this.api?.album });
+                                } catch { }
+                                return null;
+                            })();
+
+                            const closeModal = () => {
+                                try { previewEngine?.stop?.(); } catch { }
+                                try { modal.remove(); } catch { }
+                            };
+                            modal.addEventListener('click', (ev) => { if (ev.target === modal) closeModal(); });
+                            document.body.appendChild(modal);
+
+                            const dialog2 = document.createElement('div');
+                            dialog2.className = 'modal-dialog';
+                            modal.appendChild(dialog2);
+
+                            dialog2.innerHTML = `
+                                <h3>Sound FX</h3>
+                                <div class="plugin-album__character-hint" style="margin-bottom: 10px; color: var(--color-secondary-text);">
+                                    Chọn 1 sound để preview theo timeline (chỉ lưu vào auto-save).
+                                </div>
+                                <div class="plugin-album__character-submenu-list" data-role="soundfx-list"></div>
+                                <div class="modal-actions">
+                                    <button type="button" id="btn-clear" title="Clear"><span class="material-symbols-outlined">block</span></button>
+                                    <div style="flex-grow:1"></div>
+                                    <button type="button" id="btn-close" title="Close"><span class="material-symbols-outlined">close</span></button>
+                                </div>
+                            `;
+
+                            dialog2.querySelector('#btn-close')?.addEventListener('click', closeModal);
+                            dialog2.querySelector('#btn-clear')?.addEventListener('click', async (ev) => {
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                await loadSoundByPresetId('');
+                                closeModal();
+                            });
+
+                            const listEl = dialog2.querySelector('[data-role="soundfx-list"]');
+
+                            const refreshList = async () => {
+                                const all = await this.api.album.get('/sound_fx/presets');
+                                const arr = (Array.isArray(all) ? all : [])
+                                    .filter(p => p && typeof p === 'object')
+                                    .map(p => ({
+                                        id: String(p?.id || '').trim(),
+                                        name: String(p?.name || '').trim(),
+                                        ext: String(p?.ext || '').trim().toLowerCase(),
+                                    }))
+                                    .filter(p => p.id && p.name);
+
+                                if (!listEl) return;
+                                listEl.innerHTML = '';
+
+                                const currentId = String(state.sound?.presetId || '').trim();
+
+                                arr
+                                    .slice()
+                                    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+                                    .forEach((p) => {
+                                        const label = p.ext ? `${p.name}.${p.ext}` : p.name;
+
+                                        const row = document.createElement('div');
+                                        row.className = 'plugin-album__character-submenu-row';
+                                        row.dataset.id = p.id;
+
+                                        const nameSpan = document.createElement('div');
+                                        nameSpan.className = 'plugin-album__character-submenu-name';
+                                        nameSpan.textContent = label;
+                                        nameSpan.title = label;
+
+                                        const actions = document.createElement('div');
+                                        actions.className = 'plugin-album__anim-preset-actions';
+
+                                        const btnPlay = document.createElement('button');
+                                        btnPlay.type = 'button';
+                                        btnPlay.className = 'plugin-album__character-submenu-iconbtn';
+                                        btnPlay.title = 'Play preview';
+                                        btnPlay.dataset.action = 'play';
+                                        btnPlay.innerHTML = `<span class="material-symbols-outlined">play_arrow</span>`;
+
+                                        if (currentId && currentId === p.id) {
+                                            try { row.classList.add('is-selected'); } catch { }
+                                        }
+
+                                        actions.appendChild(btnPlay);
+                                        row.appendChild(nameSpan);
+                                        row.appendChild(actions);
+                                        listEl.appendChild(row);
+                                    });
+                            };
+
+                            listEl?.addEventListener('click', async (ev) => {
+                                const row = ev.target?.closest?.('.plugin-album__character-submenu-row');
+                                const id = String(row?.dataset?.id || '').trim();
+                                if (!id) return;
+
+                                const btn = ev.target?.closest?.('button[data-action]');
+                                const action = String(btn?.dataset?.action || '').trim();
+
+                                // Play button: preview only (no selection)
+                                if (action === 'play') {
+                                    ev.preventDefault();
+                                    ev.stopPropagation();
+                                    try { await previewEngine?.playPreset?.(id); } catch { }
+                                    return;
+                                }
+
+                                // Click row: select
+                                ev.preventDefault();
+                                ev.stopPropagation();
+                                await loadSoundByPresetId(id);
+                                closeModal();
+                            });
+
+                            await refreshList();
+                        };
+
+                        await openSoundPicker();
+                    } catch (err) {
+                        try { showError?.(`Không thể chọn sound: ${err.message || err}`); } catch { }
+                    }
                 });
 
                 const nameInput = dialog.querySelector('[data-role="name"]');
@@ -1707,7 +2240,9 @@
                     state.graphType = 'ease-in-out';
                     state.loop = true;
                     state.playheadMs = 0;
-                    state.tracks = { position: [], scale: [], opacity: [] };
+                    state.tracks = { position: [], scale: [], rotation: [], opacity: [] };
+                    state.sound = { presetId: '', url: '', durationMs: 0 };
+                    try { stopSoundPreview({ resetTime: true }); } catch { }
                     state.selected = null;
                     rerenderTimeline();
                     applyPreview();
@@ -1821,7 +2356,7 @@
                             const tpl = presetTemplate || {
                                 key: k,
                                 graph_type: 'linear',
-                                timeline: { duration_ms: 500, loop: true, tracks: { position: { keys: [] }, scale: { keys: [] }, opacity: { keys: [] } } },
+                                timeline: { duration_ms: 500, loop: true, tracks: { position: { keys: [] }, scale: { keys: [] }, rotation: { keys: [] }, opacity: { keys: [] } } },
                             };
                             await this.api.album.post('/animation/presets', {
                                 key: k,
@@ -2187,11 +2722,110 @@
                     if (anchor.__albumAnchorBound) return;
                     anchor.__albumAnchorBound = true;
 
+                    // Rotation icon (left side)
+                    (() => {
+                        const rotBtn = dialog.querySelector('[data-role="anchor-rotate"]');
+                        if (!rotBtn) return;
+                        if (rotBtn.__albumRotateBound) return;
+                        rotBtn.__albumRotateBound = true;
+
+                        let rdrag = null; // { startY, baseR, pointerId }
+                        let lastTap = { t: 0, x: 0, y: 0 };
+
+                        const stopPlayback = () => {
+                            try {
+                                if (!state.isPlaying) return;
+                                state.isPlaying = false;
+                                try { cancelAnimationFrame(state._playRaf); } catch { }
+                                state._playRaf = 0;
+                                try { if (layerChar) layerChar.style.animationPlayState = 'paused'; } catch { }
+                                try { stopSoundPreview(); } catch { }
+                                try { setPlayingUi(); } catch { }
+                            } catch { }
+                        };
+
+                        const resetRotationAtPlayhead = () => {
+                            const t = clampMs(state.playheadMs);
+                            upsertKey('rotation', { t, r: 0 });
+                            closeKeyMenu();
+                            rerenderTimeline();
+                            applyPreview();
+                        };
+
+                        rotBtn.addEventListener('pointerdown', (e) => {
+                            try {
+                                e.preventDefault();
+                                e.stopPropagation();
+
+                                // Double-tap support for touch
+                                try {
+                                    if (String(e.pointerType || '') === 'touch') {
+                                        const now = Date.now();
+                                        const dxTap = Math.abs((Number(e.clientX) || 0) - (Number(lastTap.x) || 0));
+                                        const dyTap = Math.abs((Number(e.clientY) || 0) - (Number(lastTap.y) || 0));
+                                        if ((now - (Number(lastTap.t) || 0)) <= 320 && dxTap <= 24 && dyTap <= 24) {
+                                            resetRotationAtPlayhead();
+                                            lastTap = { t: 0, x: 0, y: 0 };
+                                            return;
+                                        }
+                                        lastTap = { t: now, x: Number(e.clientX) || 0, y: Number(e.clientY) || 0 };
+                                    }
+                                } catch { }
+
+                                stopPlayback();
+                                const base = evalAt('rotation', state.playheadMs);
+                                rdrag = {
+                                    startY: Number(e.clientY) || 0,
+                                    baseR: Number(base.r ?? 0),
+                                    pointerId: e.pointerId,
+                                };
+                                try { history.lock = true; } catch { }
+                                try { rotBtn.setPointerCapture(e.pointerId); } catch { }
+                            } catch { }
+                        });
+
+                        rotBtn.addEventListener('pointermove', (e) => {
+                            try {
+                                if (!rdrag) return;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const dy = (Number(e.clientY) || 0) - rdrag.startY;
+                                const degPerPx = 0.5;
+                                const nr = Number(rdrag.baseR || 0) + (-dy * degPerPx);
+                                const t = clampMs(state.playheadMs);
+                                upsertKey('rotation', { t, r: nr });
+                                closeKeyMenu();
+                                scheduleUiUpdate({ preview: true, timeline: true });
+                            } catch { }
+                        });
+
+                        const end = (e) => {
+                            try {
+                                if (!rdrag) return;
+                                try { rotBtn.releasePointerCapture(rdrag.pointerId); } catch { }
+                                rdrag = null;
+                                try { history.lock = false; } catch { }
+                                try { pushHistory(); } catch { }
+                            } catch { rdrag = null; }
+                        };
+                        rotBtn.addEventListener('pointerup', end);
+                        rotBtn.addEventListener('pointercancel', end);
+
+                        rotBtn.addEventListener('dblclick', (e) => {
+                            try {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                resetRotationAtPlayhead();
+                            } catch { }
+                        });
+                    })();
+
                     const resetAllAtPlayhead = () => {
                         const t = clampMs(state.playheadMs);
                         try { history.lock = true; } catch { }
                         upsertKey('position', { t, x: 0, y: 0 });
                         upsertKey('scale', { t, s: 1 });
+                        upsertKey('rotation', { t, r: 0 });
                         upsertKey('opacity', { t, o: 1 });
                         try { history.lock = false; } catch { }
                         try { pushHistory(); } catch { }
@@ -2258,6 +2892,7 @@
                                 try { cancelAnimationFrame(state._playRaf); } catch { }
                                 state._playRaf = 0;
                                 try { if (layerChar) layerChar.style.animationPlayState = 'paused'; } catch { }
+                                try { stopSoundPreview(); } catch { }
                                 setPlayingUi();
                             }
                             const mode = hitTest(e.clientX, e.clientY);
@@ -2349,6 +2984,7 @@
                                 try { cancelAnimationFrame(state._playRaf); } catch { }
                                 state._playRaf = 0;
                                 try { if (layerChar) layerChar.style.animationPlayState = 'paused'; } catch { }
+                                try { stopSoundPreview(); } catch { }
                                 setPlayingUi();
                             } catch { }
                         };
@@ -2448,7 +3084,8 @@
                         state.graphType = 'ease-in-out';
                         state.loop = true;
                         state.playheadMs = 0;
-                        state.tracks = { position: [], scale: [], opacity: [] };
+                        state.tracks = { position: [], scale: [], rotation: [], opacity: [] };
+                        state.sound = { presetId: '', url: '', durationMs: 0 };
                         state.selected = null;
                         try { doAutoSave(); } catch { }
                     }

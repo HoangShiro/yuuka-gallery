@@ -73,31 +73,6 @@
             }
         },
 
-        _characterGetEffectiveGroupIdsFromStateSelections() {
-            try {
-                this._characterEnsureStateModeState?.();
-                const sel = this.state.character.state.selections || {};
-                const states = Array.isArray(this.state.character.state.states) ? this.state.character.state.states : [];
-                const byId = new Map(states.map(s => [String(s?.id || '').trim(), s]));
-                const out = [];
-                Object.keys(sel || {}).forEach(gid => {
-                    const sid = String(sel[gid] || '').trim();
-                    if (!sid || sid === '__none__') return;
-                    const st = byId.get(sid);
-                    const tgids = st?.tag_group_ids;
-                    if (Array.isArray(tgids)) {
-                        tgids.forEach(x => {
-                            const v = String(x || '').trim();
-                            if (v) out.push(v);
-                        });
-                    }
-                });
-                return Array.from(new Set(out));
-            } catch {
-                return [];
-            }
-        },
-
         _characterFilterSelectionsForCharacterLayer(selections) {
             const base = (selections && typeof selections === 'object') ? selections : {};
             if (!this._characterIsVisualNovelModeEnabled()) return base;
@@ -112,20 +87,18 @@
         },
 
         _characterResolveActivePresetId() {
-            // State mode: presets are derived from the union of tag groups referenced by selected States.
             try {
-                if (this._characterIsStateModeEnabled?.()) {
-                    const ids = this._characterGetEffectiveGroupIdsFromStateSelections?.() || [];
-                    const key = this._characterBuildPresetKeyFromGroupIds?.(ids) || '';
-                    return key ? `auto:${key}` : null;
-                }
-            } catch { }
+                // State-mode has been removed from Character View.
+                const explicit = this.state?.character?.activePresetId;
+                if (explicit) return explicit;
 
-            const explicit = this.state.character.activePresetId;
-            if (explicit) return explicit;
-            const selections = this.state.character.selections || {};
-            const key = this._characterBuildPresetKeyFromSelections(selections);
-            return key ? `auto:${key}` : null;
+                const selections = this.state?.character?.selections || {};
+                const key = this._characterBuildPresetKeyFromSelections(selections);
+                return key ? `auto:${key}` : null;
+            } catch (e) {
+                console.error('Character preset id resolve failed', e);
+                return this.state?.character?.activePresetId || null;
+            }
         },
     });
 })();

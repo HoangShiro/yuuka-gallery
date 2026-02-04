@@ -31,19 +31,8 @@
 
             if (menuName === 'Preset') {
                 this._characterRenderPresetList(toolbarHost, list);
-            } else if (menuName === 'StatePreset') {
-                this._characterRenderStatePresetList(toolbarHost, list);
             } else {
-                const stateGroupId = this._characterParseStateGroupIdFromMenuName?.(menuName) || '';
-                if (stateGroupId) {
-                    try {
-                        this._characterEnsureStateModeState?.();
-                        this.state.character.state.activeGroupId = stateGroupId;
-                    } catch { }
-                    this._characterRenderStateList(stateGroupId, toolbarHost, list);
-                } else {
-                    this._characterRenderTagGroupList(menuName, toolbarHost, list);
-                }
+                this._characterRenderTagGroupList(menuName, toolbarHost, list);
 
                 // Recompute empty-state immediately after rendering.
                 // Must run after submenu is visible, because the refresh function
@@ -60,7 +49,7 @@
             try {
                 if (this.state.viewMode !== 'character') return;
                 const target = String(menuName || '').trim();
-                if (!target || target === 'Preset' || target === 'StatePreset') return;
+                if (!target) return;
                 const submenu = this.contentArea?.querySelector('.plugin-album__character-submenu');
                 const toolbarHost = submenu?.querySelector('.plugin-album__character-submenu-toolbar');
                 const list = submenu?.querySelector('.plugin-album__character-submenu-list');
@@ -71,9 +60,8 @@
                 toolbarHost.innerHTML = '';
                 list.innerHTML = '';
                 try { submenu.dataset.menu = target; } catch { }
-                const stateGroupId = this._characterParseStateGroupIdFromMenuName?.(target) || '';
-                if (stateGroupId) {
-                    this._characterRenderStateList(stateGroupId, toolbarHost, list);
+                if (target === 'Preset') {
+                    this._characterRenderPresetList(toolbarHost, list);
                 } else {
                     this._characterRenderTagGroupList(target, toolbarHost, list);
                 }
