@@ -1,0 +1,205 @@
+{
+    "behavior_rules": [
+        {
+            "action": "reduce_others",
+            "type": "sleepy"
+        },
+        {
+            "action": "cap_at_5",
+            "type": "dizzy"
+        }
+    ],
+    "conflict_rules": [
+        {
+            "resolution": "keep_higher",
+            "typeA": "happy",
+            "typeB": "sad"
+        }
+    ],
+    "decay_profile": {
+        "calm": 0.6,
+        "dramatic": 0.95,
+        "emotional": 0.9,
+        "normal": 0.8
+    },
+    "mapping": {
+        "angry": {
+            "1": [
+                "annoyed"
+            ],
+            "5": [
+                "angry",
+                "scowl",
+                "furrowed_brow"
+            ],
+            "10": [
+                "furious",
+                "glaring",
+                "yelling"
+            ]
+        },
+        "anxious": {
+            "1": [
+                "nervous"
+            ],
+            "5": [
+                "anxious",
+                "sweating",
+                "looking_away"
+            ],
+            "10": [
+                "panic",
+                "heavy_sweat",
+                "wide_eyes"
+            ]
+        },
+        "dizzy": {
+            "1": [
+                "confused"
+            ],
+            "5": [
+                "dizzy",
+                "confused"
+            ],
+            "10": [
+                "spinning_eyes",
+                "dizzy"
+            ]
+        },
+        "embarrassed": {
+            "1": [
+                "light_blush"
+            ],
+            "5": [
+                "blush",
+                "embarrassed",
+                "looking_away"
+            ],
+            "10": [
+                "heavy_blush",
+                "flustered",
+                "covering_face"
+            ]
+        },
+        "happy": {
+            "1": [
+                "smile"
+            ],
+            "5": [
+                "smile",
+                "happy"
+            ],
+            "10": [
+                "bright_smile",
+                "happy",
+                "half-closed_eyes"
+            ]
+        },
+        "jealous": {
+            "1": [
+                "pout"
+            ],
+            "5": [
+                "pout",
+                "glaring"
+            ],
+            "10": [
+                "heavy_pout",
+                "dark_aura",
+                "glaring"
+            ]
+        },
+        "sad": {
+            "1": [
+                "frown"
+            ],
+            "5": [
+                "sad",
+                "frown",
+                "sad_eyes"
+            ],
+            "10": [
+                "crying",
+                "tears",
+                "sad"
+            ]
+        },
+        "sick": {
+            "1": [
+                "flushed"
+            ],
+            "5": [
+                "sick",
+                "pale"
+            ],
+            "10": [
+                "bedridden",
+                "fever"
+            ]
+        },
+        "sleepy": {
+            "1": [
+                "sleepy"
+            ],
+            "5": [
+                "sleepy",
+                "rubbing_eyes"
+            ],
+            "10": [
+                "sleeping",
+                "closed_eyes"
+            ]
+        },
+        "tired": {
+            "1": [
+                "tired"
+            ],
+            "5": [
+                "tired",
+                "bags_under_eyes"
+            ],
+            "10": [
+                "exhausted",
+                "dark_circles"
+            ]
+        }
+    },
+    "max_tag_types": 3,
+    "max_types": 3,
+    "min_threshold": 1,
+    "time_skip_turns": 9,
+    "reduce_value": {
+        "angry": -7,
+        "anxious": -6,
+        "dizzy": -2,
+        "embarrassed": -5,
+        "happy": -5,
+        "jealous": -8,
+        "sad": -6,
+        "sick": -1,
+        "sleepy": -1,
+        "tired": -1
+    },
+    "types": [
+        "happy",
+        "sad",
+        "angry",
+        "anxious",
+        "embarrassed",
+        "jealous",
+        "dizzy",
+        "tired",
+        "sleepy",
+        "sick"
+    ],
+    "value_steps": [
+        -10,
+        -5,
+        -1,
+        0,
+        1,
+        5,
+        10
+    ],
+    "version": 2
+}

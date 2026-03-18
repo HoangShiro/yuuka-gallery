@@ -1,0 +1,1173 @@
+{
+  "9": {
+    "inputs": {
+      "options": "Intermediate and Utility",
+      "filenames": [
+        "28",
+        0
+      ]
+    },
+    "class_type": "VHS_PruneOutputs",
+    "_meta": {
+      "title": "Prune Outputs 🎥🅥🅗🅢"
+    }
+  },
+  "24": {
+    "inputs": {
+      "image": "ChatGPT Image 19_41_02 2 thg 5, 2025.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Last-Frame-Image"
+    }
+  },
+  "28": {
+    "inputs": {
+      "frame_rate": [
+        "29:1286:943",
+        0
+      ],
+      "loop_count": 0,
+      "filename_prefix": "video/2026-02-25/091353",
+      "format": "video/webm",
+      "pix_fmt": "yuv420p",
+      "crf": 20,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "29:1286:966",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "1289": {
+    "inputs": {
+      "image": "ChatGPT Image 19_41_02 2 thg 5, 2025.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "First-Frame-Image"
+    }
+  },
+  "1293": {
+    "inputs": {
+      "enable": true,
+      "trigger": [
+        "28",
+        0
+      ]
+    },
+    "class_type": "YuukaFreeAllMemory",
+    "_meta": {
+      "title": "🔥 Free All Memory (Like Restart)"
+    }
+  },
+  "29:960": {
+    "inputs": {
+      "width": [
+        "29:1072:317",
+        0
+      ],
+      "height": [
+        "29:1072:317",
+        1
+      ],
+      "length": [
+        "29:1073",
+        0
+      ],
+      "batch_size": 1,
+      "positive": [
+        "29:1044",
+        0
+      ],
+      "negative": [
+        "29:1045",
+        0
+      ],
+      "vae": [
+        "29:1143",
+        0
+      ],
+      "start_image": [
+        "29:1072:329",
+        0
+      ]
+    },
+    "class_type": "WanImageToVideo",
+    "_meta": {
+      "title": "WanImageToVideo"
+    }
+  },
+  "29:1076": {
+    "inputs": {
+      "model": [
+        "29:425",
+        0
+      ]
+    },
+    "class_type": "CFGZeroStar",
+    "_meta": {
+      "title": "CFGZeroStar"
+    }
+  },
+  "29:1077": {
+    "inputs": {
+      "model": [
+        "29:426",
+        0
+      ]
+    },
+    "class_type": "CFGZeroStar",
+    "_meta": {
+      "title": "CFGZeroStar"
+    }
+  },
+  "29:1161": {
+    "inputs": {
+      "enable_fp16_accumulation": true,
+      "model": [
+        "29:1169",
+        0
+      ]
+    },
+    "class_type": "ModelPatchTorchSettings",
+    "_meta": {
+      "title": "Model Patch Torch Settings"
+    }
+  },
+  "29:1163": {
+    "inputs": {
+      "enable_fp16_accumulation": true,
+      "model": [
+        "29:1168",
+        0
+      ]
+    },
+    "class_type": "ModelPatchTorchSettings",
+    "_meta": {
+      "title": "Model Patch Torch Settings"
+    }
+  },
+  "29:1166": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean"
+    }
+  },
+  "29:1165": {
+    "inputs": {
+      "value": false
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean"
+    }
+  },
+  "29:1170": {
+    "inputs": {
+      "unet_name": "DasiwaWAN22I2V14BLightspeed_synthseductionHighV9.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "29:1229": {
+    "inputs": {
+      "model": [
+        "29:1170",
+        0
+      ]
+    },
+    "class_type": "Context (rgthree)",
+    "_meta": {
+      "title": "Context (rgthree)"
+    }
+  },
+  "29:1226": {
+    "inputs": {},
+    "class_type": "Context (rgthree)",
+    "_meta": {
+      "title": "Context (rgthree)"
+    }
+  },
+  "29:1171": {
+    "inputs": {
+      "unet_name": "DasiwaWAN22I2V14BLightspeed_synthseductionLowV9.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "29:1230": {
+    "inputs": {
+      "model": [
+        "29:1171",
+        0
+      ]
+    },
+    "class_type": "Context (rgthree)",
+    "_meta": {
+      "title": "Context (rgthree)"
+    }
+  },
+  "29:1228": {
+    "inputs": {},
+    "class_type": "Context (rgthree)",
+    "_meta": {
+      "title": "Context (rgthree)"
+    }
+  },
+  "29:1227": {
+    "inputs": {
+      "ctx_01": [
+        "29:1229",
+        0
+      ],
+      "ctx_02": [
+        "29:1226",
+        0
+      ]
+    },
+    "class_type": "Context Switch (rgthree)",
+    "_meta": {
+      "title": "Context Switch (rgthree)"
+    }
+  },
+  "29:1231": {
+    "inputs": {
+      "ctx_01": [
+        "29:1230",
+        0
+      ],
+      "ctx_02": [
+        "29:1228",
+        0
+      ]
+    },
+    "class_type": "Context Switch (rgthree)",
+    "_meta": {
+      "title": "Context Switch (rgthree)"
+    }
+  },
+  "29:1232": {
+    "inputs": {
+      "preview": "",
+      "previewMode": null,
+      "source": [
+        "29:1157",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  },
+  "29:1157": {
+    "inputs": {
+      "any_01": [
+        "29:1166",
+        0
+      ],
+      "any_02": [
+        "29:1165",
+        0
+      ]
+    },
+    "class_type": "Any Switch (rgthree)",
+    "_meta": {
+      "title": "Any Switch (rgthree)"
+    }
+  },
+  "29:1159": {
+    "inputs": {
+      "any_01": [
+        "29:1167",
+        0
+      ],
+      "any_02": [
+        "29:1165",
+        0
+      ]
+    },
+    "class_type": "Any Switch (rgthree)",
+    "_meta": {
+      "title": "Any Switch (rgthree)"
+    }
+  },
+  "29:1233": {
+    "inputs": {
+      "preview": "",
+      "previewMode": null,
+      "source": [
+        "29:1159",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  },
+  "29:1167": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean"
+    }
+  },
+  "29:1162": {
+    "inputs": {
+      "boolean": [
+        "29:1159",
+        0
+      ],
+      "on_true": [
+        "29:1161",
+        0
+      ],
+      "on_false": [
+        "29:1169",
+        0
+      ]
+    },
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "29:1164": {
+    "inputs": {
+      "boolean": [
+        "29:1159",
+        0
+      ],
+      "on_true": [
+        "29:1163",
+        0
+      ],
+      "on_false": [
+        "29:1168",
+        0
+      ]
+    },
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "29:1154": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "29:1231",
+        1
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "29:1155": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "29:1227",
+        1
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "29:425": {
+    "inputs": {
+      "shift": 5,
+      "model": [
+        "29:1162",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "Sigma Shift High"
+    }
+  },
+  "29:426": {
+    "inputs": {
+      "shift": 5,
+      "model": [
+        "29:1164",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "Sigma Shift Low"
+    }
+  },
+  "29:914": {
+    "inputs": {
+      "steps_total": 4,
+      "refiner_step": 2,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "linear_quadratic"
+    },
+    "class_type": "KSampler Config (rgthree)",
+    "_meta": {
+      "title": "Sampling"
+    }
+  },
+  "29:1044": {
+    "inputs": {
+      "text": "prompt here",
+      "clip": [
+        "29:1142",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Positive prompt"
+    }
+  },
+  "29:1045": {
+    "inputs": {
+      "text": "censored, mosaic censoring, bar censor, pixelated, glowing, bloom, blurry, out of focus, low detail, bad anatomy, ugly, overexposed, underexposed, distorted face, extra limbs, cartoonish, 3d render artifacts, duplicate people, unnatural lighting, bad composition, missing shadows, low resolution, poorly textured, glitch, noise, grain, static, motionless, still frame, stylized, artwork, painting, illustration, many people in background, three legs, walking backward, unnatural skin tone, discolored eyelid, red eyelids, closed eyes, poorly drawn hands, extra fingers, fused fingers, poorly drawn face, deformed, disfigured, malformed limbs, fog, mist, voluminous eyelashes,",
+      "clip": [
+        "29:1142",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Negative prompt"
+    }
+  },
+  "29:1169": {
+    "inputs": {
+      "boolean": [
+        "29:1157",
+        0
+      ],
+      "on_true": [
+        "29:1155",
+        0
+      ],
+      "on_false": [
+        "29:1227",
+        1
+      ]
+    },
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "29:1168": {
+    "inputs": {
+      "boolean": [
+        "29:1157",
+        0
+      ],
+      "on_true": [
+        "29:1154",
+        0
+      ],
+      "on_false": [
+        "29:1231",
+        1
+      ]
+    },
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "29:1143": {
+    "inputs": {
+      "vae_name": "WAN\\wan_2.1_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "29:1142": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "29:963": {
+    "inputs": {
+      "samples": [
+        "29:968",
+        0
+      ],
+      "vae": [
+        "29:1143",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "29:1263": {
+    "inputs": {
+      "images": [
+        "29:963",
+        0
+      ]
+    },
+    "class_type": "Context (rgthree)",
+    "_meta": {
+      "title": "Context (rgthree)"
+    }
+  },
+  "29:1075": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Seconds"
+    }
+  },
+  "29:1073": {
+    "inputs": {
+      "expression": "(round((a * b) / 8) * 8) +1",
+      "a": [
+        "29:1075",
+        0
+      ],
+      "b": [
+        "29:457",
+        0
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "frames logic 🐍"
+    }
+  },
+  "29:1276": {
+    "inputs": {
+      "value": 730425353295116
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Seed"
+    }
+  },
+  "29:457": {
+    "inputs": {
+      "value": 16
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "FPS"
+    }
+  },
+  "29:1265": {
+    "inputs": {
+      "ctx_01": [
+        "29:1263",
+        0
+      ],
+      "ctx_02": [
+        "29:1264",
+        0
+      ]
+    },
+    "class_type": "Context Switch (rgthree)",
+    "_meta": {
+      "title": "Context Switch (rgthree)"
+    }
+  },
+  "29:1264": {
+    "inputs": {},
+    "class_type": "Context (rgthree)",
+    "_meta": {
+      "title": "Context (rgthree)"
+    }
+  },
+  "29:1285:1280": {
+    "inputs": {
+      "boolean": [
+        "29:1285:1282",
+        0
+      ],
+      "on_true": [
+        "29:1072:329",
+        0
+      ],
+      "on_false": [
+        "29:1265",
+        7
+      ]
+    },
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "29:1285:1281": {
+    "inputs": {
+      "value": false
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean"
+    }
+  },
+  "29:1285:1282": {
+    "inputs": {
+      "any_02": [
+        "29:1285:1281",
+        0
+      ]
+    },
+    "class_type": "Any Switch (rgthree)",
+    "_meta": {
+      "title": "Any Switch (rgthree)"
+    }
+  },
+  "29:1285:1283": {
+    "inputs": {
+      "preview": "",
+      "previewMode": null,
+      "source": [
+        "29:1285:1282",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  },
+  "29:1072:316": {
+    "inputs": {
+      "expression": "round(sqrt(a * 1000000 * (b / c)) / 16) * 16",
+      "a": [
+        "29:1072:327",
+        0
+      ],
+      "b": [
+        "29:1072:328",
+        0
+      ],
+      "c": [
+        "29:1072:328",
+        1
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Width 🐍"
+    }
+  },
+  "29:1072:318": {
+    "inputs": {
+      "expression": "round((a / (b / c)) / 16) * 16",
+      "a": [
+        "29:1072:316",
+        0
+      ],
+      "b": [
+        "29:1072:328",
+        0
+      ],
+      "c": [
+        "29:1072:328",
+        1
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Height 🐍"
+    }
+  },
+  "29:1072:320": {
+    "inputs": {
+      "value": 0.4
+    },
+    "class_type": "FloatConstant",
+    "_meta": {
+      "title": "Float Constant"
+    }
+  },
+  "29:1072:327": {
+    "inputs": {
+      "any_03": [
+        "29:1072:320",
+        0
+      ]
+    },
+    "class_type": "Any Switch (rgthree)",
+    "_meta": {
+      "title": "Any Switch (rgthree)"
+    }
+  },
+  "29:1072:329": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": [
+        "29:1072:316",
+        0
+      ],
+      "height": [
+        "29:1072:318",
+        0
+      ],
+      "crop": "disabled",
+      "image": [
+        "1289",
+        0
+      ]
+    },
+    "class_type": "ImageScale",
+    "_meta": {
+      "title": "Upscale Image"
+    }
+  },
+  "29:1072:328": {
+    "inputs": {
+      "image": [
+        "1289",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "Get Image Size"
+    }
+  },
+  "29:1072:317": {
+    "inputs": {
+      "image": [
+        "29:1072:329",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "Get Image Size"
+    }
+  },
+  "29:1072:339": {
+    "inputs": {
+      "preview": "",
+      "previewMode": null,
+      "source": [
+        "29:1072:317",
+        1
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  },
+  "29:1072:338": {
+    "inputs": {
+      "preview": "",
+      "previewMode": null,
+      "source": [
+        "29:1072:317",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  },
+  "29:968": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": 0,
+      "steps": [
+        "29:914",
+        0
+      ],
+      "cfg": [
+        "29:914",
+        2
+      ],
+      "sampler_name": [
+        "29:914",
+        3
+      ],
+      "scheduler": [
+        "29:914",
+        4
+      ],
+      "start_at_step": [
+        "29:914",
+        1
+      ],
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "29:1077",
+        0
+      ],
+      "positive": [
+        "29:960",
+        0
+      ],
+      "negative": [
+        "29:960",
+        1
+      ],
+      "latent_image": [
+        "29:1289",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Low)"
+    }
+  },
+  "29:961": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": [
+        "29:1276",
+        0
+      ],
+      "steps": [
+        "29:914",
+        0
+      ],
+      "cfg": [
+        "29:914",
+        2
+      ],
+      "sampler_name": [
+        "29:914",
+        3
+      ],
+      "scheduler": [
+        "29:914",
+        4
+      ],
+      "start_at_step": 0,
+      "end_at_step": [
+        "29:914",
+        1
+      ],
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "29:1076",
+        0
+      ],
+      "positive": [
+        "29:960",
+        0
+      ],
+      "negative": [
+        "29:960",
+        1
+      ],
+      "latent_image": [
+        "29:960",
+        2
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (High)"
+    }
+  },
+  "29:1289": {
+    "inputs": {
+      "enable": true,
+      "passthrough": [
+        "29:961",
+        0
+      ]
+    },
+    "class_type": "YuukaUnloadModels",
+    "_meta": {
+      "title": "🧹 Unload Models (Between Steps)"
+    }
+  },
+  "29:1284:932": {
+    "inputs": {
+      "images": [
+        "29:1284:934",
+        0
+      ]
+    },
+    "class_type": "PrepareLoopFrames",
+    "_meta": {
+      "title": "🐇 Prepare Loop Frames"
+    }
+  },
+  "29:1284:933": {
+    "inputs": {
+      "ckpt_name": "rife49.pth",
+      "scale_factor": 1,
+      "ensemble": true,
+      "multiplier": 4,
+      "use_first_two": true,
+      "use_last_two": true,
+      "use_global_median": true,
+      "calibrate_metric": "MSE",
+      "calibrate_iters": 12,
+      "t_min": 0,
+      "t_max": 0.96,
+      "auto_tmax": true,
+      "t_cap": 0.995,
+      "full_clip": [
+        "29:1284:932",
+        1
+      ]
+    },
+    "class_type": "RIFE_SeamTimingAnalyzer",
+    "_meta": {
+      "title": "🐇 RIFE Seam Timing Analyzer"
+    }
+  },
+  "29:1284:931": {
+    "inputs": {
+      "ckpt_name": "rife49.pth",
+      "multiplier": [
+        "29:1284:933",
+        1
+      ],
+      "t_mode": "linear",
+      "t_gamma": 1,
+      "t_min": 0,
+      "t_max": 1,
+      "scale_factor": 1,
+      "ensemble": true,
+      "clear_cache_after_n_frames": 200,
+      "custom_t_list_csv": [
+        "29:1284:933",
+        0
+      ],
+      "frames": [
+        "29:1284:932",
+        0
+      ]
+    },
+    "class_type": "RIFE_VFI_Advanced",
+    "_meta": {
+      "title": "🐇 RIFE VFI Custom Timing"
+    }
+  },
+  "29:1284:1100": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean"
+    }
+  },
+  "29:1284:934": {
+    "inputs": {
+      "max_end_crop_frames": 8,
+      "include_first_step": true,
+      "include_last_step": true,
+      "include_global_median_step": true,
+      "seam_window_frames": 6,
+      "distance_metric": "MSE",
+      "score_in_8bit": false,
+      "use_ssim_similarity": true,
+      "use_exposure_guard": true,
+      "use_flow_guard": true,
+      "weight_step_size": 0.55,
+      "weight_similarity": 0.3,
+      "weight_exposure": 0.1,
+      "weight_flow": 0.05,
+      "ssim_downsample_scales": "1,2",
+      "accelerate_with_gpu": true,
+      "use_mixed_precision": true,
+      "clip_frames": [
+        "29:1285:1280",
+        0
+      ]
+    },
+    "class_type": "AutocropToLoop",
+    "_meta": {
+      "title": "🐇 Autocrop to Loop"
+    }
+  },
+  "29:1284:965": {
+    "inputs": {
+      "original_images": [
+        "29:1284:932",
+        1
+      ],
+      "interpolated_frames": [
+        "29:1284:1095",
+        0
+      ]
+    },
+    "class_type": "AssembleLoopFrames",
+    "_meta": {
+      "title": "🐇 Assemble Loop Frames"
+    }
+  },
+  "29:1284:1236": {
+    "inputs": {
+      "preview": "",
+      "previewMode": null,
+      "source": [
+        "29:1284:1098",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  },
+  "29:1284:1099": {
+    "inputs": {
+      "boolean": [
+        "29:1284:1098",
+        0
+      ],
+      "on_true": [
+        "29:1284:965",
+        0
+      ],
+      "on_false": [
+        "29:1285:1280",
+        0
+      ]
+    },
+    "class_type": "easy ifElse",
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "29:1284:1095": {
+    "inputs": {
+      "interpolation": "linear",
+      "transition_start_index": 0,
+      "transitioning_frames": [
+        "29:1284:1096",
+        0
+      ],
+      "start_level": 0,
+      "end_level": 1,
+      "images_1": [
+        "29:1284:931",
+        0
+      ],
+      "images_2": [
+        "29:1284:931",
+        0
+      ]
+    },
+    "class_type": "CrossFadeImages",
+    "_meta": {
+      "title": "Cross Fade Images"
+    }
+  },
+  "29:1284:1096": {
+    "inputs": {
+      "images": [
+        "29:1284:931",
+        0
+      ]
+    },
+    "class_type": "easy imageCount",
+    "_meta": {
+      "title": "ImageCount"
+    }
+  },
+  "29:1284:1098": {
+    "inputs": {
+      "any_01": [
+        "29:1284:1100",
+        0
+      ],
+      "any_02": [
+        "29:1284:1101",
+        0
+      ]
+    },
+    "class_type": "Any Switch (rgthree)",
+    "_meta": {
+      "title": "Any Switch (rgthree)"
+    }
+  },
+  "29:1284:1101": {
+    "inputs": {
+      "value": false
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean"
+    }
+  },
+  "29:1286:943": {
+    "inputs": {
+      "a": [
+        "29:457",
+        0
+      ],
+      "b": 2,
+      "operation": "multiply"
+    },
+    "class_type": "easy mathFloat",
+    "_meta": {
+      "title": "Math FPS"
+    }
+  },
+  "29:1286:966": {
+    "inputs": {
+      "ckpt_name": "rife49.pth",
+      "clear_cache_after_n_frames": 10,
+      "multiplier": 2,
+      "fast_mode": true,
+      "ensemble": true,
+      "scale_factor": 1,
+      "frames": [
+        "29:1284:1099",
+        0
+      ]
+    },
+    "class_type": "RIFE VFI",
+    "_meta": {
+      "title": "RIFE VFI (recommend rife47 and rife49)"
+    }
+  }
+}

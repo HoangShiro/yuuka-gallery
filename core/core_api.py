@@ -183,7 +183,18 @@ class CoreAPI:
         filepath = os.path.join('user_images', subfolder, filename)
         obfuscated_data = self.data_manager.read_binary(filepath)
         if obfuscated_data:
-            return self.data_manager.deobfuscate_binary(obfuscated_data), 'image/png'
+            # Yuuka: I2V video support - detect mimetype from extension
+            ext = os.path.splitext(filename)[1].lower()
+            mimetype_map = {
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.webp': 'image/webp',
+                '.webm': 'video/webm',
+                '.mp4': 'video/mp4',
+            }
+            mimetype = mimetype_map.get(ext, 'image/png')
+            return self.data_manager.deobfuscate_binary(obfuscated_data), mimetype
         return None, None
 
     # --- 4. Tải Dữ liệu Lõi (Internal Core Data Loading) ---

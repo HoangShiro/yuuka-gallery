@@ -153,6 +153,75 @@ class ImageService:
             print(f"💥 [ImageService] Failed to save image metadata: {e}")
             return None
 
+    def save_video_metadata(self, user_hash, character_hash, video_base64, generation_config, creation_time=None):
+        """Lưu metadata video (webm), tạo preview thumbnail từ frame giả và trả về object metadata mới."""
+        all_images = self.data_manager.read_json(self.IMAGE_DATA_FILENAME, obfuscated=True)
+        user_images = all_images.setdefault(user_hash, {})
+        char_images = user_images.setdefault(character_hash, [])
+
+        try:
+            video_data = base64.b64decode(video_base64)
+            filename = f"{uuid.uuid4()}.webm"
+
+            # 1. Lưu video gốc
+            obfuscated_video_data = self.data_manager.obfuscate_binary(video_data)
+            video_filepath = os.path.join('user_images', 'imgs', filename)
+            self.data_manager.save_binary(obfuscated_video_data, video_filepath)
+
+            # 2. Tạo preview thumbnail (placeholder PNG vì video không dễ thumbnail)
+            # Dùng PIL tạo ảnh placeholder xám với text "VIDEO"
+            preview_filename = f"{uuid.uuid4()}.png"
+            try:
+                from PIL import ImageDraw, ImageFont
+                img = Image.new('RGB', (self.PREVIEW_MAX_DIMENSION, self.PREVIEW_MAX_DIMENSION), (40, 40, 50))
+                draw = ImageDraw.Draw(img)
+                # Vẽ icon play-like triangle
+                cx, cy = self.PREVIEW_MAX_DIMENSION // 2, self.PREVIEW_MAX_DIMENSION // 2
+                size = 40
+                triangle = [(cx - size//2, cy - size), (cx - size//2, cy + size), (cx + size, cy)]
+                draw.polygon(triangle, fill=(100, 200, 255))
+                draw.text((cx - 30, cy + size + 10), "VIDEO", fill=(200, 200, 200))
+            except Exception:
+                img = Image.new('RGB', (self.PREVIEW_MAX_DIMENSION, self.PREVIEW_MAX_DIMENSION), (40, 40, 50))
+
+            buffer = io.BytesIO()
+            img.save(buffer, format="PNG")
+            preview_data = buffer.getvalue()
+            obfuscated_preview_data = self.data_manager.obfuscate_binary(preview_data)
+            preview_filepath = os.path.join('user_images', 'pv_imgs', preview_filename)
+            self.data_manager.save_binary(obfuscated_preview_data, preview_filepath)
+
+            config_to_save = generation_config
+            if isinstance(generation_config, dict):
+                config_to_save = deepcopy(generation_config)
+                workflow_template = config_to_save.get("_workflow_template")
+                if workflow_template is not None:
+                    config_to_save["workflow_template"] = str(workflow_template).strip()
+                config_to_save["workflow_type"] = "dasiwa_wan2_i2v"
+
+            sanitized_config = self._sanitize_config(config_to_save)
+
+            new_metadata = {
+                "id": str(uuid.uuid4()),
+                "url": f"/user_image/imgs/{filename}",
+                "pv_url": f"/user_image/pv_imgs/{preview_filename}",
+                "generationConfig": sanitized_config,
+                "createdAt": int(time.time()),
+                "character_hash": character_hash,
+                "Alpha": False,
+                "is_video": True,
+                "video_format": "video/webm",
+            }
+            if creation_time is not None:
+                new_metadata["creationTime"] = round(creation_time, 2)
+
+            char_images.append(new_metadata)
+            self.data_manager.save_json(all_images, self.IMAGE_DATA_FILENAME, obfuscated=True)
+            return new_metadata
+        except Exception as e:
+            print(f"💥 [ImageService] Failed to save video metadata: {e}")
+            return None
+
     def get_all_user_images(self, user_hash):
         """Lấy tất cả ảnh của một user, gộp lại và sắp xếp."""
         all_images_data = self.data_manager.read_json(self.IMAGE_DATA_FILENAME, obfuscated=True)

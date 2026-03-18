@@ -67,6 +67,50 @@ class OpenAIProvider(BaseAIProvider):
         """Execute an asyncio coroutine inside worker threads."""
         return asyncio.run(coro)
 
+    @staticmethod
+    def _apply_ollama_keep_alive_post(task: AIRequestTask, target_provider: str, model: str) -> None:
+        """Enforce ``keep_alive`` for Ollama requests natively.
+
+        Ollama ignores keep_alive in its OpenAI-compatible /v1/ routes.
+        This sends a native API request after completion to set the expiration.
+        """
+        if target_provider != "ollama" or not model:
+            return
+            
+        keep_alive = task.payload.get("keep_alive")
+        if keep_alive is None:
+            return
+            
+        try:
+            from integrations.openai import resolve_provider_config
+            import json
+            import urllib.request
+            
+            overrides = task.provider_overrides or {}
+            payload_overrides = task.payload.get("overrides")
+            if isinstance(payload_overrides, dict):
+                overrides = {**overrides, **payload_overrides}
+                
+            config = resolve_provider_config(provider=target_provider, overrides=overrides, user_api_key=task.user_api_key)
+            base_url = config.base_url or "http://localhost:11434/v1"
+            
+            # Convert /v1 endpoint to native /api/generate
+            if base_url.endswith("/v1"):
+                api_url = base_url[:-3] + "/api/generate"
+            else:
+                api_url = base_url.rstrip("/") + "/api/generate"
+                
+            req = urllib.request.Request(
+                api_url,
+                data=json.dumps({"model": model, "keep_alive": keep_alive}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                pass
+        except Exception as e:
+            print(f"[AIService] Warning: Failed to apply keep_alive for Ollama model {model}: {e}")
+
     def run(self, task: AIRequestTask) -> Any:
         overrides = self._merge_overrides(task)
         target_provider = task.payload.get("provider") or overrides.pop("provider", self.name)
@@ -80,7 +124,7 @@ class OpenAIProvider(BaseAIProvider):
                 model = task.payload.get("model")
                 timeout = task.payload.get("timeout")
                 extra_kwargs = task.payload.get("kwargs") or {}
-                return self._run_async(
+                result = self._run_async(
                     openai_integration.create_chat_completion(
                         messages=messages,
                         model=model,
@@ -91,6 +135,8 @@ class OpenAIProvider(BaseAIProvider):
                         **extra_kwargs,
                     )
                 )
+                self._apply_ollama_keep_alive_post(task, target_provider, model)
+                return result
 
             if operation in ("embeddings", "embedding"):
                 inputs = task.payload.get("inputs")
@@ -98,7 +144,7 @@ class OpenAIProvider(BaseAIProvider):
                     raise AIServiceError("inputs are required for embedding operations.")
                 model = task.payload.get("model")
                 extra_kwargs = task.payload.get("kwargs") or {}
-                return self._run_async(
+                result = self._run_async(
                     openai_integration.create_embeddings(
                         inputs=inputs,
                         model=model,
@@ -108,6 +154,8 @@ class OpenAIProvider(BaseAIProvider):
                         **extra_kwargs,
                     )
                 )
+                self._apply_ollama_keep_alive_post(task, target_provider, model)
+                return result
 
             if operation in ("speech_to_text", "transcribe", "transcription"):
                 audio_path = task.payload.get("audio_path")
@@ -115,7 +163,7 @@ class OpenAIProvider(BaseAIProvider):
                     raise AIServiceError("audio_path is required for transcription operations.")
                 model = task.payload.get("model")
                 extra_kwargs = task.payload.get("kwargs") or {}
-                return self._run_async(
+                result = self._run_async(
                     openai_integration.transcribe_audio(
                         audio_path=audio_path,
                         model=model,
@@ -125,6 +173,8 @@ class OpenAIProvider(BaseAIProvider):
                         **extra_kwargs,
                     )
                 )
+                self._apply_ollama_keep_alive_post(task, target_provider, model)
+                return result
 
             custom_callable = task.payload.get("callable")
             if callable(custom_callable):
@@ -388,6 +438,8 @@ class AIService:
         self.register_provider(OpenAIProvider("openai-compatible", core_api))
         # LM Studio speaks OpenAI-compatible API; register as alias
         self.register_provider(OpenAIProvider("lmstudio", core_api))
+        # Ollama speaks OpenAI-compatible API at localhost:11434/v1
+        self.register_provider(OpenAIProvider("ollama", core_api))
         self.register_provider(GeminiProvider("gemini", core_api))
 
     def register_provider(self, provider: BaseAIProvider) -> None:

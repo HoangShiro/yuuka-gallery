@@ -38,17 +38,28 @@ def _extract_choices_from_info(
 ) -> List[str]:
     """
     Yuuka: Helper function để trích xuất dữ liệu an toàn từ cấu trúc JSON đã được tải về.
+    Hỗ trợ cả format cũ [[...]] và format mới ["COMBO", {"options": [...]}].
     """
     if not all_nodes_info:
         return []
     try:
         # Truy cập vào cấu trúc JSON để lấy danh sách lựa chọn
-        choices = all_nodes_info.get(node_class, {})\
-                                .get("input", {})\
-                                .get("required", {})\
-                                .get(param_name, [[]])[0]
-        # Đảm bảo kết quả trả về là một list
-        return choices if isinstance(choices, list) else []
+        param_data = all_nodes_info.get(node_class, {})\
+                                   .get("input", {})\
+                                   .get("required", {})\
+                                   .get(param_name, [[]])
+        if not isinstance(param_data, list) or not param_data:
+            return []
+        first = param_data[0]
+        # Format cũ: [[option1, option2, ...]]
+        if isinstance(first, list):
+            return first
+        # Format mới (COMBO): ["COMBO", {"options": [option1, option2, ...]}]
+        if isinstance(first, str) and len(param_data) > 1 and isinstance(param_data[1], dict):
+            options = param_data[1].get("options", [])
+            if isinstance(options, list):
+                return options
+        return []
     except Exception as e:
         print(f"[API Client] Lỗi khi trích xuất '{param_name}' từ node '{node_class}': {e}")
         return []

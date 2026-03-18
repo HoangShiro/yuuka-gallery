@@ -307,10 +307,10 @@
         if (options.modalClass) {
             modal.classList.add(options.modalClass);
         }
-    document.body.appendChild(modal);
-    modal.innerHTML = `<div class="modal-dialog"><h3>Đang tải...</h3></div>`;
-    // Yield a frame so the modal paints immediately even if subsequent work is heavy
-    await new Promise(resolve => requestAnimationFrame(() => resolve()));
+        document.body.appendChild(modal);
+        modal.innerHTML = `<div class="modal-dialog"><h3>Đang tải...</h3></div>`;
+        // Yield a frame so the modal paints immediately even if subsequent work is heavy
+        await new Promise(resolve => requestAnimationFrame(() => resolve()));
         state.current = modal;
         const cleanupFns = [];
         const close = () => {
@@ -469,7 +469,7 @@
                 // Fire prefetch in background; when done, re-init autocomplete if present
                 tagService.prefetch(api).then(fresh => {
                     if (window.Yuuka?.ui?._initTagAutocomplete && dialog) {
-                        try { window.Yuuka.ui._initTagAutocomplete(dialog, fresh); } catch(_) {}
+                        try { window.Yuuka.ui._initTagAutocomplete(dialog, fresh); } catch (_) { }
                     }
                 });
             }
@@ -605,7 +605,23 @@
                         <div class="album-settings-section">
                             <h4>Prompts</h4>
                             <div class="album-settings-section__body">
-                                ${ct('character', 'Character', last_config.character)}
+                                <div class="form-group album-prompt-field">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                        <label for="cfg-character" style="margin-bottom: 0;">Character</label>
+                                        <div class="album-prompt-actions" style="display: flex; gap: 4px;">
+                                            <button type="button" class="album-action-btn album-btn-sysprompts" title="Edit settings (Prompt, allow)" style="background: none; border: none; cursor: pointer; color: var(--color-text-secondary); padding: 4px;">
+                                                <span class="material-symbols-outlined" style="font-size: 20px;">settings_suggest</span>
+                                            </button>
+                                            <button type="button" class="album-action-btn album-btn-genprompt" title="Generate prompt" style="background: none; border: none; cursor: pointer; color: var(--color-text-secondary); padding: 4px;">
+                                                <span class="material-symbols-outlined" style="font-size: 20px;">psychiatry</span>
+                                            </button>
+                                            <button type="button" class="album-action-btn album-btn-cancel" title="Cancel generation" style="display: none; background: none; border: none; cursor: pointer; color: #ff5252; padding: 4px;">
+                                                <span class="material-symbols-outlined" style="font-size: 20px;">stop_circle</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <textarea id="cfg-character" name="character" rows="1">${last_config.character || ''}</textarea>
+                                </div>
                                 ${isCharacterViewMode ? '' : ct('outfits', 'Outfits', last_config.outfits)}
                                 ${isCharacterViewMode ? '' : ct('expression', 'Expression', last_config.expression)}
                                 ${isCharacterViewMode ? '' : ct('action', 'Action', last_config.action)}
@@ -689,6 +705,7 @@
                     <form id="album-settings-form">${columnsHTML}</form>
                 </div>
                 <div class="modal-actions">
+                    <button type="button" class="btn-upload" title="Upload Image"><span class="material-symbols-outlined">upload</span></button>
                     <button type="button" class="btn-paste" title="Paste"><span class="material-symbols-outlined">content_paste</span></button>
                     <button type="button" class="btn-copy" title="Copy"><span class="material-symbols-outlined">content_copy</span></button>
                     <button type="button" class="btn-delete" title="Delete"><span class="material-symbols-outlined">delete_forever</span></button>
@@ -704,22 +721,22 @@
                 : { lora_strength_model: 1.0, lora_strength_clip: 1.0 };
             const saveBtn = dialog.querySelector('.btn-save');
             const generateBtn = dialog.querySelector('.btn-generate');
-                        // Unified LoRA wrapper template & initialization
-                        const loraContainer = dialog.querySelector('[data-role="lora-multi-container"]');
+            // Unified LoRA wrapper template & initialization
+            const loraContainer = dialog.querySelector('[data-role="lora-multi-container"]');
 
             const createLoraWrapperHTML = (index, value, smVal, scVal) => {
-                                const valEsc = escapeAttr(value || 'None');
-                                const sm = (typeof smVal === 'number' && !Number.isNaN(smVal)) ? smVal : (Number(loraDefaults.lora_strength_model) || 1.0);
-                                const sc = (typeof scVal === 'number' && !Number.isNaN(scVal)) ? scVal : (Number(loraDefaults.lora_strength_clip) || 1.0);
-                                return `
-                <div class=\"lora-multi-wrapper\" data-role=\"lora-multi-wrapper\" data-index=\"${index}\" data-empty=\"${(!value || value==='None') ? 'true' : 'false'}\">\n
+                const valEsc = escapeAttr(value || 'None');
+                const sm = (typeof smVal === 'number' && !Number.isNaN(smVal)) ? smVal : (Number(loraDefaults.lora_strength_model) || 1.0);
+                const sc = (typeof scVal === 'number' && !Number.isNaN(scVal)) ? scVal : (Number(loraDefaults.lora_strength_clip) || 1.0);
+                return `
+                <div class=\"lora-multi-wrapper\" data-role=\"lora-multi-wrapper\" data-index=\"${index}\" data-empty=\"${(!value || value === 'None') ? 'true' : 'false'}\">\n
                                     <div class=\"form-group lora-select-group\" data-role=\"lora-select-group\">\n
-                                        <label>LoRA #${index+1} <button type=\"button\" class=\"lora-remove-btn\" data-remove style=\"display:inline-flex\" title=\"Xóa LoRA\">&times;</button></label>\n
+                                        <label>LoRA #${index + 1} <button type=\"button\" class=\"lora-remove-btn\" data-remove style=\"display:inline-flex\" title=\"Xóa LoRA\">&times;</button></label>\n
                                         <button type=\"button\" class=\"lora-select-toggle\" aria-haspopup=\"listbox\" aria-expanded=\"false\">\n
                                             <div class=\"lora-select-toggle__thumb\"></div>\n
                                             <div class=\"lora-select-toggle__meta\">\n
-                                                <span class=\"lora-select-toggle__title\">${(value && value!=='None') ? escapeHtml(value) : 'Chọn một LoRA'}</span>\n
-                                                <span class=\"lora-select-toggle__subtitle\">${(value && value!=='None') ? escapeHtml(value) : 'Hoặc tải mới bằng Lora-downloader'}</span>\n
+                                                <span class=\"lora-select-toggle__title\">${(value && value !== 'None') ? escapeHtml(value) : 'Chọn một LoRA'}</span>\n
+                                                <span class=\"lora-select-toggle__subtitle\">${(value && value !== 'None') ? escapeHtml(value) : 'Hoặc tải mới bằng Lora-downloader'}</span>\n
                                             </div>\n
                                             <span class=\"material-symbols-outlined lora-select-toggle__icon\">expand_more</span>\n
                                         </button>\n
@@ -744,95 +761,95 @@
                                     </div>\n
                                     <div class=\"lora-tags-wrapper\" data-role=\"lora-tags-wrapper\"></div>\n
                                 </div>`;
-                        };
+            };
 
-                        const parseMultiLoraPreset = () => {
-                            // Priority: normalized chain from info -> last_config.lora_names -> multi_lora_names
-                            let names = [];
-                            if (normalizedLoraChain.length) {
-                                names = normalizedLoraChain.map(e => String(e.lora_name || '').trim()).filter(Boolean);
-                            }
-                            if (!names.length) {
-                                const namesRaw = loraNamesFromInfo.length ? loraNamesFromInfo : (last_config.lora_names || last_config.multi_lora_names || []);
-                                names = Array.isArray(namesRaw) ? namesRaw.filter(v => typeof v === 'string' && v.trim()) : [];
-                            }
-                            // Preferred structured format: array-of-arrays of strings
-                            const structured = Array.isArray(last_config.multi_lora_prompt_groups)
-                                ? last_config.multi_lora_prompt_groups.map(arr => Array.isArray(arr) ? arr.filter(Boolean) : [])
-                                : null;
-                            if (structured) {
-                                return { names, perLoraGroups: structured };
-                            }
-                            // Legacy string format: one parentheses block per LoRA; split content by comma into multiple groups
-                            const presetString = last_config.multi_lora_prompt_tags || '';
-                            const groupRegex = /\(([^)]*)\)/g;
-                            const perLoraGroups = [];
-                            let match;
-                            while ((match = groupRegex.exec(presetString)) !== null) {
-                                const content = (match[1] || '').trim();
-                                if (content) {
-                                    const parts = content.split(',').map(s => s.trim()).filter(Boolean);
-                                    perLoraGroups.push(parts);
-                                } else {
-                                    perLoraGroups.push([]);
-                                }
-                            }
-                            return { names, perLoraGroups };
-                        };
+            const parseMultiLoraPreset = () => {
+                // Priority: normalized chain from info -> last_config.lora_names -> multi_lora_names
+                let names = [];
+                if (normalizedLoraChain.length) {
+                    names = normalizedLoraChain.map(e => String(e.lora_name || '').trim()).filter(Boolean);
+                }
+                if (!names.length) {
+                    const namesRaw = loraNamesFromInfo.length ? loraNamesFromInfo : (last_config.lora_names || last_config.multi_lora_names || []);
+                    names = Array.isArray(namesRaw) ? namesRaw.filter(v => typeof v === 'string' && v.trim()) : [];
+                }
+                // Preferred structured format: array-of-arrays of strings
+                const structured = Array.isArray(last_config.multi_lora_prompt_groups)
+                    ? last_config.multi_lora_prompt_groups.map(arr => Array.isArray(arr) ? arr.filter(Boolean) : [])
+                    : null;
+                if (structured) {
+                    return { names, perLoraGroups: structured };
+                }
+                // Legacy string format: one parentheses block per LoRA; split content by comma into multiple groups
+                const presetString = last_config.multi_lora_prompt_tags || '';
+                const groupRegex = /\(([^)]*)\)/g;
+                const perLoraGroups = [];
+                let match;
+                while ((match = groupRegex.exec(presetString)) !== null) {
+                    const content = (match[1] || '').trim();
+                    if (content) {
+                        const parts = content.split(',').map(s => s.trim()).filter(Boolean);
+                        perLoraGroups.push(parts);
+                    } else {
+                        perLoraGroups.push([]);
+                    }
+                }
+                return { names, perLoraGroups };
+            };
 
-                        const applyPresetToWrapper = (wrapper, loraName, groupList) => {
-                            if (!wrapper) return;
-                            const hidden = wrapper.querySelector('input[type="hidden"][name^="lora_name_"]');
-                            if (hidden) hidden.value = loraName || 'None';
-                            const titleEl = wrapper.querySelector('.lora-select-toggle__title');
-                            const subtitleEl = wrapper.querySelector('.lora-select-toggle__subtitle');
-                            if (titleEl) titleEl.textContent = (loraName && loraName !== 'None') ? loraName : 'Chọn một LoRA';
-                            if (subtitleEl) subtitleEl.textContent = (loraName && loraName !== 'None') ? loraName : 'Hoặc tải mới bằng Lora-downloader';
-                            // After init, when tags are rendered we will toggle according to groupList
-                            wrapper.dataset.presetGroups = JSON.stringify(groupList || []);
-                        };
+            const applyPresetToWrapper = (wrapper, loraName, groupList) => {
+                if (!wrapper) return;
+                const hidden = wrapper.querySelector('input[type="hidden"][name^="lora_name_"]');
+                if (hidden) hidden.value = loraName || 'None';
+                const titleEl = wrapper.querySelector('.lora-select-toggle__title');
+                const subtitleEl = wrapper.querySelector('.lora-select-toggle__subtitle');
+                if (titleEl) titleEl.textContent = (loraName && loraName !== 'None') ? loraName : 'Chọn một LoRA';
+                if (subtitleEl) subtitleEl.textContent = (loraName && loraName !== 'None') ? loraName : 'Hoặc tải mới bằng Lora-downloader';
+                // After init, when tags are rendered we will toggle according to groupList
+                wrapper.dataset.presetGroups = JSON.stringify(groupList || []);
+            };
 
-                        const mountInitialWrappers = () => {
-                            if (!loraContainer) return [];
-                            const { names, perLoraGroups } = parseMultiLoraPreset();
-                            // Always render at least one wrapper; prefer normalized/explicit names
-                            const finalNames = names.length ? names : ['None'];
-                            loraContainer.innerHTML = '';
-                            const getInitStrengths = (idx, name) => {
-                                let sm = Number(loraDefaults.lora_strength_model) || 1.0;
-                                let sc = Number(loraDefaults.lora_strength_clip) || 1.0;
-                                if (Array.isArray(normalizedLoraChain) && normalizedLoraChain.length) {
-                                    const byIdx = normalizedLoraChain[idx];
-                                    if (byIdx && (!name || byIdx.lora_name === name)) {
-                                        const smRaw = byIdx.strength_model ?? byIdx.lora_strength_model;
-                                        const scRaw = byIdx.strength_clip ?? byIdx.lora_strength_clip;
-                                        if (typeof smRaw === 'number') sm = smRaw; else if (typeof smRaw === 'string') { const t = parseFloat(smRaw); if (!Number.isNaN(t)) sm = t; }
-                                        if (typeof scRaw === 'number') sc = scRaw; else if (typeof scRaw === 'string') { const t2 = parseFloat(scRaw); if (!Number.isNaN(t2)) sc = t2; }
-                                    } else if (name) {
-                                        const found = normalizedLoraChain.find(e => e && e.lora_name === name);
-                                        if (found) {
-                                            const smRaw = found.strength_model ?? found.lora_strength_model;
-                                            const scRaw = found.strength_clip ?? found.lora_strength_clip;
-                                            if (typeof smRaw === 'number') sm = smRaw; else if (typeof smRaw === 'string') { const t = parseFloat(smRaw); if (!Number.isNaN(t)) sm = t; }
-                                            if (typeof scRaw === 'number') sc = scRaw; else if (typeof scRaw === 'string') { const t2 = parseFloat(scRaw); if (!Number.isNaN(t2)) sc = t2; }
-                                        }
-                                    }
-                                }
-                                return { sm, sc };
-                            };
-                            finalNames.forEach((n, idx) => {
-                                const { sm, sc } = getInitStrengths(idx, n);
-                                const html = createLoraWrapperHTML(idx, n || 'None', sm, sc);
-                                const temp = document.createElement('div');
-                                temp.innerHTML = html.trim();
-                                const wrapper = temp.firstElementChild;
-                                loraContainer.appendChild(wrapper);
-                                applyPresetToWrapper(wrapper, n, perLoraGroups[idx] || []);
-                            });
-                            return Array.from(loraContainer.querySelectorAll('.lora-multi-wrapper'));
-                        };
-                        const mountedWrappers = mountInitialWrappers();
-                        const initialWrapper = mountedWrappers[0] || null;
+            const mountInitialWrappers = () => {
+                if (!loraContainer) return [];
+                const { names, perLoraGroups } = parseMultiLoraPreset();
+                // Always render at least one wrapper; prefer normalized/explicit names
+                const finalNames = names.length ? names : ['None'];
+                loraContainer.innerHTML = '';
+                const getInitStrengths = (idx, name) => {
+                    let sm = Number(loraDefaults.lora_strength_model) || 1.0;
+                    let sc = Number(loraDefaults.lora_strength_clip) || 1.0;
+                    if (Array.isArray(normalizedLoraChain) && normalizedLoraChain.length) {
+                        const byIdx = normalizedLoraChain[idx];
+                        if (byIdx && (!name || byIdx.lora_name === name)) {
+                            const smRaw = byIdx.strength_model ?? byIdx.lora_strength_model;
+                            const scRaw = byIdx.strength_clip ?? byIdx.lora_strength_clip;
+                            if (typeof smRaw === 'number') sm = smRaw; else if (typeof smRaw === 'string') { const t = parseFloat(smRaw); if (!Number.isNaN(t)) sm = t; }
+                            if (typeof scRaw === 'number') sc = scRaw; else if (typeof scRaw === 'string') { const t2 = parseFloat(scRaw); if (!Number.isNaN(t2)) sc = t2; }
+                        } else if (name) {
+                            const found = normalizedLoraChain.find(e => e && e.lora_name === name);
+                            if (found) {
+                                const smRaw = found.strength_model ?? found.lora_strength_model;
+                                const scRaw = found.strength_clip ?? found.lora_strength_clip;
+                                if (typeof smRaw === 'number') sm = smRaw; else if (typeof smRaw === 'string') { const t = parseFloat(smRaw); if (!Number.isNaN(t)) sm = t; }
+                                if (typeof scRaw === 'number') sc = scRaw; else if (typeof scRaw === 'string') { const t2 = parseFloat(scRaw); if (!Number.isNaN(t2)) sc = t2; }
+                            }
+                        }
+                    }
+                    return { sm, sc };
+                };
+                finalNames.forEach((n, idx) => {
+                    const { sm, sc } = getInitStrengths(idx, n);
+                    const html = createLoraWrapperHTML(idx, n || 'None', sm, sc);
+                    const temp = document.createElement('div');
+                    temp.innerHTML = html.trim();
+                    const wrapper = temp.firstElementChild;
+                    loraContainer.appendChild(wrapper);
+                    applyPresetToWrapper(wrapper, n, perLoraGroups[idx] || []);
+                });
+                return Array.from(loraContainer.querySelectorAll('.lora-multi-wrapper'));
+            };
+            const mountedWrappers = mountInitialWrappers();
+            const initialWrapper = mountedWrappers[0] || null;
 
 
             // --- Yuuka: Multi-LoRA dynamic add v1.0 ---
@@ -871,7 +888,7 @@
                     // Metadata may not be loaded yet; attempt local lookup only
                     const metadata = (Object.keys(loraMetadataMap).length && value !== 'None') ? findLoraMetadata(value) : null;
                     // Hide 'None' option from panel (user can remove wrapper to clear)
-                    if (value === 'None') return; 
+                    if (value === 'None') return;
                     let displayName = resolveLoraCharacterName(metadata, option.name || value);
                     let subtitle = (metadata?.filename || metadata?.name || option.name || value);
                     const thumbUrl = value === 'None' ? null : getLoraThumbnailUrl(metadata);
@@ -879,12 +896,12 @@
                     card.type = 'button';
                     card.className = 'lora-card';
                     card.dataset.value = value;
-                    card.setAttribute('role','option');
+                    card.setAttribute('role', 'option');
                     card.innerHTML = `
                         <div class="lora-card__thumb">${thumbUrl ? `<img src="${escapeAttr(thumbUrl)}" alt="${escapeAttr(displayName)}" loading="lazy">` : ''}</div>
                         <div class="lora-card__meta">
-                            <div class="lora-card__title">${escapeHtml(truncateText(displayName,40))}</div>
-                            <div class="lora-card__subtitle">${escapeHtml(truncateText(subtitle,40))}</div>
+                            <div class="lora-card__title">${escapeHtml(truncateText(displayName, 40))}</div>
+                            <div class="lora-card__subtitle">${escapeHtml(truncateText(subtitle, 40))}</div>
                         </div>
                     `;
                     // Clicking the thumbnail opens simple-viewer (does not select the LoRA)
@@ -921,7 +938,7 @@
                 let state = wrapperTagStates.get(stateKey);
                 let presetGroups = [];
                 if (parentWrapper && parentWrapper.dataset.presetGroups) {
-                    try { presetGroups = JSON.parse(parentWrapper.dataset.presetGroups) || []; } catch (_) {}
+                    try { presetGroups = JSON.parse(parentWrapper.dataset.presetGroups) || []; } catch (_) { }
                 }
                 const normalizedPreset = presetGroups.map(g => g.trim().toLowerCase());
                 if (!state || state.length !== trainedWords.length) {
@@ -940,7 +957,7 @@
                     const header = document.createElement('div');
                     header.className = 'lora-tag-card__header';
                     const title = document.createElement('span');
-                    title.textContent = `LoRA tags ${idx+1}`;
+                    title.textContent = `LoRA tags ${idx + 1}`;
                     const toggle = document.createElement('button');
                     toggle.type = 'button';
                     toggle.className = 'lora-tag-toggle';
@@ -971,7 +988,7 @@
                     if (label) {
                         const removeBtn = label.querySelector('[data-remove]');
                         // Reset text (firstChild text node)
-                        label.childNodes.forEach(node => { if (node.nodeType===3) node.textContent = `LoRA #${idx+1} `; });
+                        label.childNodes.forEach(node => { if (node.nodeType === 3) node.textContent = `LoRA #${idx + 1} `; });
                         if (removeBtn) removeBtn.style.display = '';
                     }
                     // Update strength inputs' name/id/for and display span ids to keep inline oninput working
@@ -1095,7 +1112,7 @@
                         card.style.display = (!term || value.includes(term) || text.includes(term)) ? '' : 'none';
                     });
                 });
-                clearBtn?.addEventListener('click', () => { if (searchInput){ searchInput.value=''; searchInput.dispatchEvent(new Event('input')); } });
+                clearBtn?.addEventListener('click', () => { if (searchInput) { searchInput.value = ''; searchInput.dispatchEvent(new Event('input')); } });
                 removeBtn?.addEventListener('click', () => {
                     wrapper.remove();
                     reindexLoraWrappers();
@@ -1308,7 +1325,7 @@
             // Legacy single-LoRA search panel and global tag toggles removed; selection is managed per-wrapper.
 
             if (window.Yuuka?.ui?._initTagAutocomplete) {
-                try { window.Yuuka.ui._initTagAutocomplete(dialog, tagPredictions); } catch(_) {}
+                try { window.Yuuka.ui._initTagAutocomplete(dialog, tagPredictions); } catch (_) { }
             }
             dialog.querySelectorAll('textarea').forEach(t => {
                 const autoResize = () => {
@@ -1389,6 +1406,34 @@
                 });
             }
 
+            const uploadBtn = dialog.querySelector('.btn-upload');
+            if (uploadBtn) {
+                uploadBtn.addEventListener('click', () => {
+                    if (typeof options.onUpload !== 'function') {
+                        showError("Chưa có hàm upload ảnh.");
+                        return;
+                    }
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = async (e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        if (file.size > 20 * 1024 * 1024) {
+                            showError("Dung lượng file vượt quá 20MB.");
+                            return;
+                        }
+                        close();
+                        try {
+                            await options.onUpload(file);
+                        } catch (err) {
+                            showError(`Upload thất bại: ${err?.message || err}`);
+                        }
+                    };
+                    input.click();
+                });
+            }
+
             const collectFormValues = () => {
                 const payload = {};
                 ['character', 'outfits', 'expression', 'action', 'context', 'quality', 'negative', 'server_address', 'sampler_name', 'scheduler', 'ckpt_name']
@@ -1403,7 +1448,7 @@
                 loraWrappers.forEach(wrapper => {
                     const hidden = wrapper.querySelector('input[type="hidden"][name^="lora_name_"]');
                     const loraName = (hidden?.value || 'None').trim();
-                    if (!loraName || loraName.toLowerCase()==='none') return;
+                    if (!loraName || loraName.toLowerCase() === 'none') return;
                     // Read per-LoRA strengths from sliders in this wrapper
                     const smInput = wrapper.querySelector('input[data-lora-strength="model"]');
                     const scInput = wrapper.querySelector('input[data-lora-strength="clip"]');
@@ -1531,7 +1576,7 @@
                             localStorage.setItem('yuuka.album.character.settings', JSON.stringify(payload.__character_settings));
                         } catch { }
                     }
-                } catch {}
+                } catch { }
                 setActionButtonsDisabled(true);
                 try {
                     try {
@@ -1596,6 +1641,17 @@
                     generateBtn.style.display = 'none';
                 }
             }
+
+            if (typeof options.onSysPrompts === 'function') {
+                const btnSys = dialog.querySelector('.album-btn-sysprompts');
+                if (btnSys) btnSys.addEventListener('click', () => options.onSysPrompts(dialog, form));
+            }
+            if (typeof options.onGeneratePrompt === 'function') {
+                const btnGen = dialog.querySelector('.album-btn-genprompt');
+                const btnCancel = dialog.querySelector('.album-btn-cancel');
+                if (btnGen) btnGen.addEventListener('click', () => options.onGeneratePrompt(dialog, form, btnGen, btnCancel));
+            }
+
         } catch (e) {
             close();
             let friendlyMessage = "Lỗi: Không thể mở modal cấu hình.";

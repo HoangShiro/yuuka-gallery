@@ -39,6 +39,14 @@ class OpenAIIntegrationError(RuntimeError):
     """Raised when an OpenAI-compatible request cannot be fulfilled."""
 
 
+# Local providers that do not require a real API key.
+# Maps provider name -> default base_url.
+LOCAL_PROVIDERS: Dict[str, str] = {
+    "ollama": "http://localhost:11434/v1",
+    "lmstudio": "http://localhost:1234/v1",
+}
+
+
 def _first_env_match(candidates: Iterable[str]) -> Optional[str]:
     for variable in candidates:
         value = os.getenv(variable)
@@ -111,15 +119,22 @@ def resolve_provider_config(
         )
     )
 
+    is_local = provider in LOCAL_PROVIDERS
     if not api_key:
-        raise OpenAIIntegrationError(
-            f"No API key available for provider '{provider}'. "
-            "Supply one via user input, overrides, or environment variables."
-        )
+        if is_local:
+            # Local providers (Ollama, LM Studio) don't need a real key.
+            api_key = "ollama"
+        else:
+            raise OpenAIIntegrationError(
+                f"No API key available for provider '{provider}'. "
+                "Supply one via user input, overrides, or environment variables."
+            )
 
     base_url = pick_value("BASE_URL")
     if not base_url and overrides.get("endpoint"):
         base_url = overrides["endpoint"]
+    if not base_url and is_local:
+        base_url = LOCAL_PROVIDERS[provider]
 
     organization = pick_value("ORGANIZATION")
     default_model = overrides.get("default_model") or pick_value("DEFAULT_MODEL")

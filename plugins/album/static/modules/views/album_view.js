@@ -32,11 +32,13 @@
         },
 
         renderCharacterAlbumView() {
+            if (!this.contentArea) return;
             this.contentArea.innerHTML = `<div class="plugin-album__grid image-grid"></div>`;
             this._renderImageGrid();
         },
 
         updateUI(state, text = '') {
+            if (!this.contentArea) return;
             if (state === 'error') {
                 this.contentArea.innerHTML = `<div class="error-msg">${text}</div>`;
             } else if (state === 'loading') {
@@ -45,11 +47,11 @@
         },
 
         async _startGeneration(configOverrides = {}) {
-            if (this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length >= 5) { showError("Đã đạt giới hạn 5 tác vụ đồng thời."); return; }
+            if (this.contentArea && this.contentArea.querySelectorAll('.plugin-album__grid .placeholder-card').length >= 5) { showError("Đã đạt giới hạn 5 tác vụ đồng thời."); return; }
             if (!this.state.isComfyUIAvaidable) { showError("ComfyUI chưa kết nối."); return; }
             let tempTaskId = `temp_${Date.now()}`;
             try {
-                const grid = this.contentArea.querySelector('.plugin-album__grid');
+                const grid = this.contentArea ? this.contentArea.querySelector('.plugin-album__grid') : null;
                 if (grid) {
                     const placeholder = this._createPlaceholderCard(tempTaskId);
                     grid.prepend(placeholder);
@@ -125,7 +127,7 @@
                 this.state.allImageData = images;
                 this.renderCharacterAlbumView(); // Render layout cơ bản
 
-                const grid = this.contentArea.querySelector('.plugin-album__grid');
+                const grid = this.contentArea ? this.contentArea.querySelector('.plugin-album__grid') : null;
                 if (!grid) return;
 
                 // Lọc các tác vụ đang chạy chỉ cho nhân vật hiện tại
@@ -154,6 +156,7 @@
         },
 
         _renderImageGrid() {
+            if (!this.contentArea) return;
             const grid = this.contentArea.querySelector('.plugin-album__grid');
             if (!grid) return;
             grid.innerHTML = '';
@@ -203,17 +206,44 @@
             const c = document.createElement('div');
             c.className = 'plugin-album__album-card plugin-album__image-card';
             c.dataset.id = imgData.id;
-            c.innerHTML = `<img src="${imgData.pv_url}" alt="Art" loading="lazy">`;
 
-            // Only open viewer when clicking exactly on the image.
-            // (Users may click around the card shadow/padding; that should not open.)
-            const imgEl = c.querySelector('img');
-            if (imgEl) {
-                imgEl.addEventListener('click', (e) => {
+            const isVideo = !!(imgData.is_video || (imgData.pv_url || '').endsWith('.webm') || (imgData.pv_url || '').endsWith('.mp4'));
+
+            if (isVideo) {
+                c.classList.add('video-card');
+                // Use the actual video URL (imgData.url) as <video> src, not pv_url which is a PNG placeholder.
+                // pv_url is used as the poster fallback image.
+                const videoSrc = imgData.url || imgData.pv_url;
+                const posterSrc = imgData.pv_url || '';
+                c.innerHTML = `
+                    <video src="${videoSrc}#t=0.001" poster="${posterSrc}" loop muted playsinline preload="metadata" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px;"></video>
+                    <div class="video-indicator"><span class="material-symbols-outlined">play_circle</span></div>
+                `;
+                const vidEl = c.querySelector('video');
+
+                c.addEventListener('mouseenter', () => {
+                    vidEl.play().catch(() => { });
+                });
+                c.addEventListener('mouseleave', () => {
+                    vidEl.pause();
+                    vidEl.currentTime = 0.001;
+                });
+
+                vidEl.addEventListener('click', (e) => {
                     try { e.preventDefault(); e.stopPropagation(); } catch { }
                     this.renderImageViewer(imgData);
                 });
+            } else {
+                c.innerHTML = `<img src="${imgData.pv_url}" alt="Art" loading="lazy">`;
+                const imgEl = c.querySelector('img');
+                if (imgEl) {
+                    imgEl.addEventListener('click', (e) => {
+                        try { e.preventDefault(); e.stopPropagation(); } catch { }
+                        this.renderImageViewer(imgData);
+                    });
+                }
             }
+
             return c;
         },
 

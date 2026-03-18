@@ -11,22 +11,39 @@
     },
     "assets": {
         "js": [
-            "chat-bootstrap.js",
-            "controllers/chat-snapshot-manager.js",
-            "controllers/chat-message-actions.js",
-            "services/chat-api.js",
-            "stores/chat-store.js",
-            "components/tab-character-list.js",
-            "components/tab-chat-list.js",
-            "components/tab-chat-page.js",
-            "components/tab-character-definition.js",
-            "components/tab-generation-settings.js",
-            "modals/message-controls.js",
-            "chat.js"
+            "js/emotion_engine/engine.js",
+            "js/emotion_engine/emotion_editor.js",
+            "js/action_engine/engine.js",
+            "js/action_engine/action_editor.js",
+            "chat.js",
+            "js/utils/historyStateEngine.js",
+            "js/utils/chatUtils.js",
+            "js/components/chatDock.js",
+            "js/tabs/chatHome.js",
+            "js/tabs/chatList.js",
+            "js/tabs/chatGroupList.js",
+            "js/tabs/chatUserPersona.js",
+            "js/tabs/chatSettings.js",
+            "js/tabs/chatCreation.js",
+            "js/tabs/chatGroupCreation.js",
+            "js/tabs/chatStatusUI.js",
+            "js/tabs/chatMemory.js",
+            "js/tabs/chatImageGen.js",
+            "js/tabs/chatMessageActions.js",
+            "js/tabs/chatRenderer.js",
+            "js/tabs/chatStreaming.js",
+            "js/tabs/chatGroupStreaming.js",
+            "js/tabs/chatSystemAction.js",
+            "js/tabs/chatCommand.js",
+            "js/tabs/chatScenario.js",
+            "js/tabs/chatSceneEdit.js",
+            "js/tabs/chatRuleEdit.js",
+            "js/tabs/chatView.js",
+            "js/tabs/chatGroupView.js",
+            "js/tabs/chatGroupInventory.js"
         ],
         "css": [
-            "chat.css",
-            "ui-settings.css"
+            "chat.css"
         ]
     },
     "dependencies": {

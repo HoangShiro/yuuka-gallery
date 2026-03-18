@@ -1,0 +1,128 @@
+{
+    "version": 1,
+    "max_active_types": 2,
+    "stamina": {
+        "max": 100,
+        "regen_per_turn": 10,
+        "tags": {
+            "0": [
+                "exhausted"
+            ],
+            "25": [
+                "tired"
+            ],
+            "50": [
+                "normal"
+            ],
+            "75": [
+                "energetic"
+            ]
+        }
+    },
+    "solo_types": {
+        "standing": {
+            "group": 0,
+            "decay": 0,
+            "stamina": 0,
+            "tags": [
+                "standing"
+            ]
+        },
+        "sitting": {
+            "group": 0,
+            "decay": 0,
+            "stamina": 0,
+            "tags": [
+                "sitting"
+            ]
+        },
+        "lying_down": {
+            "group": 0,
+            "decay": 0,
+            "stamina": 0,
+            "tags": [
+                "lying_down"
+            ]
+        },
+        "walking": {
+            "group": 0,
+            "decay": 0,
+            "stamina": -5,
+            "tags": [
+                "walking"
+            ]
+        },
+        "running": {
+            "group": 0,
+            "decay": -10,
+            "stamina": -15,
+            "tags": [
+                "running"
+            ]
+        },
+        "reading": {
+            "group": 1,
+            "decay": 0,
+            "stamina": 0,
+            "tags": [
+                "reading",
+                "book"
+            ]
+        },
+        "drinking": {
+            "group": 1,
+            "decay": -10,
+            "stamina": 0,
+            "tags": [
+                "drinking",
+                "cup"
+            ]
+        },
+        "waving": {
+            "group": 1,
+            "decay": -10,
+            "stamina": 0,
+            "tags": [
+                "waving"
+            ]
+        }
+    },
+    "duo_types": {
+        "holding_hands": {
+            "group": 0,
+            "decay": 0,
+            "stamina": 0,
+            "tags": [
+                "holding_hands",
+                "interlocked_fingers"
+            ]
+        },
+        "hug": {
+            "group": 0,
+            "decay": 0,
+            "stamina": 0,
+            "tags": [
+                "hug",
+                "arms_around_neck"
+            ]
+        },
+        "headpat": {
+            "group": 1,
+            "decay": -10,
+            "stamina": 0,
+            "tags": [
+                "head_pat",
+                "happy"
+            ]
+        },
+        "kiss": {
+            "group": 0,
+            "decay": 0,
+            "stamina": 0,
+            "tags": [
+                "kiss",
+                "closed_eyes"
+            ]
+        }
+    }
+}

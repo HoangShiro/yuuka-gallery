@@ -22,6 +22,7 @@
             "modules/core/capabilities_instance.js",
             "modules/core/navibar.js",
             "modules/core/settings_modal.js",
+            "modules/core/i2v_modal.js",
             "modules/views/grid.js",
             "modules/views/album_view.js",
             "modules/views/character/domain/categories.js",

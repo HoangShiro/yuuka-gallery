@@ -65,7 +65,7 @@
                 seed: 0,
                 sampler_name: 'euler_ancestral',
                 scheduler: 'karras',
-                ckpt_name: 'waiNSFWIllustrious_v150.safetensors',
+                ckpt_name: 'waiNSFWIllustrious_v140.safetensors',
                 server_address: '127.0.0.1:8888',
                 width: 832,
                 height: 1216

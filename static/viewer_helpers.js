@@ -40,7 +40,7 @@
                     const s = cfg.lora_name.trim();
                     if (s && s.toLowerCase() !== 'none') return 1;
                 }
-            } catch (e) {}
+            } catch (e) { }
             return 0;
         };
 
@@ -133,21 +133,14 @@
             return cfg.lora_name;
         };
 
-        const infoGrid = `<div class="info-grid">${
-            buildRow('Model', cfg.ckpt_name?.split('.')[0])
-        }${
-            buildRow('Sampler', `${cfg.sampler_name} (${cfg.scheduler})`)
-        }${
-            buildRow('Image Size', `${cfg.width}x${cfg.height}`)
-        }${
-            buildRow('Steps', cfg.steps)
-        }${
-            buildRow('CFG', cfg.cfg)
-        }${
-            buildRow('LoRA', displayLoRA())
-        }${
-            buildRow('Workflow', resolveWorkflowDisplay())
-        }</div>`;
+        const infoGrid = `<div class="info-grid">${buildRow('Model', cfg.ckpt_name?.split('.')[0])
+            }${buildRow('Sampler', `${cfg.sampler_name} (${cfg.scheduler})`)
+            }${buildRow('Image Size', `${cfg.width}x${cfg.height}`)
+            }${buildRow('Steps', cfg.steps)
+            }${buildRow('CFG', cfg.cfg)
+            }${buildRow('LoRA', displayLoRA())
+            }${buildRow('Workflow', resolveWorkflowDisplay())
+            }</div>`;
 
         const loraTags = (() => {
             // First, try structured multi groups
@@ -181,6 +174,13 @@
     };
 
     const normalizeDisabled = (value) => {
+        if (typeof value === 'function') return value;
+        if (value === undefined || value === null) return null;
+        const fixed = !!value;
+        return () => fixed;
+    };
+
+    const normalizeHidden = (value) => {
         if (typeof value === 'function') return value;
         if (value === undefined || value === null) return null;
         const fixed = !!value;
@@ -221,6 +221,7 @@
                 icon: 'auto_awesome',
                 title: config.regen.title || 'Re-Generate',
                 disabled: normalizeDisabled(config.regen.disabled),
+                hidden: normalizeHidden(config.regen.hidden),
                 onClick: config.regen.onClick,
             });
         }
@@ -231,7 +232,19 @@
                 icon: 'wand_stars',
                 title: config.hires.title || 'Hires x2',
                 disabled: normalizeDisabled(config.hires.disabled),
+                hidden: normalizeHidden(config.hires.hidden),
                 onClick: config.hires.onClick,
+            });
+        }
+
+        if (config.i2v && typeof config.i2v.onClick === 'function') {
+            buttons.push({
+                id: 'i2v',
+                icon: 'animated_images',
+                title: config.i2v.title || 'I2V (DaSiWa WAN2)',
+                disabled: normalizeDisabled(config.i2v.disabled),
+                hidden: normalizeHidden(config.i2v.hidden),
+                onClick: config.i2v.onClick,
             });
         }
 
@@ -240,6 +253,7 @@
                 id: 'copy',
                 icon: 'content_copy',
                 title: config.copy.title || 'Copy Prompt',
+                hidden: normalizeHidden(config.copy.hidden),
                 onClick: config.copy.onClick,
             });
         }
@@ -249,6 +263,7 @@
                 id: 'delete',
                 icon: 'delete',
                 title: config.delete.title || 'Remove Image',
+                hidden: normalizeHidden(config.delete.hidden),
                 onClick: config.delete.onClick,
             });
         }

@@ -23,7 +23,7 @@
     max-width: 90vw;
     max-height: 80vh;
     border-radius: var(--rounded-md);
-    box-shadow: 0 0 30px rgba(0,0,0,0.5);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
 }
 
 #modal-caption {
@@ -54,13 +54,16 @@
     background-color: var(--color-card-bg);
     color: var(--color-primary-text);
 }
+
 .modal-action-btn:hover {
     transform: scale(1.1);
 }
+
 .modal-action-btn.is-active {
     background-color: var(--color-accent);
     color: white;
 }
+
 .modal-action-btn.is-active .material-symbols-outlined {
     font-variation-settings: 'FILL' 1;
 }
@@ -82,7 +85,7 @@
     font-size: 28px;
     line-height: 1;
     z-index: 2;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
     backdrop-filter: saturate(150%) blur(2px);
     transition: transform 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
 }
@@ -111,10 +114,10 @@
     position: relative;
 }
 
-.card-album-btn {
+.card-album-btn,
+.card-chat-btn {
     position: absolute;
     top: 6px;
-    right: 6px;
     background-color: rgba(0, 0, 0, 0.5);
     color: white;
     border: none;
@@ -131,16 +134,28 @@
     z-index: 5;
 }
 
-.character-card:hover .card-album-btn {
+.card-album-btn {
+    right: 6px;
+}
+
+.card-chat-btn {
+    right: 44px;
+    /* 32px width + 12px padding between buttons if needed, or just 6 + 32 + 6 = 44 */
+}
+
+.character-card:hover .card-album-btn,
+.character-card:hover .card-chat-btn {
     opacity: 1;
     transform: scale(1);
 }
 
-.card-album-btn:hover {
+.card-album-btn:hover,
+.card-chat-btn:hover {
     background-color: var(--color-accent);
 }
 
-.card-album-btn .material-symbols-outlined {
+.card-album-btn .material-symbols-outlined,
+.card-chat-btn .material-symbols-outlined {
     font-size: 20px;
 }
 
@@ -148,11 +163,14 @@
 #gallery {
     /* Use a variable for item size, with a fallback */
     grid-template-columns: repeat(auto-fill, minmax(var(--gallery-item-size, 150px), 1fr));
-    transition: grid-template-columns 0.1s ease-out; /* Add a little transition */
+    transition: grid-template-columns 0.1s ease-out;
+    /* Add a little transition */
 }
 
 /* Yuuka: grid zoom v2.0 - Add styles for the zoom drag action */
 body.is-zooming {
-    cursor: ew-resize; /* East-West resize cursor */
-    user-select: none; /* Prevent text selection during drag */
+    cursor: ew-resize;
+    /* East-West resize cursor */
+    user-select: none;
+    /* Prevent text selection during drag */
 }

@@ -207,7 +207,16 @@ class GenerationService:
     def _run_task(self, user_hash, task_id, character_hash, cfg_data):
         ws = None
         execution_successful = False
-        start_time = None 
+        start_time = None
+        # Yuuka: I2V timeout support
+        context = None
+        with self._get_user_lock(user_hash):
+            context = self.user_states.get(user_hash, {}).get("tasks", {}).get(task_id, {}).get("context") or {}
+        timeout_seconds = None
+        if isinstance(context, dict):
+            ts = context.get('timeout_seconds')
+            if ts and int(ts) > 0:
+                timeout_seconds = int(ts)
         try:
             client_id = str(uuid.uuid4())
             seed = uuid.uuid4().int % (10**15) if int(cfg_data.get("seed", 0)) == 0 else int(cfg_data.get("seed", 0))
@@ -269,16 +278,29 @@ class GenerationService:
 
             ws = websocket.WebSocket()
             ws.connect(f"ws://{target_address}/ws?clientId={client_id}", timeout=10)
+            # Set a short timeout for recv so we can periodically check for user cancellation or overall task timeout
+            ws.settimeout(3.0)
             websocket_closed_early = False
 
             while True:
                 with self._get_user_lock(user_hash):
                     task = self.user_states[user_hash]["tasks"].get(task_id)
                     if not task or task.get('cancel_requested'): raise InterruptedError("Cancelled by user.")
-                try: out = ws.recv()
-                except (websocket.WebSocketTimeoutException, websocket.WebSocketConnectionClosedException):
+                
+                # Yuuka: I2V timeout check
+                if timeout_seconds and start_time and (time.time() - start_time) > timeout_seconds:
+                    raise TimeoutError(f"Task timed out after {timeout_seconds}s.")
+                
+                try:
+                    out = ws.recv()
+                except websocket.WebSocketTimeoutException:
+                    # Expected: no messages from ComfyUI for 3s (e.g. during a long generation step).
+                    # Just loop back to check cancellation/timeout and recv again.
+                    continue
+                except websocket.WebSocketConnectionClosedException:
                     websocket_closed_early = True
                     break
+                
                 if not isinstance(out, str): continue
                 try: message = json.loads(out)
                 except json.JSONDecodeError: continue
@@ -305,10 +327,14 @@ class GenerationService:
             
             history_outputs = {}
             image_b64 = None
+            video_b64 = None
             history_error = None
 
-            max_history_attempts = 60
+            max_history_attempts = 360
             for attempt in range(max_history_attempts):
+                # Yuuka: I2V timeout check in history poll
+                if timeout_seconds and start_time and (time.time() - start_time) > timeout_seconds:
+                    raise TimeoutError(f"Task timed out after {timeout_seconds}s.")
                 try:
                     history = self.core_api.comfy_api_client.get_history(prompt_id, target_address)
                 except Exception as err:
@@ -320,15 +346,26 @@ class GenerationService:
                 if not isinstance(history_outputs, dict):
                     history_outputs = {}
                 node_output = history_outputs.get(output_node_id, {})
-                images_base64 = node_output.get("images_base64") if isinstance(node_output, dict) else None
-                if images_base64:
-                    image_b64 = images_base64[0]
-                    execution_successful = True
-                    break
+                if isinstance(node_output, dict):
+                    # Check for image output (ImageToBase64_Yuuka)
+                    images_base64 = node_output.get("images_base64")
+                    if images_base64:
+                        image_b64 = images_base64[0]
+                        execution_successful = True
+                        break
+                    # Check for video output (VideoToBase64_Yuuka)
+                    video_base64_list = node_output.get("video_base64")
+                    if video_base64_list:
+                        video_b64 = video_base64_list[0]
+                        execution_successful = True
+                        break
 
                 time.sleep(1.0)
 
-            if execution_successful and image_b64:
+            result_b64 = image_b64 or video_b64
+            is_video_result = video_b64 is not None
+
+            if execution_successful and result_b64:
                 # Clear progress line before final output
                 self._clear_progress_line()
                 with self._get_user_lock(user_hash):
@@ -344,11 +381,16 @@ class GenerationService:
                 except Exception:
                     alpha_flag = False
 
-                new_metadata = self.image_service.save_image_metadata(
-                    user_hash, character_hash, image_b64, cfg_data, creation_duration, alpha=alpha_flag
-                )
+                if is_video_result:
+                    new_metadata = self.image_service.save_video_metadata(
+                        user_hash, character_hash, video_b64, cfg_data, creation_duration
+                    )
+                else:
+                    new_metadata = self.image_service.save_image_metadata(
+                        user_hash, character_hash, image_b64, cfg_data, creation_duration, alpha=alpha_flag
+                    )
                 if not new_metadata:
-                    raise Exception("L\u01b0u \u1ea3nh th\u1ea5t b\u1ea1i.")
+                    raise Exception("L\u01b0u k\u1ebft qu\u1ea3 th\u1ea5t b\u1ea1i.")
 
                 # Yuuka: console notify when generation completes
                 try:
@@ -357,26 +399,40 @@ class GenerationService:
                     user_tail = user_hash[-4:]
                     cfg_gc = new_metadata.get('generationConfig', {}) or {}
                     workflow_label = self._format_workflow_label(cfg_gc)
+                    media_type = "Video" if is_video_result else "Art"
                     # image size: try width/height from config, else '?' placeholders
                     width = cfg_gc.get('width') or cfg_gc.get('img_width') or '?'
                     height = cfg_gc.get('height') or cfg_gc.get('img_height') or '?'
                     size_label = f"{width} x {height}"
                     GREEN = "\033[32m"; RESET = "\033[0m"
-                    print(f"{GREEN}[{dt_str}] Art Generation: {user_tail} | {workflow_label} | {size_label} | {round(creation_duration,2)}s{RESET}")
+                    print(f"{GREEN}[{dt_str}] {media_type} Generation: {user_tail} | {workflow_label} | {size_label} | {round(creation_duration,2)}s{RESET}")
                 except Exception:
                     pass
 
-                self._add_event(user_hash, "IMAGE_SAVED", {"task_id": task_id, "image_data": new_metadata, "context": task.get("context")})
+                event_type = "VIDEO_SAVED" if is_video_result else "IMAGE_SAVED"
+                self._add_event(user_hash, event_type, {"task_id": task_id, "image_data": new_metadata, "context": task.get("context")})
             else:
-                if history_error and image_b64 is None:
+                if history_error and result_b64 is None:
                     raise ConnectionAbortedError(f"WebSocket closed early and history unavailable: {history_error}")
                 if websocket_closed_early and not execution_successful:
                     raise ConnectionAbortedError("WebSocket connection lost before prompt finished execution.")
-                raise Exception(f"Kh\u00f4ng t\u00ecm th\u1ea5y d\u1eef li\u1ec7u \u1ea3nh base64 trong node '{output_node_id}'")
+                raise Exception(f"Kh\u00f4ng t\u00ecm th\u1ea5y d\u1eef li\u1ec7u base64 trong node '{output_node_id}'")
 
         except InterruptedError as e:
              self._clear_progress_line()
              print(f"✅ [GenService Task {task_id}] Cancelled gracefully for user {user_hash}.")
+        except TimeoutError as e:
+            self._clear_progress_line()
+            print(f"⏰ [GenService Task {task_id}] Timed out for user {user_hash}: {e}")
+            # Auto-cancel on ComfyUI side
+            try:
+                self.request_cancellation(user_hash, task_id)
+            except Exception:
+                pass
+            with self._get_user_lock(user_hash):
+                task = self.user_states[user_hash]["tasks"].get(task_id)
+                if task:
+                    task['error_message'] = f"Lỗi: Task quá thời gian ({timeout_seconds}s)"
         except Exception as e:
             self._clear_progress_line()
             msg = str(e)

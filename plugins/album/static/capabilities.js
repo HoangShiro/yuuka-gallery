@@ -149,17 +149,19 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                         context,
                         quality,
                         negative,
+                        ckpt_name,
                     } = args;
                     let resolvedHash = null;
+                    let resolvedName = character_name || null;
+                    const inst = (this && this.state && this._startGeneration)
+                        ? this
+                        : resolveAlbumInstance();
 
                     // Ưu tiên character_hash nếu được truyền trực tiếp
                     if (character_hash && typeof character_hash === 'string') {
                         resolvedHash = character_hash;
                     } else if (character_name && typeof character_name === 'string') {
                         // Thử tìm album theo tên nếu không có hash
-                        const inst = (this && this.state && this._startGeneration)
-                            ? this
-                            : resolveAlbumInstance();
                         if (!inst || !inst.api || !inst.api.album) {
                             throw new Error('Không thể tìm album theo tên: AlbumComponent hoặc API chưa sẵn sàng.');
                         }
@@ -177,6 +179,7 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                                 throw new Error(`Không tìm thấy album nào khớp với tên: ${character_name}`);
                             }
                             resolvedHash = matched.hash;
+                            resolvedName = matched.name || resolvedName;
                         } catch (err) {
                             console.warn('[Album] Failed to resolve character by name in image.generate capability:', err);
                             throw err;
@@ -187,20 +190,33 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                         throw new Error('Missing or invalid character identifier for image.generate (cần character_hash hoặc character_name).');
                     }
 
-                    const self = (this && this.state && this._startGeneration)
-                        ? this
-                        : resolveAlbumInstance();
+                    const self = inst;
                     if (!self || !self.state || !self._startGeneration) {
                         throw new Error('Album capability is not attached to an active AlbumComponent instance.');
+                    }
+
+                    // Nếu truyền character_hash nhưng không có resolvedName và đang là Unknown, cố gắng tìm tên từ API
+                    if (!resolvedName && (!self.state.selectedCharacter || self.state.selectedCharacter.hash !== resolvedHash || !self.state.selectedCharacter.name || self.state.selectedCharacter.name === 'Unknown')) {
+                        try {
+                            const albums = await self.api.album.get('/albums');
+                            if (Array.isArray(albums)) {
+                                const matched = albums.find(a => a && a.hash === resolvedHash) || null;
+                                if (matched && matched.name) {
+                                    resolvedName = matched.name;
+                                }
+                            }
+                        } catch (e) { }
                     }
 
                     if (!self.state.selectedCharacter || self.state.selectedCharacter.hash !== resolvedHash) {
                         self.state.selectedCharacter = {
                             hash: resolvedHash,
-                            name: self.state.selectedCharacter?.name || 'Unknown',
+                            name: resolvedName || self.state.selectedCharacter?.name || 'Unknown',
                         };
                         self.state.viewMode = 'album';
                         await self.loadAndDisplayCharacterAlbum();
+                    } else if (resolvedName && (!self.state.selectedCharacter.name || self.state.selectedCharacter.name === 'Unknown')) {
+                        self.state.selectedCharacter.name = resolvedName;
                     }
 
                     // Đảm bảo đã có comfy settings/config trước khi override các field
@@ -222,9 +238,13 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                     if (typeof context === 'string') baseConfig.context = context;
                     if (typeof quality === 'string') baseConfig.quality = quality;
                     if (typeof negative === 'string') baseConfig.negative = negative;
+                    if (typeof ckpt_name === 'string') baseConfig.ckpt_name = ckpt_name;
 
                     cached.last_config = baseConfig;
                     self.state.cachedComfySettings = cached;
+
+                    // Inject hash into config so _startGeneration doesn't crash if state is cleared async
+                    baseConfig.character_hash = resolvedHash;
 
                     await self._startGeneration(baseConfig);
                     return {
@@ -502,7 +522,7 @@ function registerAlbumCapabilitiesAtLoad(windowObj = window) {
                     });
                     try {
                         windowObj?.Yuuka?.events?.emit?.('generation:task_created_locally', response);
-                    } catch (_e) {}
+                    } catch (_e) { }
                     return { status: 'started', image_id, via: 'api', response };
                 },
             });

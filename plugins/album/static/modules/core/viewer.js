@@ -19,6 +19,27 @@
                 return `<div class="info-row"><strong>${label}:</strong> <span>${span.innerHTML}</span></div>`;
             };
 
+            const createdText = it.createdAt ? new Date(it.createdAt * 1000).toLocaleString('vi-VN') : '';
+            const renderTime = it.creationTime ? `${Number(it.creationTime).toFixed(2)} giây` : '';
+
+            // Handle Video Information separately
+            if (it.is_video || (it.url && (it.url.endsWith('.webm') || it.url.endsWith('.mp4')))) {
+                const promptRows = buildRow('Prompt', cfg.prompt) + buildRow('Positive Prompt', cfg.positive_prompt);
+                const infoGrid = `<div class="info-grid">${buildRow('Video Length', cfg.seconds ? `${cfg.seconds} seconds` : '')
+                    }${buildRow('FPS', cfg.fps)
+                    }${buildRow('Dimension', `${cfg.width || '?'}x${cfg.height || '?'}`)
+                    }${buildRow('Workflow', cfg.workflow_type || cfg._workflow_type)
+                    }</div>`;
+
+                const sections = [];
+                if (promptRows) sections.push(promptRows, '<hr>');
+                sections.push(infoGrid);
+                if (createdText || renderTime) sections.push('<hr>');
+                if (createdText) sections.push(buildRow('Created', createdText));
+                if (renderTime) sections.push(buildRow('Render time', renderTime));
+                return sections.filter(Boolean).join('').trim();
+            }
+
             const resolveWorkflowDisplay = () => {
                 const normalize = (value) => String(value || '').trim().toLowerCase();
                 const workflowTemplate = String(cfg.workflow_template || '').trim();
@@ -83,20 +104,12 @@
                 .map(key => buildRow(key.charAt(0).toUpperCase() + key.slice(1), cfg[key]))
                 .filter(Boolean)
                 .join('');
-            const createdText = it.createdAt ? new Date(it.createdAt * 1000).toLocaleString('vi-VN') : '';
-            const renderTime = it.creationTime ? `${Number(it.creationTime).toFixed(2)} giây` : '';
-            const infoGrid = `<div class="info-grid">${
-                buildRow('Model', cfg.ckpt_name?.split('.')[0])
-            }${
-                buildRow('Sampler', `${cfg.sampler_name} (${cfg.scheduler})`)
-            }${
-                buildRow('Image Size', `${cfg.width}x${cfg.height}`)
-            }${
-                buildRow('Steps', cfg.steps)
-            }${
-                buildRow('CFG', cfg.cfg)
-            }${
-                (() => {
+            const infoGrid = `<div class="info-grid">${buildRow('Model', cfg.ckpt_name?.split('.')[0])
+                }${buildRow('Sampler', `${cfg.sampler_name} (${cfg.scheduler})`)
+                }${buildRow('Image Size', `${cfg.width}x${cfg.height}`)
+                }${buildRow('Steps', cfg.steps)
+                }${buildRow('CFG', cfg.cfg)
+                }${(() => {
                     const displayLoRA = () => {
                         if (Array.isArray(cfg.lora_chain) && cfg.lora_chain.length) {
                             return cfg.lora_chain.map(item => {
@@ -117,9 +130,8 @@
                     };
                     return buildRow('LoRA', displayLoRA());
                 })()
-            }${
-                buildRow('Workflow', resolveWorkflowDisplay())
-            }</div>`;
+                }${buildRow('Workflow', resolveWorkflowDisplay())
+                }</div>`;
             const loraTags = (() => {
                 // Prefer structured multi-LoRA groups if present
                 if (Array.isArray(cfg.multi_lora_prompt_groups)) {
@@ -201,8 +213,15 @@
 
         const copyPromptHandler = (item) => {
             const cfg = item.generationConfig;
-            const keys = ['outfits', 'expression', 'action', 'context', 'quality', 'negative'];
-            const clipboardData = keys.map(key => [key, cfg[key] ? String(cfg[key]).trim() : '']);
+            let clipboardData;
+
+            if (item.is_video || (item.url && (item.url.endsWith('.webm') || item.url.endsWith('.mp4')))) {
+                clipboardData = [['Prompt', cfg.prompt ? String(cfg.prompt).trim() : '']];
+            } else {
+                const keys = ['outfits', 'expression', 'action', 'context', 'quality', 'negative'];
+                clipboardData = keys.map(key => [key, cfg[key] ? String(cfg[key]).trim() : '']);
+            }
+
             this._setPromptClipboard(clipboardData);
             showError('Prompt đã sao chép.');
         };
@@ -223,11 +242,16 @@
             }
         };
 
+        const isVideoItem = (item) => {
+            return !!(item.is_video || (item.url && (item.url.endsWith('.webm') || item.url.endsWith('.mp4'))));
+        };
+
         let actionButtons;
         if (viewerHelpers?.createActionButtons) {
             actionButtons = viewerHelpers.createActionButtons({
                 regen: {
-                    disabled: () => isGenDisabled,
+                    disabled: (item) => isGenDisabled,
+                    hidden: (item) => isVideoItem(item),
                     onClick: (item, close) => {
                         close();
                         this._startGeneration(item.generationConfig);
@@ -235,7 +259,13 @@
                 },
                 hires: {
                     disabled: (item) => isGenDisabled || isImageHiresFn(item),
+                    hidden: (item) => isVideoItem(item),
                     onClick: (item) => this._startHiresUpscale(item)
+                },
+                i2v: {
+                    disabled: (item) => isGenDisabled || isVideoItem(item),
+                    hidden: (item) => isVideoItem(item),
+                    onClick: (item, close) => this.openI2VSettings(item, close)
                 },
                 copy: {
                     onClick: copyPromptHandler
@@ -250,7 +280,8 @@
                     id: 'regen',
                     icon: 'auto_awesome',
                     title: 'Re-generate',
-                    disabled: () => isGenDisabled,
+                    disabled: (item) => isGenDisabled,
+                    hidden: (item) => isVideoItem(item),
                     onClick: (item, close) => {
                         close();
                         this._startGeneration(item.generationConfig);
@@ -261,7 +292,16 @@
                     icon: 'wand_stars',
                     title: 'Hires x2',
                     disabled: (item) => isGenDisabled || isImageHiresFn(item),
+                    hidden: (item) => isVideoItem(item),
                     onClick: (item) => this._startHiresUpscale(item)
+                },
+                {
+                    id: 'i2v',
+                    icon: 'animated_images',
+                    title: 'Image to Video',
+                    disabled: (item) => isGenDisabled,
+                    hidden: (item) => isVideoItem(item),
+                    onClick: (item, close) => this.openI2VSettings(item, close)
                 },
                 {
                     id: 'copy',

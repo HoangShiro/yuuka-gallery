@@ -8,9 +8,10 @@ from .services.lora import AlbumLoraMixin
 from .services.album_management import AlbumManagementMixin
 from .services.animation import AlbumAnimationMixin
 from .services.sound_fx import AlbumSoundFxMixin
+from .services.i2v import AlbumI2VMixin
 
 # Import API route handlers
-from .api import albums, comfyui, images, character_view, animation, sound_fx
+from .api import albums, comfyui, images, character_view, animation, sound_fx, i2v, settings_prompt
 
 class AlbumPlugin(
     AlbumCharacterViewMixin,
@@ -19,6 +20,7 @@ class AlbumPlugin(
     AlbumManagementMixin,
     AlbumAnimationMixin,
     AlbumSoundFxMixin,
+    AlbumI2VMixin,
 ):
     def __init__(self, core_api):
         self.core_api = core_api
@@ -44,6 +46,28 @@ class AlbumPlugin(
         # --- Sound FX presets + groups (per-user)
         self.SOUND_FX_GROUPS_FILENAME = "album_sound_fx_groups.json"
         self.SOUND_FX_PRESETS_FILENAME = "album_sound_fx_presets.json"
+
+        # --- I2V (Image-to-Video) settings per character
+        self.I2V_CONFIG_FILENAME = "album_i2v_configs.json"
+        self.I2V_VIDEO_SETTINGS_FILENAME = "album_i2v_video_settings.json"
+        self.I2V_DEFAULT_CONFIG = {
+            "prompt": "",
+            "seconds": 5,
+            "fps": 16,
+            "enable_loop": True,
+            "enable_interpolation": True,
+            "resolution": "480p",
+        }
+        
+        self.I2V_SYS_PROMPTS_FILENAME = "album_i2v_sys_prompts.json"
+        self.I2V_DEFAULT_SYS_PROMPTS = {
+            "I2V_SysPrompt": "You are an expert prompt engineer for video generation. Enhance the user's short description into a highly detailed, cinematic prompt focusing on camera motion, lighting, and vivid details suitable for high-quality video synthesis. Return ONLY the prompt, with no surrounding text.",
+            "I2V_SysPrompt_secondary": "",
+            "I2V_SysPrompt_active_tab": "primary",
+            "I2V_SysICap": "You are a highly perceptive vision model. Describe the provided image in rich, literal detail, focusing on the character's appearance, pose, environment, and lighting. Do not add narrative or assumptions. Keep it descriptive.",
+            "I2V_SysICap_secondary": "",
+            "I2V_SysICap_active_tab": "primary",
+        }
 
         # External (manual) presets: read-only tag groups loaded from data_cache/album_preset/*.txt
         self.EXTERNAL_ALBUM_PRESET_DIRNAME = os.path.join('album_preset')
@@ -85,7 +109,9 @@ class AlbumPlugin(
         images.register_routes(self.blueprint, self)
         character_view.register_routes(self.blueprint, self)
         animation.register_routes(self.blueprint, self)
+        i2v.register_routes(self.blueprint, self)
         sound_fx.register_routes(self.blueprint, self)
+        settings_prompt.register_routes(self.blueprint, self)
 
 
 

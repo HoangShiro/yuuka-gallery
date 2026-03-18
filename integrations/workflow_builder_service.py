@@ -22,6 +22,29 @@ HIRESFIX_ESRGAN_LORA_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "hiresfix_esrg
 HIRESFIX_ESRGAN_INPUT_IMAGE_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "hiresfix_esrgan_input_image.json")
 HIRESFIX_ESRGAN_INPUT_IMAGE_LORA_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "hiresfix_esrgan_input_image_LoRA.json")
 
+# Yuuka: DaSiWa WAN2 I2V workflow
+DASIWA_WAN2_WORKFLOW_PATH = os.path.join(_WORKFLOWS_DIR, "DaSiWa WAN2.json")
+
+# Default config cho DaSiWa WAN2 I2V (lấy từ workflow gốc)
+DASIWA_WAN2_DEFAULTS = {
+    "fps": 16,
+    "seconds": 5,
+    "shift_high": 5,
+    "shift_low": 5,
+    "steps_total": 4,
+    "refiner_step": 2,
+    "cfg": 1.0,
+    "sampler_name": "euler",
+    "scheduler": "linear_quadratic",
+    "crf": 20,
+    "negative_prompt": "censored, mosaic censoring, bar censor, pixelated, glowing, bloom, blurry, out of focus, low detail, bad anatomy, ugly, overexposed, underexposed, distorted face, extra limbs, cartoonish, 3d render artifacts, duplicate people, unnatural lighting, bad composition, missing shadows, low resolution, poorly textured, glitch, noise, grain, static, motionless, still frame, stylized, artwork, painting, illustration, many people in background, three legs, walking backward, unnatural skin tone, discolored eyelid, red eyelids, closed eyes, poorly drawn hands, extra fingers, fused fingers, poorly drawn face, deformed, disfigured, malformed limbs, fog, mist, voluminous eyelashes,",
+    "unet_high": "DasiwaWAN22I2V14BLightspeed_synthseductionHighV9.safetensors",
+    "unet_low": "DasiwaWAN22I2V14BLightspeed_synthseductionLowV9.safetensors",
+    "vae_name": "WAN\\wan_2.1_vae.safetensors",
+    "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "resolution_mp": 0.4,  # 0.40 MP ~ SD Speed 480p
+}
+
 SDXL_LORA_WORKFLOW_NAME = os.path.basename(SDXL_LORA_WORKFLOW_PATH)
 HIRESFIX_ESRGAN_WORKFLOW_NAME = os.path.basename(HIRESFIX_ESRGAN_WORKFLOW_PATH)
 HIRESFIX_ESRGAN_LORA_WORKFLOW_NAME = os.path.basename(HIRESFIX_ESRGAN_LORA_WORKFLOW_PATH)
@@ -33,7 +56,7 @@ COMBINED_TEXT_PROMPT_KEY = "combined_text_prompt"
 
 DEFAULT_CONFIG = {
     "server_address": "127.0.0.1:8888",
-    "ckpt_name": "waiNSFWIllustrious_v150.safetensors",
+    "ckpt_name": "waiNSFWIllustrious_v140.safetensors",
     "character": "shiina_mahiru_(otonari_no_tenshi-sama)",
     "expression": "smile",
     "action": "sitting",
@@ -148,6 +171,7 @@ class WorkflowBuilderService:
             "hiresfix_esrgan_lora": HIRESFIX_ESRGAN_LORA_WORKFLOW_PATH,
             "hiresfix_esrgan_input_image": HIRESFIX_ESRGAN_INPUT_IMAGE_WORKFLOW_PATH,
             "hiresfix_esrgan_input_image_lora": HIRESFIX_ESRGAN_INPUT_IMAGE_LORA_WORKFLOW_PATH,
+            "dasiwa_wan2_i2v": DASIWA_WAN2_WORKFLOW_PATH,
         }
         for name, path in workflow_paths.items():
             try:
@@ -468,6 +492,11 @@ class WorkflowBuilderService:
         alpha_requested = self._is_alpha_requested(cfg_data)
 
         workflow_type = cfg_data.get('_workflow_type')
+
+        # Yuuka: DaSiWa WAN2 I2V workflow
+        if workflow_type == 'dasiwa_wan2_i2v':
+            return self._build_dasiwa_wan2_workflow(cfg_data, seed)
+
         if workflow_type == 'hires_input_image':
             workflow, output_node_id = self._build_hiresfix_input_image_workflow(cfg_data, seed)
             if alpha_requested:
@@ -836,5 +865,232 @@ class WorkflowBuilderService:
             else:
                 # Thử các ID phổ biến
                 output_node_id = "15" if "15" in workflow else ("9" if "9" in workflow else "15")
+
+        return workflow, output_node_id
+
+    # ===========================
+    # Yuuka: DaSiWa WAN2 I2V Builder
+    # ===========================
+    def _build_dasiwa_wan2_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
+        """
+        Xây dựng workflow API-format cho DaSiWa WAN 2.2 I2V.
+        Load template từ DaSiWa WAN2.json (API format), deepcopy và chỉ thay đổi
+        các tham số cần thiết thay vì xây dựng lại toàn bộ workflow.
+        """
+        if isinstance(cfg_data, dict):
+            cfg_data["_workflow_template"] = "DaSiWa WAN2 I2V"
+
+        D = DASIWA_WAN2_DEFAULTS
+
+        # --- Load template ---
+        template_key = "dasiwa_wan2_i2v"
+        if template_key not in self.workflow_templates or self.workflow_templates[template_key] is None:
+            raise FileNotFoundError(
+                f"DaSiWa WAN2 workflow template not found: {DASIWA_WAN2_WORKFLOW_PATH}"
+            )
+        workflow = deepcopy(self.workflow_templates[template_key])
+
+        # --- Extract parameters from cfg_data ---
+        positive_prompt = cfg_data.get('prompt', '')
+        if not positive_prompt:
+            positive_prompt = cfg_data.get('positive_prompt', '')
+        negative_prompt = cfg_data.get('negative_prompt', D['negative_prompt'])
+
+        fps = int(cfg_data.get('fps', D['fps']))
+        if fps not in (16, 24):
+            fps = 16
+        seconds = int(cfg_data.get('seconds', D['seconds']))
+        if seconds not in (2, 3, 4, 5):
+            seconds = 5
+
+        shift_high = float(cfg_data.get('shift_high', D['shift_high']))
+        shift_low = float(cfg_data.get('shift_low', D['shift_low']))
+        steps_total = int(cfg_data.get('steps_total', D['steps_total']))
+        refiner_step = int(cfg_data.get('refiner_step', D['refiner_step']))
+        cfg_val = float(cfg_data.get('cfg', D['cfg']))
+        sampler_name = cfg_data.get('sampler_name', D['sampler_name'])
+        scheduler = cfg_data.get('scheduler', D['scheduler'])
+        crf = int(cfg_data.get('crf', D['crf']))
+
+        # Models
+        unet_high = cfg_data.get('unet_high', D['unet_high'])
+        unet_low = cfg_data.get('unet_low', D['unet_low'])
+        vae_name = cfg_data.get('vae_name', D['vae_name'])
+        clip_name = cfg_data.get('clip_name', D['clip_name'])
+
+        # Input images (đã upload lên ComfyUI qua upload_image_bytes)
+        first_frame_name = cfg_data.get('_first_frame_image_name', '')
+        last_frame_name = cfg_data.get('_last_frame_image_name', first_frame_name)
+
+        # Resolution MP
+        resolution_mp = float(cfg_data.get('resolution_mp', D['resolution_mp']))
+
+        # Toggle features
+        enable_loop = cfg_data.get('enable_loop', True)
+        if isinstance(enable_loop, str):
+            enable_loop = enable_loop.strip().lower() in ('1', 'true', 'yes')
+        enable_interpolation = cfg_data.get('enable_interpolation', True)
+        if isinstance(enable_interpolation, str):
+            enable_interpolation = enable_interpolation.strip().lower() in ('1', 'true', 'yes')
+
+        # =====================================================================
+        # Patch template nodes với giá trị từ cfg_data
+        # =====================================================================
+
+        # --- Input images ---
+        # Node "1289": LoadImage (First-Frame-Image)
+        if "1289" in workflow:
+            workflow["1289"]["inputs"]["image"] = first_frame_name
+        # Node "24": LoadImage (Last-Frame-Image)
+        if "24" in workflow:
+            workflow["24"]["inputs"]["image"] = last_frame_name
+
+        # --- Prompts ---
+        # Node "29:1044": CLIPTextEncode (Positive prompt)
+        if "29:1044" in workflow:
+            workflow["29:1044"]["inputs"]["text"] = positive_prompt
+        # Node "29:1045": CLIPTextEncode (Negative prompt)
+        if "29:1045" in workflow:
+            workflow["29:1045"]["inputs"]["text"] = negative_prompt
+
+        # --- Timing: Seconds & FPS ---
+        # Node "29:1075": PrimitiveInt (Seconds)
+        if "29:1075" in workflow:
+            workflow["29:1075"]["inputs"]["value"] = seconds
+        # Node "29:457": PrimitiveFloat (FPS)
+        if "29:457" in workflow:
+            workflow["29:457"]["inputs"]["value"] = fps
+
+        # --- Seed ---
+        # Node "29:1276": PrimitiveInt (Seed)
+        if "29:1276" in workflow:
+            workflow["29:1276"]["inputs"]["value"] = seed
+
+        # --- Sampling config ---
+        # Node "29:914": KSampler Config (rgthree)
+        if "29:914" in workflow:
+            workflow["29:914"]["inputs"]["steps_total"] = steps_total
+            workflow["29:914"]["inputs"]["refiner_step"] = refiner_step
+            workflow["29:914"]["inputs"]["cfg"] = cfg_val
+            workflow["29:914"]["inputs"]["sampler_name"] = sampler_name
+            workflow["29:914"]["inputs"]["scheduler"] = scheduler
+
+        # --- Sigma shifts ---
+        # Node "29:425": ModelSamplingSD3 (Sigma Shift High)
+        if "29:425" in workflow:
+            workflow["29:425"]["inputs"]["shift"] = shift_high
+        # Node "29:426": ModelSamplingSD3 (Sigma Shift Low)
+        if "29:426" in workflow:
+            workflow["29:426"]["inputs"]["shift"] = shift_low
+
+        # --- Model loaders ---
+        # Node "29:1170": UNETLoader (High model)
+        if "29:1170" in workflow:
+            workflow["29:1170"]["inputs"]["unet_name"] = unet_high
+        # Node "29:1171": UNETLoader (Low model)
+        if "29:1171" in workflow:
+            workflow["29:1171"]["inputs"]["unet_name"] = unet_low
+        # Node "29:1143": VAELoader
+        if "29:1143" in workflow:
+            workflow["29:1143"]["inputs"]["vae_name"] = vae_name
+        # Node "29:1142": CLIPLoader
+        if "29:1142" in workflow:
+            workflow["29:1142"]["inputs"]["clip_name"] = clip_name
+
+        # --- Resolution MP ---
+        # Node "29:1072:320": FloatConstant (target megapixels for auto-scaling)
+        if "29:1072:320" in workflow:
+            workflow["29:1072:320"]["inputs"]["value"] = resolution_mp
+
+        # --- Perfect Loop toggle ---
+        # Node "29:1284:1100": PrimitiveBoolean controls the Perfect Loop switch.
+        # When false, the loop processing is bypassed and raw frames pass through.
+        if "29:1284:1100" in workflow:
+            workflow["29:1284:1100"]["inputs"]["value"] = bool(enable_loop)
+
+        # =====================================================================
+        # Replace output: VHS_VideoCombine → VideoToBase64_Yuuka
+        # =====================================================================
+        # Node "28" is VHS_VideoCombine which saves to disk.
+        # We need to replace it with VideoToBase64_Yuuka for API output.
+        #
+        # The original node "28" receives:
+        #   - images from "29:1286:966" (RIFE interpolation output)
+        #   - frame_rate from "29:1286:943" (FPS * 2 due to interpolation)
+        #
+        # We keep the same input connections but output base64 instead.
+
+        # --- Determine output wiring based on interpolation toggle ---
+        # When interpolation is enabled (default):
+        #   images come from "29:1286:966" (RIFE VFI 2x) and FPS from "29:1286:943" (fps*2)
+        # When interpolation is disabled:
+        #   images come from "29:1284:1099" (Perfect Loop / raw output) and FPS = raw fps
+        if enable_interpolation:
+            # Use the original wiring (through RIFE interpolation)
+            video_image_source = None
+            video_fps_source = None
+            if "28" in workflow:
+                old_inputs = workflow["28"]["inputs"]
+                video_image_source = old_inputs.get("images")  # ["29:1286:966", 0]
+                video_fps_source = old_inputs.get("frame_rate")  # ["29:1286:943", 0]
+            if not video_image_source:
+                video_image_source = ["29:1286:966", 0]
+            if not video_fps_source:
+                video_fps_source = ["29:1286:943", 0]
+        else:
+            # Bypass interpolation: take frames directly from the loop/raw output
+            # Node "29:1284:1099" is the If-else that outputs either looped or raw frames
+            video_image_source = ["29:1284:1099", 0]
+            video_fps_source = float(fps)
+
+        # Create VideoToBase64_Yuuka output node with numeric ID
+        max_node_id = 0
+        for nid in workflow.keys():
+            try:
+                max_node_id = max(max_node_id, int(nid.split(":")[0]))
+            except (ValueError, IndexError):
+                continue
+        output_node_id = str(max_node_id + 100)
+
+        workflow[output_node_id] = {
+            "inputs": {
+                "images": video_image_source,
+                "frame_rate": video_fps_source,
+                "crf": crf,
+            },
+            "class_type": "VideoToBase64_Yuuka",
+            "_meta": {"title": "Video to Base64 (Yuuka)"},
+        }
+
+        # Remove GUI-only nodes that aren't needed for API execution
+        gui_only_nodes = []
+        for node_id, node_data in workflow.items():
+            class_type = node_data.get("class_type", "")
+            if class_type in ("VHS_PruneOutputs", "PreviewAny"):
+                gui_only_nodes.append(node_id)
+
+        for node_id in gui_only_nodes:
+            del workflow[node_id]
+
+        # When interpolation is disabled, remove the RIFE interpolation nodes
+        # to avoid ComfyUI executing unused branches
+        if not enable_interpolation:
+            rife_nodes = [nid for nid in workflow if nid.startswith("29:1286:")]
+            for nid in rife_nodes:
+                del workflow[nid]
+
+        # Remove the original VHS_VideoCombine node (replaced by VideoToBase64_Yuuka)
+        if "28" in workflow:
+            del workflow["28"]
+
+        # Fix any remaining references to deleted nodes
+        # Node "1293" (YuukaFreeAllMemory) referenced "28" as a trigger.
+        # Since VideoToBase64_Yuuka has no output, we trigger memory cleanup right before/after by
+        # linking it to the video's input source or just deleting it as it's not strictly necessary in API mode
+        # Actually, let's keep it but trigger it off the video image source:
+        for nid, ndata in workflow.items():
+            if isinstance(ndata, dict) and ndata.get("class_type") == "YuukaFreeAllMemory":
+                if "trigger" in ndata.get("inputs", {}) and isinstance(ndata["inputs"]["trigger"], list) and ndata["inputs"]["trigger"][0] == "28":
+                    ndata["inputs"]["trigger"] = video_image_source if video_image_source else ["29:963", 0]
 
         return workflow, output_node_id

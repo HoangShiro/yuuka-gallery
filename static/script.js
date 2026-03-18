@@ -19,14 +19,14 @@ window.Yuuka = window.Yuuka || {
         },
         emit(eventName, data) {
             if (this._listeners[eventName]) {
-                this._listeners[eventName].forEach(cb => { try { cb(data); } catch(e){ console.error(`[EventBus] Error in '${eventName}' listener:`, e); } });
+                this._listeners[eventName].forEach(cb => { try { cb(data); } catch (e) { console.error(`[EventBus] Error in '${eventName}' listener:`, e); } });
             }
         }
     },
     // Global UI helpers and shared services live under `ui` / `services`
     ui: {
-        switchTab(tabId){ switchTab(tabId); },
-        confirm(message){
+        switchTab(tabId) { switchTab(tabId); },
+        confirm(message) {
             return new Promise(resolve => {
                 if (document.querySelector('.confirm-modal-backdrop')) { resolve(false); return; }
                 const modal = document.createElement('div');
@@ -34,7 +34,7 @@ window.Yuuka = window.Yuuka || {
                 modal.innerHTML = `<div class="confirm-modal-dialog"><p>${message}</p><div class="modal-actions"><button class="btn-cancel" title="Cancel"><span class="material-symbols-outlined">close</span></button><button class="btn-confirm" title="Confirm"><span class="material-symbols-outlined">check</span></button></div></div>`;
                 document.body.appendChild(modal);
                 const cleanup = v => { modal.remove(); window.removeEventListener('keydown', kd); resolve(v); };
-                const kd = e => { if (e.key==='Escape') cleanup(false); if (e.key==='Enter') cleanup(true); };
+                const kd = e => { if (e.key === 'Escape') cleanup(false); if (e.key === 'Enter') cleanup(true); };
                 modal.querySelector('.btn-confirm').onclick = () => cleanup(true);
                 modal.querySelector('.btn-cancel').onclick = () => cleanup(false);
                 modal.addEventListener('click', e => { if (e.target === modal) cleanup(false); });
@@ -42,27 +42,27 @@ window.Yuuka = window.Yuuka || {
                 modal.querySelector('.btn-confirm').focus();
             });
         },
-        copyToClipboard(text){
+        copyToClipboard(text) {
             return new Promise((resolve, reject) => {
-                if (navigator.clipboard && window.isSecureContext){ navigator.clipboard.writeText(text).then(resolve).catch(reject); return; }
-                const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.left='-9999px'; document.body.appendChild(ta); ta.focus(); ta.select();
+                if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(resolve).catch(reject); return; }
+                const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px'; document.body.appendChild(ta); ta.focus(); ta.select();
                 try { if (document.execCommand('copy')) resolve(); else reject(new Error('Copy command was not successful')); }
-                catch(err){ reject(err); }
-                finally{ document.body.removeChild(ta); }
+                catch (err) { reject(err); }
+                finally { document.body.removeChild(ta); }
             });
         },
-        _initTagAutocomplete(formContainer, tagPredictions){
+        _initTagAutocomplete(formContainer, tagPredictions) {
             if (!tagPredictions || !tagPredictions.length) return;
             formContainer.querySelectorAll('textarea, input[type="text"]').forEach(input => {
                 if (input.parentElement.classList.contains('tag-autocomplete-container')) return;
-                const wrapper=document.createElement('div'); wrapper.className='tag-autocomplete-container'; input.parentElement.insertBefore(wrapper,input); wrapper.appendChild(input);
-                const list=document.createElement('ul'); list.className='tag-autocomplete-list'; wrapper.appendChild(list);
-                let activeIndex=-1; const hide=()=>{ list.style.display='none'; list.innerHTML=''; activeIndex=-1; };
-                input.addEventListener('input', ()=>{ const textValue=input.value; const cursor=input.selectionStart; const before=textValue.substring(0,cursor); const lastComma=before.lastIndexOf(','); const current=before.substring(lastComma+1).trim(); if (current.length<1){ hide(); return; } const search=current.replace(/\s+/g,'_').toLowerCase(); const matches=tagPredictions.filter(t=>t.startsWith(search)).slice(0,7); if(matches.length){ list.innerHTML=matches.map(m=>`<li class="tag-autocomplete-item" data-tag="${m}">${m.replace(/_/g,' ')}</li>`).join(''); list.style.display='block'; activeIndex=-1; } else hide(); });
-                const applyTag=tag=>{ const textValue=input.value; const cursor=input.selectionStart; const before=textValue.substring(0,cursor); const lastComma=before.lastIndexOf(','); const prefix=textValue.substring(0,lastComma+1); const after=textValue.substring(cursor); const nextComma=after.indexOf(','); const remaining=nextComma==-1?'' : after.substring(nextComma); const result=`${prefix.trim()?`${prefix.trim()} `:''}${tag.replace(/_/g,' ')}, ${remaining.trim()}`.trim(); input.value=result; const newCursor=(`${prefix.trim()?`${prefix.trim()} `:''}${tag}`).length+2; input.focus(); input.setSelectionRange(newCursor,newCursor); hide(); input.dispatchEvent(new Event('input',{ bubbles:true })); };
-                list.addEventListener('mousedown', ev=>{ ev.preventDefault(); if (ev.target.matches('.tag-autocomplete-item')) applyTag(ev.target.dataset.tag); });
-                input.addEventListener('keydown', ev=>{ const items=list.querySelectorAll('.tag-autocomplete-item'); if(!items.length) return; if(ev.key==='ArrowDown'){ ev.preventDefault(); activeIndex=(activeIndex+1)%items.length; } else if(ev.key==='ArrowUp'){ ev.preventDefault(); activeIndex=(activeIndex-1+items.length)%items.length; } else if((ev.key==='Enter'||ev.key==='Tab') && activeIndex>-1){ ev.preventDefault(); applyTag(items[activeIndex].dataset.tag); } else if(ev.key==='Escape'){ hide(); } items.forEach((it,idx)=>it.classList.toggle('active', idx===activeIndex)); });
-                input.addEventListener('blur', ()=> setTimeout(hide,150));
+                const wrapper = document.createElement('div'); wrapper.className = 'tag-autocomplete-container'; input.parentElement.insertBefore(wrapper, input); wrapper.appendChild(input);
+                const list = document.createElement('ul'); list.className = 'tag-autocomplete-list'; wrapper.appendChild(list);
+                let activeIndex = -1; const hide = () => { list.style.display = 'none'; list.innerHTML = ''; activeIndex = -1; };
+                input.addEventListener('input', () => { const textValue = input.value; const cursor = input.selectionStart; const before = textValue.substring(0, cursor); const lastComma = before.lastIndexOf(','); const current = before.substring(lastComma + 1).trim(); if (current.length < 1) { hide(); return; } const search = current.replace(/\s+/g, '_').toLowerCase(); const matches = tagPredictions.filter(t => t.startsWith(search)).slice(0, 7); if (matches.length) { list.innerHTML = matches.map(m => `<li class="tag-autocomplete-item" data-tag="${m}">${m.replace(/_/g, ' ')}</li>`).join(''); list.style.display = 'block'; activeIndex = -1; } else hide(); });
+                const applyTag = tag => { const textValue = input.value; const cursor = input.selectionStart; const before = textValue.substring(0, cursor); const lastComma = before.lastIndexOf(','); const prefix = textValue.substring(0, lastComma + 1); const after = textValue.substring(cursor); const nextComma = after.indexOf(','); const remaining = nextComma == -1 ? '' : after.substring(nextComma); const result = `${prefix.trim() ? `${prefix.trim()} ` : ''}${tag.replace(/_/g, ' ')}, ${remaining.trim()}`.trim(); input.value = result; const newCursor = (`${prefix.trim() ? `${prefix.trim()} ` : ''}${tag}`).length + 2; input.focus(); input.setSelectionRange(newCursor, newCursor); hide(); input.dispatchEvent(new Event('input', { bubbles: true })); };
+                list.addEventListener('mousedown', ev => { ev.preventDefault(); if (ev.target.matches('.tag-autocomplete-item')) applyTag(ev.target.dataset.tag); });
+                input.addEventListener('keydown', ev => { const items = list.querySelectorAll('.tag-autocomplete-item'); if (!items.length) return; if (ev.key === 'ArrowDown') { ev.preventDefault(); activeIndex = (activeIndex + 1) % items.length; } else if (ev.key === 'ArrowUp') { ev.preventDefault(); activeIndex = (activeIndex - 1 + items.length) % items.length; } else if ((ev.key === 'Enter' || ev.key === 'Tab') && activeIndex > -1) { ev.preventDefault(); applyTag(items[activeIndex].dataset.tag); } else if (ev.key === 'Escape') { hide(); } items.forEach((it, idx) => it.classList.toggle('active', idx === activeIndex)); });
+                input.addEventListener('blur', () => setTimeout(hide, 150));
             });
         }
     }
@@ -103,7 +103,7 @@ window.Yuuka = window.Yuuka || {
 //   `this` to the instance (similar to AlbumComponent._attachInstanceToCapability).
 // - Prefer stable ids like "pluginId.actionName" to avoid collisions.
 ;
-(function initCapabilitiesService(){
+(function initCapabilitiesService() {
     const g = window.Yuuka = window.Yuuka || {};
     g.services = g.services || {};
     if (g.services.capabilities) return; // already initialized
@@ -113,10 +113,10 @@ window.Yuuka = window.Yuuka || {
     let _versionCounter = 1;
     const _bootstrapStartedAt = Date.now();
 
-    const normalizeId = (id)=> typeof id === 'string' ? id.trim() : '';
+    const normalizeId = (id) => typeof id === 'string' ? id.trim() : '';
 
     const capabilities = {
-        register(def){
+        register(def) {
             if (!def || !def.id) {
                 console.warn('[Capabilities] Missing id in definition:', def);
                 return null;
@@ -177,7 +177,7 @@ window.Yuuka = window.Yuuka || {
                 tags: Array.isArray(def.tags) ? def.tags.slice() : [],
                 llmCallable: !!def.llmCallable,
                 llmName: def.llmName && def.llmName.trim() ? def.llmName.trim() : id,
-                paramsSchema: def.paramsSchema && typeof def.paramsSchema === 'object' ? def.paramsSchema : { type:'object', properties:{} },
+                paramsSchema: def.paramsSchema && typeof def.paramsSchema === 'object' ? def.paramsSchema : { type: 'object', properties: {} },
                 // Keep raw invoke so caller can execute it
                 invoke: def.invoke,
                 // Example metadata for playgrounds / docs (e.g. Maid-chan Ability tab)
@@ -203,17 +203,17 @@ window.Yuuka = window.Yuuka || {
                         'Capabilities should be registered at script load time (IIFE) before the plugin UI is constructed.'
                     );
                 }
-            } catch(_e) { /* ignore */ }
+            } catch (_e) { /* ignore */ }
 
             // Broadcast registration for listeners (e.g. Maid-chan UI)
             try {
                 g.events && g.events.emit && g.events.emit('capability:registered', stored);
-            } catch(e){ console.error('[Capabilities] Error emitting capability:registered', e); }
+            } catch (e) { console.error('[Capabilities] Error emitting capability:registered', e); }
 
             return stored;
         },
 
-        unregister(id){
+        unregister(id) {
             id = normalizeId(id);
             if (!id || !_registry.has(id)) return false;
             const def = _registry.get(id);
@@ -225,11 +225,11 @@ window.Yuuka = window.Yuuka || {
             }
             try {
                 g.events && g.events.emit && g.events.emit('capability:unregistered', def);
-            } catch(e){ console.error('[Capabilities] Error emitting capability:unregistered', e); }
+            } catch (e) { console.error('[Capabilities] Error emitting capability:unregistered', e); }
             return true;
         },
 
-        unregisterByPlugin(pluginId){
+        unregisterByPlugin(pluginId) {
             pluginId = normalizeId(pluginId);
             if (!pluginId || !_byPlugin.has(pluginId)) return 0;
             const ids = Array.from(_byPlugin.get(pluginId));
@@ -237,7 +237,7 @@ window.Yuuka = window.Yuuka || {
             return ids.length;
         },
 
-        get(id){
+        get(id) {
             id = normalizeId(id);
             if (!id) return null;
             const def = _registry.get(id);
@@ -246,24 +246,24 @@ window.Yuuka = window.Yuuka || {
             return { ...def };
         },
 
-        list(filterFn){
+        list(filterFn) {
             const all = Array.from(_registry.values()).map(d => ({ ...d }));
             if (typeof filterFn === 'function') return all.filter(filterFn);
             return all;
         },
 
-        listByPlugin(pluginId){
+        listByPlugin(pluginId) {
             pluginId = normalizeId(pluginId);
             if (!pluginId || !_byPlugin.has(pluginId)) return [];
             const ids = Array.from(_byPlugin.get(pluginId));
             return ids.map(id => ({ ..._registry.get(id) })).filter(Boolean);
         },
 
-        listLLMCallable(){
+        listLLMCallable() {
             return this.list(c => !!c.llmCallable);
         },
 
-        async invoke(id, args = {}, ctx = {}){
+        async invoke(id, args = {}, ctx = {}) {
             const def = _registry.get(normalizeId(id));
             if (!def || typeof def.invoke !== 'function') {
                 throw new Error(`[Capabilities] Unknown or non-callable capability: ${id}`);
@@ -276,7 +276,7 @@ window.Yuuka = window.Yuuka || {
             }
         },
 
-        getVersion(){
+        getVersion() {
             return _versionCounter;
         }
     };
@@ -415,8 +415,9 @@ async function checkGlobalGenerationStatus() {
         if (status.events && status.events.length > 0) {
             status.events.forEach(event => {
                 const { type, data } = event;
-                switch(type) {
+                switch (type) {
                     case 'IMAGE_SAVED':
+                    case 'VIDEO_SAVED':
                         Yuuka.events.emit('image:added', data); // Gửi toàn bộ data
                         break;
                     case 'IMAGE_DELETED': // Yuuka: event bus v1.0
@@ -432,7 +433,7 @@ async function checkGlobalGenerationStatus() {
             clearInterval(state.generationStatus.interval);
             state.generationStatus.interval = null;
             state.generationStatus.knownTasks.clear();
-             console.log('[Core Poller] No active tasks. Stopping status polling.');
+            console.log('[Core Poller] No active tasks. Stopping status polling.');
         }
 
     } catch (error) {
@@ -455,15 +456,15 @@ async function initializeAppUI() {
     console.log("[Core] Authentication successful. Initializing UI...");
     document.body.className = 'is-logged-in';
     authContainer.innerHTML = '';
-    
+
     const activePluginsUI = await api.getActivePluginsUI();
     state.activePlugins = activePluginsUI;
     if (state.activePlugins.length === 0) { showError("Lỗi: Không có plugin nào được tải."); return; }
 
     // YUUKA: Bắt đầu polling nếu có bất kỳ plugin nào yêu cầu thông qua cờ trong manifest.
     if (activePluginsUI.some(p => p.ui?.needs_generation_poller)) { // Yuuka: architecture-fix v1.0
-       await checkGlobalGenerationStatus(); // Chạy lần đầu ngay lập tức
-       startGlobalPolling(); 
+        await checkGlobalGenerationStatus(); // Chạy lần đầu ngay lập tức
+        startGlobalPolling();
     }
     // Lắng nghe event để bắt đầu polling nếu một task mới được tạo ra
     Yuuka.events.on('generation:started', startGlobalPolling);
@@ -474,7 +475,7 @@ async function initializeAppUI() {
     tabsContainer.innerHTML = '';
     activePluginsUI.forEach(plugin => {
         api.createPluginApiClient(plugin.id);
-        
+
         const componentName = plugin.entry_points.frontend_component;
         const ComponentClass = window.Yuuka.components[componentName];
 
@@ -484,7 +485,7 @@ async function initializeAppUI() {
                 console.log(`[Core] Initializing singleton UI plugin: ${plugin.id}`);
                 const serviceInstance = new ComponentClass(null, api, activePluginsUI);
                 window.Yuuka.services[plugin.id] = serviceInstance;
-            } 
+            }
             else if (plugin.ui?.tab) {
                 const tabBtn = document.createElement('button');
                 tabBtn.className = 'tab-btn';
@@ -492,7 +493,7 @@ async function initializeAppUI() {
                 tabsContainer.appendChild(tabBtn);
 
                 if (plugin.id !== 'core') {
-                     const existingContainer = document.querySelector(`.plugin-container[data-plugin-id="${plugin.id}"]`);
+                    const existingContainer = document.querySelector(`.plugin-container[data-plugin-id="${plugin.id}"]`);
                     if (!existingContainer) {
                         const pluginContainer = document.createElement('div');
                         pluginContainer.id = `${plugin.id}-container`;
@@ -503,13 +504,13 @@ async function initializeAppUI() {
                 }
             }
             else {
-                 console.log(`[Core] Initializing pure JS service plugin: ${plugin.id}`);
-                 const serviceInstance = new ComponentClass(null, api);
-                 window.Yuuka.services[plugin.id] = serviceInstance;
+                console.log(`[Core] Initializing pure JS service plugin: ${plugin.id}`);
+                const serviceInstance = new ComponentClass(null, api);
+                window.Yuuka.services[plugin.id] = serviceInstance;
             }
         }
     });
-    
+
     const firstTab = state.activePlugins.find(p => p.ui?.tab)?.ui?.tab?.id;
     if (firstTab) {
         await switchTab(firstTab);
@@ -532,8 +533,8 @@ async function startApplication() {
             // Fallback placeholder (will be replaced once plugin script loads)
             window.Yuuka.services.auth = {
                 getToken: () => localStorage.getItem('yuuka-auth-token'),
-                showLogin: (msg) => { document.body.className='is-logged-out'; const c=document.getElementById('auth-container'); if(c) c.innerHTML=`<div class="auth-form-wrapper"><h3>Đang tải Auth Plugin...</h3>${msg?`<p class='error-msg'>${msg}</p>`:''}</div>`; },
-                ensureLogoutMessage: ()=>{ const m=sessionStorage.getItem('yuuka-logout-message'); if(m){ sessionStorage.removeItem('yuuka-logout-message'); showError(m);} }
+                showLogin: (msg) => { document.body.className = 'is-logged-out'; const c = document.getElementById('auth-container'); if (c) c.innerHTML = `<div class="auth-form-wrapper"><h3>Đang tải Auth Plugin...</h3>${msg ? `<p class='error-msg'>${msg}</p>` : ''}</div>`; },
+                ensureLogoutMessage: () => { const m = sessionStorage.getItem('yuuka-logout-message'); if (m) { sessionStorage.removeItem('yuuka-logout-message'); showError(m); } }
             };
         }
     }
@@ -561,5 +562,5 @@ async function startApplication() {
 window.addEventListener('load', startApplication);
 // Listen for auth:login to bootstrap rest of UI if not yet initialized
 window.Yuuka.events.on('auth:login', async () => {
-    try { await initializeAppUI(); } catch (e){ console.error('[Auth] Failed post-login init:', e); showError(`Lỗi khởi tạo: ${e.message}`); }
+    try { await initializeAppUI(); } catch (e) { console.error('[Auth] Failed post-login init:', e); showError(`Lỗi khởi tạo: ${e.message}`); }
 });

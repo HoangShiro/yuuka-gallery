@@ -113,12 +113,12 @@ window.Yuuka.plugins.simpleViewer = (() => {
                 queue.reduce((p, url) => p.then(() => {
                     if (myGen !== loadGeneration) return Promise.resolve();
                     const pre = preloadImage(url);
-                    return pre ? pre.catch(() => {}) : Promise.resolve();
+                    return pre ? pre.catch(() => { }) : Promise.resolve();
                 }), Promise.resolve());
             } else {
                 queue.forEach((url) => {
                     const pre = preloadImage(url);
-                    if (pre) pre.catch(() => {});
+                    if (pre) pre.catch(() => { });
                 });
             }
 
@@ -236,7 +236,7 @@ window.Yuuka.plugins.simpleViewer = (() => {
         if (e.key === 'ArrowLeft') showPrev();
         if (e.key === 'Escape') close();
     }
-    
+
     /**
      * Cập nhật nội dung của viewer khi chuyển ảnh
      * @param {number} index - Index của ảnh mới
@@ -248,22 +248,40 @@ window.Yuuka.plugins.simpleViewer = (() => {
 
         const slider = viewerElement.querySelector('.sv-viewer-image-slider');
         const infoPanel = viewerElement.querySelector('.sv-viewer-info');
-        
-        const oldActiveImages = Array.from(slider.querySelectorAll('img.active'));
+
+        const oldActiveImages = Array.from(slider.querySelectorAll('img.active, video.active'));
 
         slider.querySelectorAll('.sv-viewer-placeholder').forEach(el => el.remove());
         const placeholder = createPlaceholder();
         slider.appendChild(placeholder);
 
-        const newImgElement = document.createElement('img');
-        slider.appendChild(newImgElement);
-        initZoomAndPan(newImgElement);
+        // Yuuka: I2V video support - detect video items
+        const isVideoItem = !!(newItem.is_video || (newItem.imageUrl || '').endsWith('.webm') || (newItem.imageUrl || '').endsWith('.mp4'));
+
+        let newMediaElement;
+        if (isVideoItem) {
+            newMediaElement = document.createElement('video');
+            newMediaElement.autoplay = true;
+            newMediaElement.loop = true;
+            newMediaElement.muted = true;
+            newMediaElement.playsInline = true;
+            newMediaElement.style.cursor = 'default';
+            newMediaElement.style.maxWidth = '100%';
+            newMediaElement.style.maxHeight = '100%';
+            newMediaElement.style.objectFit = 'contain';
+        } else {
+            newMediaElement = document.createElement('img');
+        }
+        slider.appendChild(newMediaElement);
+        if (!isVideoItem) {
+            initZoomAndPan(newMediaElement);
+        }
 
         let cleanupExecuted = false;
         let cleanupTimeout = null;
 
         function fadeOutImage(img) {
-            if (!img || img === newImgElement || img.dataset.svRemoving === 'true') return;
+            if (!img || img === newMediaElement || img.dataset.svRemoving === 'true') return;
             img.dataset.svRemoving = 'true';
 
             let fallbackRemoval = null;
@@ -274,7 +292,9 @@ window.Yuuka.plugins.simpleViewer = (() => {
                     clearTimeout(fallbackRemoval);
                 }
                 delete img.dataset.svRemoving;
-                if (img !== newImgElement && img.isConnected) {
+                if (img !== newMediaElement && img.isConnected) {
+                    // Pause video before removing to free resources
+                    if (img.tagName === 'VIDEO') try { img.pause(); } catch { }
                     img.remove();
                 }
             };
@@ -301,12 +321,12 @@ window.Yuuka.plugins.simpleViewer = (() => {
             }
 
             oldActiveImages.forEach(img => {
-                if (!img || img === newImgElement) return;
+                if (!img || img === newMediaElement) return;
                 if (!img.isConnected) return;
                 fadeOutImage(img);
             });
 
-            newImgElement.removeEventListener('transitionend', handleNewImageTransition);
+            newMediaElement.removeEventListener('transitionend', handleNewImageTransition);
         }
 
         function handleNewImageTransition(event) {
@@ -314,14 +334,14 @@ window.Yuuka.plugins.simpleViewer = (() => {
             cleanupOldImages();
         }
 
-        newImgElement.addEventListener('transitionend', handleNewImageTransition);
+        newMediaElement.addEventListener('transitionend', handleNewImageTransition);
 
         const activateImage = () => {
             requestAnimationFrame(() => {
                 // Force layout before toggling the active state to make sure mobile browsers register the transition.
-                newImgElement.getBoundingClientRect();
+                newMediaElement.getBoundingClientRect();
                 requestAnimationFrame(() => {
-                    newImgElement.classList.add('active');
+                    newMediaElement.classList.add('active');
                 });
             });
             placeholder.classList.add('hidden');
@@ -338,39 +358,57 @@ window.Yuuka.plugins.simpleViewer = (() => {
             const cacheEntry = imageCache.get(newItem.imageUrl);
             if (cacheEntry) {
                 cacheEntry.status = 'loaded';
-                cacheEntry.image = newImgElement;
+                cacheEntry.image = newMediaElement;
                 cacheEntry.promise = resolvedPromise;
             } else {
                 imageCache.set(newItem.imageUrl, {
                     status: 'loaded',
                     promise: resolvedPromise,
-                    image: newImgElement,
+                    image: newMediaElement,
                 });
             }
         };
 
         const handleImageError = () => {
             placeholder.classList.add('error');
-            placeholder.textContent = 'Failed to load image';
+            placeholder.textContent = isVideoItem ? 'Failed to load video' : 'Failed to load image';
             imageCache.delete(newItem.imageUrl);
         };
 
-        newImgElement.src = newItem.imageUrl;
+        newMediaElement.src = newItem.imageUrl;
 
         const myGen = ++loadGeneration; // increment token for this navigation
 
-        waitForImageElement(newImgElement)
-            .then(() => {
-                if (myGen !== loadGeneration) return; // stale
+        if (isVideoItem) {
+            // For video, wait for loadeddata event instead of load
+            const onLoaded = () => {
+                newMediaElement.removeEventListener('loadeddata', onLoaded);
+                newMediaElement.removeEventListener('error', onVidError);
+                if (myGen !== loadGeneration) return;
                 activateImage();
-                // Only start preloading AFTER the current image is fully displayed
-                preloadAroundIndex(currentIndex, getPreloadConfig());
-            })
-            .catch((err) => {
-                if (myGen !== loadGeneration) return; // stale
-                handleImageError(err);
-            });
-        
+            };
+            const onVidError = () => {
+                newMediaElement.removeEventListener('loadeddata', onLoaded);
+                newMediaElement.removeEventListener('error', onVidError);
+                if (myGen !== loadGeneration) return;
+                handleImageError();
+            };
+            newMediaElement.addEventListener('loadeddata', onLoaded);
+            newMediaElement.addEventListener('error', onVidError);
+        } else {
+            waitForImageElement(newMediaElement)
+                .then(() => {
+                    if (myGen !== loadGeneration) return; // stale
+                    activateImage();
+                    // Only start preloading AFTER the current image is fully displayed
+                    preloadAroundIndex(currentIndex, getPreloadConfig());
+                })
+                .catch((err) => {
+                    if (myGen !== loadGeneration) return; // stale
+                    handleImageError(err);
+                });
+        }
+
         renderActionButtons(newItem);
 
         if (typeof options.renderInfoPanel === 'function') {
@@ -388,7 +426,50 @@ window.Yuuka.plugins.simpleViewer = (() => {
         actionsContainer.innerHTML = '';
         if (!options.actionButtons || options.actionButtons.length === 0) return;
 
+        const isVideoItem = !!(item.is_video || (item.imageUrl || '').endsWith('.webm') || (item.imageUrl || '').endsWith('.mp4'));
+        if (isVideoItem) {
+            const playPauseBtn = document.createElement('button');
+            playPauseBtn.title = "Play / Pause";
+            playPauseBtn.innerHTML = `<span class="material-symbols-outlined">pause</span>`;
+
+            // Helper function to update the icon based on video state
+            const updateIcon = (vid) => {
+                if (!vid) return;
+                playPauseBtn.innerHTML = vid.paused ?
+                    `<span class="material-symbols-outlined">play_arrow</span>` :
+                    `<span class="material-symbols-outlined">pause</span>`;
+            };
+
+            playPauseBtn.addEventListener('click', () => {
+                const activeVid = viewerElement.querySelector('video.active');
+                if (!activeVid) return;
+
+                if (activeVid.paused) {
+                    activeVid.play().catch(e => console.warn('Play interrupted', e));
+                } else {
+                    activeVid.pause();
+                }
+                updateIcon(activeVid);
+            });
+
+            // Try to listen to video events to keep icon in sync
+            setTimeout(() => {
+                const activeVid = viewerElement.querySelector('video.active');
+                if (activeVid) {
+                    activeVid.addEventListener('play', () => updateIcon(activeVid));
+                    activeVid.addEventListener('pause', () => updateIcon(activeVid));
+                    updateIcon(activeVid);
+                }
+            }, 100);
+
+            actionsContainer.appendChild(playPauseBtn);
+        }
+
         options.actionButtons.forEach(buttonDef => {
+            if (buttonDef.hidden && buttonDef.hidden(item)) {
+                return; // skip hidden buttons
+            }
+
             const button = document.createElement('button');
             button.title = buttonDef.title;
             if (buttonDef.disabled && buttonDef.disabled(item)) {
@@ -398,25 +479,25 @@ window.Yuuka.plugins.simpleViewer = (() => {
                 button.style.cssText = buttonDef.style;
             }
             button.innerHTML = `<span class="material-symbols-outlined">${buttonDef.icon}</span>`;
-            
+
             button.addEventListener('click', () => {
                 if (typeof buttonDef.onClick === 'function') {
                     buttonDef.onClick(item, close, updateItemsAndRefresh);
                 }
             });
-            
+
             actionsContainer.appendChild(button);
         });
-        
+
         const infoButton = document.createElement('button');
         infoButton.title = "Xem thông tin";
         infoButton.innerHTML = `<span class="material-symbols-outlined">info</span>`;
         infoButton.addEventListener('click', () => {
-             viewerElement.querySelector('.sv-viewer-info').classList.toggle('visible');
+            viewerElement.querySelector('.sv-viewer-info').classList.toggle('visible');
         });
         actionsContainer.appendChild(infoButton);
     }
-    
+
     /**
      * Khởi tạo logic Zoom và Pan cho một element ảnh
      * @param {HTMLImageElement} imgElement 
@@ -497,12 +578,12 @@ window.Yuuka.plugins.simpleViewer = (() => {
             close();
             return;
         }
-        
+
         let newIndex = items.findIndex(item => item.id === currentId);
         if (newIndex === -1) { // Ảnh đang xem đã bị xóa
             newIndex = Math.min(currentIndex, items.length - 1);
         }
-        
+
         updateViewerContent(newIndex);
     }
 
@@ -581,7 +662,7 @@ window.Yuuka.plugins.simpleViewer = (() => {
             options = opts;
             items = options.items || [];
             if (items.length === 0) return;
-            
+
             viewerElement = document.createElement('div');
             viewerElement.className = 'sv-viewer';
             viewerElement.innerHTML = `
@@ -600,6 +681,25 @@ window.Yuuka.plugins.simpleViewer = (() => {
                 </div>
             `;
             document.body.appendChild(viewerElement);
+
+            // Yuuka: I2V toolbar buttons support
+            if (options.toolbarButtons && options.toolbarButtons.length > 0) {
+                const toolbar = viewerElement.querySelector('.sv-viewer-toolbar');
+                const downloadBtn = toolbar.querySelector('.sv-viewer-download');
+                options.toolbarButtons.forEach(btnDef => {
+                    const btn = document.createElement('button');
+                    btn.className = 'sv-viewer-toolbar-btn';
+                    btn.title = btnDef.title || '';
+                    btn.innerHTML = `<span class="material-symbols-outlined">${btnDef.icon}</span>`;
+                    btn.addEventListener('click', () => {
+                        if (typeof btnDef.onClick === 'function') {
+                            const currentItem = items[currentIndex];
+                            btnDef.onClick(currentItem, close);
+                        }
+                    });
+                    toolbar.insertBefore(btn, downloadBtn);
+                });
+            }
 
             const viewerContent = viewerElement.querySelector('.sv-viewer-content');
             const navPrev = viewerElement.querySelector('.sv-viewer-nav.prev');

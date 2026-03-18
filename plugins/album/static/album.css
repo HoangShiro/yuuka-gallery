@@ -129,15 +129,13 @@
     border-radius: var(--rounded-md);
     border: 1px solid var(--color-border);
     background:
-        linear-gradient(
-            to right,
+        linear-gradient(to right,
             transparent 0,
             transparent var(--zoom-start),
             color-mix(in srgb, var(--color-accent) 14%, transparent) var(--zoom-start),
             color-mix(in srgb, var(--color-accent) 14%, transparent) var(--zoom-end),
             transparent var(--zoom-end),
-            transparent 100%
-        ),
+            transparent 100%),
         color-mix(in srgb, var(--color-card-bg) 70%, transparent);
     overflow: hidden;
 }
@@ -147,8 +145,7 @@
     inset: 0;
     pointer-events: none;
     background:
-        linear-gradient(
-            to right,
+        linear-gradient(to right,
             transparent 0,
             transparent calc(var(--sel-start) - 1px),
             var(--color-accent) calc(var(--sel-start) - 1px),
@@ -158,8 +155,7 @@
             var(--color-accent) calc(var(--sel-end) - 1px),
             var(--color-accent) calc(var(--sel-end) + 1px),
             transparent calc(var(--sel-end) + 1px),
-            transparent 100%
-        );
+            transparent 100%);
     opacity: 0.8;
 }
 
@@ -602,7 +598,7 @@
     transition: width 80ms linear;
 }
 
-.plugin-album__soundmgr-item > * {
+.plugin-album__soundmgr-item>* {
     position: relative;
     z-index: 1;
 }
@@ -689,17 +685,20 @@
 }
 
 @media (max-width: 600px) {
+
     /* On narrow screens, reclaim ~one button height so the menu sits closer to the bottom.
        Default is bottom: 100px (space for bottom nav); 100 - 44 = 56px. */
     .plugin-album.plugin-album--character {
         bottom: 56px;
     }
 }
+
 .plugin-album__grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: var(--spacing-4);
 }
+
 .album-character-card,
 .album-add-card {
     display: flex;
@@ -728,6 +727,7 @@
 .album-add-card .name {
     font-weight: var(--font-weight-medium);
 }
+
 .album-add-card:hover .image-container.no-cover span {
     color: var(--color-accent);
 }
@@ -804,7 +804,8 @@
 /* Yuuka: Style mới cho placeholder, căn giữa nội dung */
 .plugin-album__album-card.placeholder-card {
     display: flex;
-    flex-direction: column; /* Sắp xếp nội dung theo chiều dọc */
+    flex-direction: column;
+    /* Sắp xếp nội dung theo chiều dọc */
     align-items: center;
     justify-content: center;
     padding: var(--spacing-3);
@@ -853,9 +854,11 @@
     font-weight: var(--font-weight-medium);
     transition: background-color 0.2s;
 }
+
 .plugin-album__cancel-btn:hover {
     background-color: color-mix(in srgb, var(--color-accent-hover) 80%, black);
 }
+
 .plugin-album__cancel-btn .material-symbols-outlined {
     font-size: 1.2em;
 }
@@ -875,7 +878,7 @@
 .album-grid-progress-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(0,0,0,0.2);
+    background: rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -990,6 +993,7 @@
     background: var(--color-accent);
     cursor: pointer;
 }
+
 /* --- Kết thúc Style mới --- */
 
 /* --- Settings Modal --- */
@@ -1016,8 +1020,10 @@
     width: 100%;
     height: 100%;
     position: relative;
-    padding-bottom: 90px; /* Thêm không gian cho thanh action nổi */
+    padding-bottom: 90px;
+    /* Thêm không gian cho thanh action nổi */
 }
+
 .plugin-album__settings-modal .modal-dialog h3 {
     margin-top: 0;
     padding-bottom: var(--spacing-3);
@@ -1031,8 +1037,15 @@
     margin: 0 calc(var(--spacing-2) * -1);
 }
 
-.plugin-album__settings-modal .form-group { margin-bottom: 15px; }
-.plugin-album__settings-modal .form-group label { display: block; font-weight: 500; margin-bottom: 5px; }
+.plugin-album__settings-modal .form-group {
+    margin-bottom: 15px;
+}
+
+.plugin-album__settings-modal .form-group label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 5px;
+}
 
 /* Keep the android-like toggle row horizontal inside settings modal */
 .plugin-album__settings-modal .form-group label.plugin-album__android-toggle {
@@ -1057,20 +1070,47 @@
     font-weight: var(--font-weight-medium);
     color: var(--color-primary-text);
 }
-.plugin-album__settings-modal .form-group input[type="text"], 
-.plugin-album__settings-modal .form-group input[type="number"], 
-.plugin-album__settings-modal .form-group select, 
+
+.plugin-album__settings-modal .form-group input[type="text"],
+.plugin-album__settings-modal .form-group input[type="number"],
+.plugin-album__settings-modal .form-group select,
 .plugin-album__settings-modal .form-group textarea {
-    width: 100%; padding: 8px; border: 1px solid var(--color-border);
-    border-radius: 4px; box-sizing: border-box; font-family: inherit;
-    font-size: 1em; background-color: var(--color-primary-bg);
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 1em;
+    background-color: var(--color-primary-bg);
     color: var(--color-primary-text);
 }
-.plugin-album__settings-modal .form-group textarea { resize: none; overflow-y: hidden; }
-.plugin-album__settings-modal .form-group-slider { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; }
-.plugin-album__settings-modal .form-group-slider label { flex-basis: 100%; }
-.plugin-album__settings-modal .form-group-slider input[type="range"] { flex-grow: 1; }
-.plugin-album__settings-modal .input-with-button { display: flex; gap: 8px; }
+
+.plugin-album__settings-modal .form-group textarea {
+    resize: none;
+    overflow-y: hidden;
+}
+
+.plugin-album__settings-modal .form-group-slider {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.plugin-album__settings-modal .form-group-slider label {
+    flex-basis: 100%;
+}
+
+.plugin-album__settings-modal .form-group-slider input[type="range"] {
+    flex-grow: 1;
+}
+
+.plugin-album__settings-modal .input-with-button {
+    display: flex;
+    gap: 8px;
+}
+
 .plugin-album__settings-modal .input-with-button button {
     padding: 8px 12px;
     border: 1px solid var(--color-border);
@@ -1080,6 +1120,7 @@
     cursor: pointer;
     font-weight: 500;
 }
+
 .plugin-album__settings-modal .input-with-button button:hover {
     background-color: var(--color-border);
 }
@@ -1140,6 +1181,7 @@
 .plugin-album__character-layer--char:focus {
     outline: none;
 }
+
 .plugin-album__character-layer--char:focus-visible {
     outline: none;
 }
@@ -1152,6 +1194,7 @@
         overscroll-behavior-x: none;
         touch-action: pan-y;
     }
+
     .plugin-album__character-view--vn .plugin-album__character-layer--char {
         max-width: none;
     }
@@ -1163,17 +1206,15 @@
     .plugin-album__character-view--vn .plugin-album__character-layer--char {
         /* 0% opacity at edges, full opacity in center band */
         -webkit-mask-image: linear-gradient(to right,
-            transparent 0%,
-            #000 12%,
-            #000 88%,
-            transparent 100%
-        );
+                transparent 0%,
+                #000 12%,
+                #000 88%,
+                transparent 100%);
         mask-image: linear-gradient(to right,
-            transparent 0%,
-            #000 12%,
-            #000 88%,
-            transparent 100%
-        );
+                transparent 0%,
+                #000 12%,
+                #000 88%,
+                transparent 100%);
         -webkit-mask-repeat: no-repeat;
         mask-repeat: no-repeat;
         -webkit-mask-size: 100% 100%;
@@ -1251,7 +1292,8 @@
     border-radius: 999px;
     border: 0;
     background: color-mix(in srgb, var(--color-accent) 75%, transparent);
-    margin-top: -6px; /* center on 2px track */
+    margin-top: -6px;
+    /* center on 2px track */
 }
 
 .plugin-album__character-loop-speed input[type="range"]::-moz-range-track {
@@ -1391,29 +1433,30 @@
     transition: height 220ms ease;
     will-change: height;
 
-    background-image: linear-gradient(
-        0deg,
-        color-mix(in srgb, var(--color-accent) 60%, transparent),
-        color-mix(in srgb, var(--color-accent) 35%, transparent),
-        color-mix(in srgb, var(--color-accent) 60%, transparent)
-    );
+    background-image: linear-gradient(0deg,
+            color-mix(in srgb, var(--color-accent) 60%, transparent),
+            color-mix(in srgb, var(--color-accent) 35%, transparent),
+            color-mix(in srgb, var(--color-accent) 60%, transparent));
     background-size: 100% 200%;
     animation: plugin-album__menu-fill-shimmer 2.4s linear infinite;
 }
 
 @keyframes plugin-album__menu-fill-shimmer {
-    0% { background-position: 50% 100%; }
-    100% { background-position: 50% -100%; }
+    0% {
+        background-position: 50% 100%;
+    }
+
+    100% {
+        background-position: 50% -100%;
+    }
 }
 
 /* When auto tasks are running, use a muted gray shimmer instead of accent */
 .plugin-album__character-progressbar.is-auto-generating .plugin-album__character-progressbar-fill {
-    background-image: linear-gradient(
-        0deg,
-        color-mix(in srgb, var(--color-secondary-text) 45%, transparent),
-        color-mix(in srgb, var(--color-secondary-text) 25%, transparent),
-        color-mix(in srgb, var(--color-secondary-text) 45%, transparent)
-    );
+    background-image: linear-gradient(0deg,
+            color-mix(in srgb, var(--color-secondary-text) 45%, transparent),
+            color-mix(in srgb, var(--color-secondary-text) 25%, transparent),
+            color-mix(in srgb, var(--color-secondary-text) 45%, transparent));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1560,7 +1603,7 @@
     z-index: 0;
 }
 
-.plugin-album__character-submenu-row.is-generating > * {
+.plugin-album__character-submenu-row.is-generating>* {
     position: relative;
     z-index: 1;
 }
@@ -1760,6 +1803,7 @@
     border-radius: inherit;
     z-index: 0;
 }
+
 .plugin-album__character-submenu-item.sortable-ghost {
     opacity: 0.35;
 }
@@ -2291,7 +2335,7 @@
 }
 
 /* Subtle separators between tracks */
-.plugin-album__anim-editor-track-stack .plugin-album__anim-editor-track + .plugin-album__anim-editor-track {
+.plugin-album__anim-editor-track-stack .plugin-album__anim-editor-track+.plugin-album__anim-editor-track {
     border-top: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
 }
 
@@ -2544,6 +2588,7 @@
     .plugin-album__anim-editor-control {
         grid-template-columns: max-content 1fr;
     }
+
     .plugin-album__anim-editor-control input {
         width: 100%;
         min-width: 160px;
@@ -2802,43 +2847,56 @@
     padding: 0;
 }
 
-.plugin-album__settings-modal .modal-actions .btn-save { background: var(--color-accent); color: white; }
+.plugin-album__settings-modal .modal-actions .btn-save {
+    background: var(--color-accent);
+    color: white;
+}
+
 .plugin-album__settings-modal .modal-actions .btn-generate {
     background: var(--color-accent);
     color: white;
 }
+
 .plugin-album__settings-modal .modal-actions .btn-generate:hover {
     filter: brightness(1.05);
 }
-.plugin-album__settings-modal .modal-actions .btn-cancel { 
-    background: var(--color-border); 
-    color: var(--color-primary-text); 
-    margin-left: auto; /* Đẩy nhóm nút này sang phải */
+
+.plugin-album__settings-modal .modal-actions .btn-cancel {
+    background: var(--color-border);
+    color: var(--color-primary-text);
+    margin-left: auto;
+    /* Đẩy nhóm nút này sang phải */
 }
 
 .plugin-album__settings-modal .modal-actions .btn-delete {
     background: transparent;
     color: #d14343;
 }
+
 .plugin-album__settings-modal .modal-actions .btn-delete:hover {
     background: #d14343;
     color: #fff;
 }
-/* Style chung cho nút Paste và Copy bên trái */
+
+/* Style chung cho nút Paste, Copy, và Upload bên trái */
+.plugin-album__settings-modal .modal-actions .btn-upload,
 .plugin-album__settings-modal .modal-actions .btn-paste,
 .plugin-album__settings-modal .modal-actions .btn-copy {
     background: transparent;
     color: var(--color-secondary-text);
 }
+
+.plugin-album__settings-modal .modal-actions .btn-upload:hover,
 .plugin-album__settings-modal .modal-actions .btn-paste:hover,
-.plugin-album__settings-modal .modal-actions .btn-copy:hover { 
-    background-color: var(--color-border); 
+.plugin-album__settings-modal .modal-actions .btn-copy:hover {
+    background-color: var(--color-border);
 }
 
 /* --- Yuuka: Styles cho tiên đoán tag --- */
 .tag-autocomplete-container {
     position: relative;
 }
+
 .tag-autocomplete-list {
     display: none;
     position: absolute;
@@ -2852,13 +2910,17 @@
     box-sizing: border-box;
     max-height: 150px;
     overflow-y: auto;
-    z-index: 2600; /* Phải cao hơn modal-dialog */
+    z-index: 2600;
+    /* Phải cao hơn modal-dialog */
 }
+
 .tag-autocomplete-item {
     padding: var(--spacing-2) var(--spacing-3);
     cursor: pointer;
 }
-.tag-autocomplete-item:hover, .tag-autocomplete-item.active {
+
+.tag-autocomplete-item:hover,
+.tag-autocomplete-item.active {
     background-color: var(--color-border);
 }
 
@@ -2866,15 +2928,18 @@
 .character-card .image-container {
     position: relative;
 }
+
 .plugin-album__settings-modal .album-settings-container {
     max-height: 80vh;
     overflow-y: auto;
 }
+
 .plugin-album__settings-modal .album-settings-columns {
     display: grid;
     grid-template-columns: repeat(3, minmax(320px, 1fr));
     gap: var(--spacing-4);
 }
+
 .plugin-album__settings-modal .album-settings-column h4 {
     margin-top: 0;
     margin-bottom: var(--spacing-3);
@@ -2882,15 +2947,19 @@
     font-weight: var(--font-weight-medium);
     color: var(--color-primary-text);
 }
+
 .plugin-album__settings-modal .album-settings-column .form-group {
     margin-bottom: var(--spacing-3);
 }
+
 .plugin-album__settings-modal .album-settings-column .form-group:last-child {
     margin-bottom: 0;
 }
+
 .plugin-album__settings-modal .album-settings-columns .lora-tags-wrapper {
     margin-top: var(--spacing-3);
 }
+
 .plugin-album__settings-modal .album-settings-column[data-column="lora"] {
     display: flex;
     flex-direction: column;
@@ -2920,14 +2989,17 @@
     color: #fff;
     box-shadow: 0 10px 18px -12px rgba(0, 0, 0, 0.35);
 }
+
 .plugin-album__settings-modal .album-settings-column[data-column="lora"] .lora-tags-wrapper {
     flex-grow: 1;
 }
+
 @media (max-width: 1200px) {
     .plugin-album__settings-modal .album-settings-columns {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
+
 @media (max-width: 768px) {
     .plugin-album__settings-modal .album-settings-columns {
         grid-template-columns: 1fr;
@@ -3050,15 +3122,15 @@
     transition: transform 0.2s ease;
 }
 
-.plugin-album__android-toggle input[type="checkbox"]:checked + .plugin-album__android-toggle__track {
+.plugin-album__android-toggle input[type="checkbox"]:checked+.plugin-album__android-toggle__track {
     background: var(--color-accent);
 }
 
-.plugin-album__android-toggle input[type="checkbox"]:checked + .plugin-album__android-toggle__track::after {
+.plugin-album__android-toggle input[type="checkbox"]:checked+.plugin-album__android-toggle__track::after {
     transform: translateX(20px);
 }
 
-.plugin-album__android-toggle input[type="checkbox"]:focus-visible + .plugin-album__android-toggle__track {
+.plugin-album__android-toggle input[type="checkbox"]:focus-visible+.plugin-album__android-toggle__track {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
 }
@@ -3087,7 +3159,7 @@
     left: 3px;
 }
 
-.plugin-album__android-toggle.plugin-album__android-toggle--compact input[type="checkbox"]:checked + .plugin-album__android-toggle__track::after {
+.plugin-album__android-toggle.plugin-album__android-toggle--compact input[type="checkbox"]:checked+.plugin-album__android-toggle__track::after {
     transform: translateX(18px);
 }
 
@@ -3107,7 +3179,7 @@
     padding-left: var(--spacing-1);
 }
 
-.plugin-album__settings-modal.is-mobile .modal-dialog > h3 {
+.plugin-album__settings-modal.is-mobile .modal-dialog>h3 {
     display: none;
 }
 
@@ -3128,13 +3200,16 @@
     background: var(--color-border);
     color: var(--color-primary-text);
 }
+
 .plugin-album__settings-modal .modal-actions .btn-generate:hover {
     filter: brightness(1.05);
 }
+
 .plugin-album__settings-modal .modal-actions .btn-delete {
     background: transparent;
     color: #d14343;
 }
+
 .plugin-album__settings-modal .modal-actions .btn-delete:hover {
     background: #d14343;
     color: #fff;
@@ -3152,6 +3227,7 @@
     margin-bottom: var(--spacing-2);
     border-bottom: 1px dashed var(--color-border);
 }
+
 .plugin-album__settings-modal .lora-multi-wrapper:last-child {
     border-bottom: none;
     padding-bottom: 0;
@@ -3159,21 +3235,29 @@
 }
 
 /* Per-LoRA strength sliders (Model & Clip) */
-.plugin-album__settings-modal .lora-multi-wrapper { position: relative; }
+.plugin-album__settings-modal .lora-multi-wrapper {
+    position: relative;
+}
+
 .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row {
     margin: 4px 0 6px;
     display: flex;
     gap: 12px;
     align-items: flex-end;
     width: 100%;
-    flex-wrap: nowrap; /* keep on one line by default */
+    flex-wrap: nowrap;
+    /* keep on one line by default */
 }
+
 .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider {
-    flex: 1 1 0%; /* allow equal shrink/grow without min-content overflow */
-    min-width: 0; /* enable shrinking below content's min width */
+    flex: 1 1 0%;
+    /* allow equal shrink/grow without min-content overflow */
+    min-width: 0;
+    /* enable shrinking below content's min width */
     margin: 0;
     box-sizing: border-box;
 }
+
 .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider label {
     font-size: 11px;
     line-height: 1.2;
@@ -3183,41 +3267,50 @@
     justify-content: space-between;
     gap: 6px;
 }
+
 .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider input[type="range"] {
     width: 100%;
     height: 4px;
 }
+
 .plugin-album__settings-modal .lora-multi-wrapper[data-empty="true"] .lora-strength-row {
     display: none !important;
 }
+
 .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row span[id^="val-lora_strength_"] {
     min-width: 28px;
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
+
 @media (max-width: 600px) {
     .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row {
-        flex-direction: row; /* keep same row */
+        flex-direction: row;
+        /* keep same row */
         align-items: center;
         flex-wrap: nowrap;
-        gap: 8px; /* tighter gap on small screens */
+        gap: 8px;
+        /* tighter gap on small screens */
     }
+
     .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider {
         flex: 1 1 0%;
         min-width: 0;
     }
+
     .plugin-album__settings-modal .lora-multi-wrapper .lora-strength-row .form-group-slider label {
         justify-content: space-between;
     }
 }
 
 /* Remove button inside label */
-.plugin-album__settings-modal .lora-select-group > label {
+.plugin-album__settings-modal .lora-select-group>label {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--spacing-2);
 }
+
 .plugin-album__settings-modal .lora-remove-btn {
     background: transparent;
     border: none;
@@ -3227,6 +3320,7 @@
     line-height: 1;
     padding: 0 var(--spacing-2);
 }
+
 .plugin-album__settings-modal .lora-remove-btn:hover {
     color: #d14343;
 }
@@ -3235,6 +3329,7 @@
 .plugin-album__settings-modal .lora-multi-add {
     margin-top: var(--spacing-3);
 }
+
 .plugin-album__settings-modal .lora-multi-add__btn {
     width: 100%;
     display: flex;
@@ -3249,11 +3344,13 @@
     cursor: pointer;
     transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
+
 .plugin-album__settings-modal .lora-multi-add__btn:hover {
     background: var(--color-primary-bg);
     border-color: var(--color-accent);
     color: var(--color-primary-text);
 }
+
 .plugin-album__settings-modal .lora-multi-add__btn .material-symbols-outlined {
     font-size: 24px;
 }
@@ -3483,10 +3580,12 @@
     .plugin-album__settings-modal .lora-select-toggle {
         gap: var(--spacing-2);
     }
+
     .plugin-album__settings-modal .lora-card-grid {
         grid-template-columns: 1fr;
     }
 }
+
 .stage-config-grid {
     display: grid;
     gap: 12px;
@@ -3500,14 +3599,16 @@
 }
 
 /* In two-stage (hires) mode, show Upscale Model & Method side-by-side */
-.stage-config-grid.is-hires ~ [data-hires-only] {
+.stage-config-grid.is-hires~[data-hires-only] {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
 }
 
 /* Ensure selects stretch nicely */
-[data-hires-only] .form-group { margin-bottom: 0; }
+[data-hires-only] .form-group {
+    margin-bottom: 0;
+}
 
 .stage-config-grid:not(.is-hires) {
     grid-template-columns: 1fr;
@@ -3546,6 +3647,7 @@
 .stage-config-grid:not(.is-hires) [data-stage1-denoise] {
     grid-column: 1 / -1;
 }
+
 /* Album settings modal layout overrides */
 .plugin-album__settings-modal .modal-dialog {
     padding-bottom: 0;
@@ -3622,7 +3724,7 @@
     overflow-y: auto;
 }
 
-.plugin-album__settings-modal .album-settings-section__body > *:last-child {
+.plugin-album__settings-modal .album-settings-section__body>*:last-child {
     margin-bottom: 0;
 }
 
@@ -3695,8 +3797,369 @@
 
 /* Hide large headers on narrow screens to save space */
 @media (max-width: 768px) {
+
     .plugin-album__settings-modal .modal-header h3,
-    .plugin-album__settings-modal .album-settings-section > h4 {
+    .plugin-album__settings-modal .album-settings-section>h4 {
         display: none;
     }
+}
+
+/* ================================================================
+   Yuuka: I2V (Image-to-Video) settings modal
+   ================================================================ */
+.plugin-album__i2v-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    animation: i2vFadeIn 0.2s ease;
+}
+
+@keyframes i2vFadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.plugin-album__i2v-modal {
+    width: 380px;
+    max-width: 92vw;
+    background: var(--color-card-bg, #1e1e2e);
+    border: 1px solid var(--color-border, #333);
+    border-radius: var(--rounded-lg, 12px);
+    box-shadow: 0 24px 48px -16px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: i2vSlideUp 0.25s ease;
+}
+
+@media (min-width: 768px) {
+    .plugin-album__i2v-modal {
+        width: 600px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .plugin-album__i2v-modal {
+        width: 800px;
+    }
+}
+
+@keyframes i2vSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.i2v-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    border-bottom: 1px solid var(--color-border, #333);
+}
+
+.i2v-modal-title {
+    font-size: var(--font-size-base, 15px);
+    font-weight: var(--font-weight-semibold, 600);
+    color: var(--color-primary-text, #e0e0e0);
+}
+
+.i2v-modal-close {
+    background: transparent;
+    border: none;
+    color: var(--color-secondary-text, #999);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--rounded-sm, 6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.i2v-modal-close:hover {
+    color: var(--color-primary-text, #e0e0e0);
+    background: var(--color-primary-bg, rgba(255, 255, 255, 0.06));
+}
+
+.i2v-modal-body {
+    padding: var(--spacing-4, 16px);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3, 12px);
+}
+
+.i2v-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1, 4px);
+}
+
+.i2v-label {
+    font-size: var(--font-size-sm, 13px);
+    font-weight: var(--font-weight-medium, 500);
+    color: var(--color-secondary-text, #999);
+}
+
+.i2v-prompt {
+    width: 100%;
+    padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+    border: 1px solid var(--color-border, #333);
+    border-radius: var(--rounded-md, 8px);
+    background: var(--color-primary-bg, #141420);
+    color: var(--color-primary-text, #e0e0e0);
+    font-family: inherit;
+    font-size: var(--font-size-sm, 13px);
+    resize: vertical;
+    line-height: 1.5;
+    transition: border-color 0.15s ease;
+    box-sizing: border-box;
+}
+
+.i2v-prompt:focus {
+    outline: none;
+    border-color: var(--color-accent, #6c7ee1);
+}
+
+.i2v-row {
+    display: flex;
+    gap: var(--spacing-3, 12px);
+}
+
+.i2v-row .i2v-field {
+    flex: 1;
+}
+
+.i2v-row select {
+    width: 100%;
+    padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+    border: 1px solid var(--color-border, #333);
+    border-radius: var(--rounded-md, 8px);
+    background: var(--color-primary-bg, #141420);
+    color: var(--color-primary-text, #e0e0e0);
+    font-family: inherit;
+    font-size: var(--font-size-sm, 13px);
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+    appearance: auto;
+}
+
+.i2v-row select:focus {
+    outline: none;
+    border-color: var(--color-accent, #6c7ee1);
+}
+
+.i2v-modal-footer {
+    padding: var(--spacing-3, 12px) var(--spacing-4, 16px);
+    border-top: 1px solid var(--color-border, #333);
+    display: flex;
+    justify-content: flex-end;
+}
+
+.i2v-upload-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: var(--rounded-md, 8px);
+    background: color-mix(in srgb, var(--color-secondary-text, #999) 12%, transparent);
+    color: var(--color-primary-text, #e0e0e0);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.i2v-upload-btn:hover {
+    background: color-mix(in srgb, var(--color-secondary-text, #999) 20%, transparent);
+}
+
+.i2v-generate-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-2, 8px);
+    padding: var(--spacing-2, 8px) var(--spacing-4, 16px);
+    border: none;
+    border-radius: var(--rounded-md, 8px);
+    background: var(--color-accent, #6c7ee1);
+    color: #fff;
+    font-weight: var(--font-weight-medium, 500);
+    cursor: pointer;
+    transition: filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+.i2v-generate-btn:hover {
+    filter: brightness(1.1);
+    box-shadow: 0 8px 18px -8px rgba(108, 126, 225, 0.4);
+}
+
+.i2v-generate-btn .material-symbols-outlined {
+    font-size: 20px;
+}
+
+/* I2V Toggle switches (Android-style) */
+.i2v-toggles-row {
+    justify-content: flex-start;
+    gap: var(--spacing-4, 16px) !important;
+    padding-top: var(--spacing-1, 4px);
+}
+
+.i2v-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2, 8px);
+    cursor: pointer;
+    user-select: none;
+}
+
+.i2v-toggle input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    width: 36px;
+    height: 20px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    cursor: pointer;
+    margin: 0;
+    flex-shrink: 0;
+    transition: background 0.25s ease;
+}
+
+.i2v-toggle input[type="checkbox"]::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 50%;
+    transition: transform 0.25s ease, background 0.25s ease;
+}
+
+.i2v-toggle input[type="checkbox"]:checked {
+    background: var(--color-accent, #6c7ee1);
+}
+
+.i2v-toggle input[type="checkbox"]:checked::after {
+    transform: translateX(16px);
+    background: #fff;
+}
+
+.i2v-toggle-label {
+    font-size: var(--font-size-sm, 13px);
+    color: var(--color-primary-text, #e0e0e0);
+    font-weight: var(--font-weight-medium, 500);
+}
+
+/* I2V System Prompt Tabs */
+.i2v-sysprompt-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.i2v-sysprompt-tabs {
+    display: flex;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 2px;
+}
+
+.i2v-sysprompt-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--color-secondary-text, #999);
+    font-size: var(--font-size-sm, 13px);
+    font-weight: var(--font-weight-medium, 500);
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+    white-space: nowrap;
+}
+
+.i2v-sysprompt-tab:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-primary-text, #e0e0e0);
+}
+
+.i2v-sysprompt-tab.is-active {
+    background: rgba(108, 126, 225, 0.15);
+    color: var(--color-accent, #6c7ee1);
+}
+
+.i2v-tab-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.4;
+    transition: opacity 0.2s ease;
+}
+
+.i2v-sysprompt-tab.is-active .i2v-tab-dot {
+    opacity: 1;
+}
+
+/* Video Grid Card Styles */
+.plugin-album__image-card.video-card {
+    position: relative;
+    overflow: hidden;
+}
+
+.plugin-album__image-card.video-card .video-indicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    opacity: 0.8;
+    pointer-events: none;
+    /* Let clicks pass through */
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.plugin-album__image-card.video-card .video-indicator .material-symbols-outlined {
+    font-size: 32px;
+}
+
+.plugin-album__image-card.video-card:hover .video-indicator {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.2);
 }

@@ -332,7 +332,317 @@
                 this.state.viewMode = 'grid';
                 await this.showCharacterSelectionGrid();
                 this._updateNav();
-            }
+            },
+            onUpload: async (file) => {
+                const current = this.state.selectedCharacter;
+                if (!current?.hash) {
+                    throw new Error('Không xác định được album đang mở.');
+                }
+                const formData = new FormData();
+                formData.append('image', file);
+
+                const placeholder = { id: 'uploading-placeholder', pv_url: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' };
+                this.state.allImageData = this.state.allImageData || [];
+                this.state.allImageData.unshift(placeholder);
+                if (typeof this._renderImageGrid === 'function') this._renderImageGrid();
+
+                try {
+                    const authToken = localStorage.getItem('yuuka-auth-token');
+                    const headers = {};
+                    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+                    const res = await fetch(`/api/plugin/album/${current.hash}/i2v/upload`, {
+                        method: 'POST',
+                        body: formData,
+                        headers: headers
+                    });
+                    if (!res.ok) throw new Error(await res.text());
+                    const data = await res.json();
+
+                    const idx = this.state.allImageData.findIndex(img => img.id === 'uploading-placeholder');
+                    if (idx !== -1) {
+                        this.state.allImageData[idx] = data.image;
+                    } else {
+                        this.state.allImageData.unshift(data.image);
+                    }
+                } catch (err) {
+                    const idx = this.state.allImageData.findIndex(img => img.id === 'uploading-placeholder');
+                    if (idx !== -1) this.state.allImageData.splice(idx, 1);
+                    throw err;
+                } finally {
+                    if (typeof this._renderImageGrid === 'function') this._renderImageGrid();
+                }
+            },
+            onSysPrompts: () => this._openSettingsSysPromptsModal(this.state.selectedCharacter.hash),
+            onGeneratePrompt: (dialog, form, btnGen, btnCancel) => this._generateSettingsPrompt(this.state.selectedCharacter.hash, dialog, form, btnGen, btnCancel)
         });
+    };
+    proto._openSettingsSysPromptsModal = async function (charHash) {
+        if (!charHash) return;
+        const _save = async (data) => {
+            try {
+                await fetch(`/api/plugin/album/${charHash}/settings/sys_prompts`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('yuuka-auth-token')}`
+                    },
+                    body: JSON.stringify(data)
+                });
+            } catch (err) {
+                console.warn('[Album Settings] Failed to save sys prompts config:', err);
+            }
+        };
+
+        try {
+            const res = await fetch(`/api/plugin/album/${charHash}/settings/sys_prompts`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('yuuka-auth-token')}` }
+            });
+            let initialData = {
+                sys_prompt: "You are a creative and expert prompt generator. Create highly detailed and cinematic booru tags for the character's outfits, expression, action, and context based on the user's description. Use rich, varied vocabulary and focus on visual aesthetics.",
+                sys_prompt_secondary: "",
+                sys_prompt_active_tab: "primary",
+                enabled_fields: { outfits: true, expression: true, action: true, context: true, use_current_tags: true }
+            };
+            if (res.ok) {
+                const data = await res.json();
+                if (data) initialData = { ...initialData, ...data };
+            }
+
+            const activeTab = initialData.sys_prompt_active_tab || 'primary';
+
+            const _escapeHtml = (s) => String(s).replace(/[&<>"']/g, m => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[m]);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'plugin-album__i2v-overlay';
+            overlay.style.zIndex = '100000';
+
+            const modal = document.createElement('div');
+            modal.className = 'plugin-album__i2v-modal';
+            modal.innerHTML = `
+                <div class="i2v-modal-header">
+                    <span class="i2v-modal-title">Edit System Prompts</span>
+                    <button class="i2v-modal-close" title="Đóng">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+                <div class="i2v-modal-body">
+                    <style>
+                        .album-settings-fields-toggles { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+                        .album-settings-toggle-btn { padding: 4px 10px; border: 1px solid var(--border-color); border-radius: 4px; background: transparent; color: var(--text-color); cursor: pointer; opacity: 0.5; transition: all 0.2s; font-size: 0.9em; }
+                        .album-settings-toggle-btn.active { opacity: 1; border-color: var(--primary-color); background: rgba(var(--primary-color-rgb), 0.1); }
+                    </style>
+
+                    <div class="i2v-field">
+                        <div class="i2v-sysprompt-section-header">
+                            <span class="i2v-label" style="margin-bottom: 0;">Enabled Fields</span>
+                        </div>
+                        <div class="album-settings-fields-toggles">
+                            <button type="button" class="album-settings-toggle-btn ${initialData.enabled_fields?.outfits !== false ? 'active' : ''}" data-field="outfits">Outfits</button>
+                            <button type="button" class="album-settings-toggle-btn ${initialData.enabled_fields?.expression !== false ? 'active' : ''}" data-field="expression">Expression</button>
+                            <button type="button" class="album-settings-toggle-btn ${initialData.enabled_fields?.action !== false ? 'active' : ''}" data-field="action">Action</button>
+                            <button type="button" class="album-settings-toggle-btn ${initialData.enabled_fields?.context !== false ? 'active' : ''}" data-field="context">Context</button>
+                            <button type="button" class="album-settings-toggle-btn ${initialData.enabled_fields?.use_current_tags !== false ? 'active' : ''}" data-field="use_current_tags" title="Gửi kèm các tag hiện tại làm base cho LLM tham khảo (trừ Negative)">Use the current tags</button>
+                        </div>
+                    </div>
+
+                    <div class="i2v-field">
+                        <div class="i2v-sysprompt-section-header">
+                            <span class="i2v-label" style="margin-bottom: 0;">Prompt Generator</span>
+                            <div class="i2v-sysprompt-tabs" data-section="prompt">
+                                <button type="button" class="i2v-sysprompt-tab ${activeTab === 'primary' ? 'is-active' : ''}" data-tab="primary" title="Chính">
+                                    <span class="i2v-tab-dot"></span>Chính
+                                </button>
+                                <button type="button" class="i2v-sysprompt-tab ${activeTab === 'secondary' ? 'is-active' : ''}" data-tab="secondary" title="Phụ">
+                                    <span class="i2v-tab-dot"></span>Phụ
+                                </button>
+                            </div>
+                        </div>
+                        <textarea id="sys_prompt_primary" class="i2v-prompt i2v-sysprompt-textarea" data-section="prompt" data-tab="primary" rows="12" style="display: ${activeTab === 'primary' ? 'block' : 'none'};">${_escapeHtml(initialData.sys_prompt || '')}</textarea>
+                        <textarea id="sys_prompt_secondary" class="i2v-prompt i2v-sysprompt-textarea" data-section="prompt" data-tab="secondary" rows="12" style="display: ${activeTab === 'secondary' ? 'block' : 'none'};">${_escapeHtml(initialData.sys_prompt_secondary || '')}</textarea>
+                    </div>
+                </div>
+                <div class="i2v-modal-footer"></div>
+            `;
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            // Toggles
+            const toggles = modal.querySelectorAll('.album-settings-toggle-btn');
+            toggles.forEach(btn => {
+                btn.addEventListener('click', () => btn.classList.toggle('active'));
+            });
+
+            // Tab switching logic
+            modal.querySelectorAll('.i2v-sysprompt-tabs').forEach(tabGroup => {
+                const section = tabGroup.dataset.section;
+                tabGroup.querySelectorAll('.i2v-sysprompt-tab').forEach(tabBtn => {
+                    tabBtn.addEventListener('click', () => {
+                        const targetTab = tabBtn.dataset.tab;
+                        // Update active tab button
+                        tabGroup.querySelectorAll('.i2v-sysprompt-tab').forEach(b => b.classList.remove('is-active'));
+                        tabBtn.classList.add('is-active');
+                        // Show/hide textareas
+                        modal.querySelectorAll(`.i2v-sysprompt-textarea[data-section="${section}"]`).forEach(ta => {
+                            ta.style.display = ta.dataset.tab === targetTab ? 'block' : 'none';
+                        });
+                    });
+                });
+            });
+
+            const getValues = () => {
+                const enabled_fields = {};
+                toggles.forEach(btn => {
+                    enabled_fields[btn.getAttribute('data-field')] = btn.classList.contains('active');
+                });
+
+                const getActiveTab = (section) => {
+                    const activeTabBtn = modal.querySelector(`.i2v-sysprompt-tabs[data-section="${section}"] .i2v-sysprompt-tab.is-active`);
+                    return activeTabBtn ? activeTabBtn.dataset.tab : 'primary';
+                };
+
+                return {
+                    sys_prompt: modal.querySelector('#sys_prompt_primary').value,
+                    sys_prompt_secondary: modal.querySelector('#sys_prompt_secondary').value,
+                    sys_prompt_active_tab: getActiveTab('prompt'),
+                    enabled_fields: enabled_fields
+                };
+            };
+
+            const closeModal = async () => {
+                await _save(getValues());
+                overlay.remove();
+            };
+
+            modal.querySelector('.i2v-modal-close').addEventListener('click', () => closeModal());
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeModal();
+            });
+
+            const escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    e.stopPropagation();
+                    document.removeEventListener('keydown', escHandler, true);
+                    closeModal();
+                }
+            };
+            document.addEventListener('keydown', escHandler, true);
+
+        } catch (e) {
+            showError(`Gặp lỗi khi lấy cấu hình: ${e.message}`);
+        }
+    };
+
+    proto._generateSettingsPrompt = async function (charHash, dialog, form, btnGen, btnCancel) {
+        if (!charHash) return;
+        const charInput = form.elements['character'];
+        const userPrompt = charInput.value.trim();
+
+        const targets = {
+            outfits: form.elements['outfits'],
+            expression: form.elements['expression'],
+            action: form.elements['action'],
+            context: form.elements['context']
+        };
+
+        const inputsToDisable = Array.from(form.querySelectorAll('input, select, textarea, button:not(.btn-cancel):not(.album-btn-cancel)'));
+
+        const currentTags = {
+            outfits: form.elements['outfits']?.value || '',
+            expression: form.elements['expression']?.value || '',
+            action: form.elements['action']?.value || '',
+            context: form.elements['context']?.value || '',
+            quality: form.elements['quality']?.value || ''
+        };
+
+        let abortController = new AbortController();
+
+        btnGen.style.display = 'none';
+        btnCancel.style.display = '';
+        inputsToDisable.forEach(el => el.disabled = true);
+
+        const onCancel = () => {
+            if (abortController) {
+                abortController.abort();
+            }
+        };
+        btnCancel.addEventListener('click', onCancel);
+
+        const cleanupUI = () => {
+            btnCancel.removeEventListener('click', onCancel);
+            btnCancel.style.display = 'none';
+            btnGen.style.display = '';
+            inputsToDisable.forEach(el => el.disabled = false);
+        };
+
+        try {
+            const res = await fetch(`/api/plugin/album/${charHash}/settings/prompt_generate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('yuuka-auth-token')}`
+                },
+                body: JSON.stringify({ prompt: userPrompt, current_tags: currentTags }),
+                signal: abortController.signal
+            });
+
+            if (!res.ok) {
+                const raw = await res.text();
+                throw new Error(raw);
+            }
+
+            // Clear values before streaming
+            for (const key in targets) {
+                if (targets[key]) targets[key].value = '';
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+
+            let done = false;
+            while (!done) {
+                const { value, done: readerDone } = await reader.read();
+                done = readerDone;
+                if (value) {
+                    const chunk = decoder.decode(value, { stream: true });
+                    buffer += chunk;
+
+                    if (buffer.includes('<CLEAR>')) {
+                        buffer = buffer.replace('<CLEAR>', '');
+                        for (const key in targets) {
+                            if (targets[key]) targets[key].value = '';
+                        }
+                    }
+
+                    // Direct matching: regex dynamically extracts values for 4 fields
+                    // Value capturing ends at the next double quote
+                    for (const key in targets) {
+                        if (targets[key]) {
+                            const regex = new RegExp(`"${key}"\\s*:\\s*"([^"]*)`);
+                            const match = buffer.match(regex);
+                            if (match) {
+                                targets[key].value = match[1];
+                            }
+                        }
+                    }
+                }
+            }
+
+            showError("Tạo prompt thành công.");
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                showError("Đã hủy tạo prompt.");
+            } else {
+                showError(`Lỗi tạo prompt: ${e.message}`);
+                console.error(e);
+            }
+        } finally {
+            cleanupUI();
+        }
     };
 })();

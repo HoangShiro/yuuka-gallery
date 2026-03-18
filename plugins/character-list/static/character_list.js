@@ -21,12 +21,12 @@ class CharacterListComponent {
             allCharacters: [], sessionBrowseOrder: [], favourites: [], blacklist: [],
             displayMode: 'browse', currentPage: 1, isLoading: false, hasMore: true,
             currentSearchQuery: '', debounceTimeout: null, syncTimeout: null,
-            currentModalCharacter: null, 
+            currentModalCharacter: null,
             animateNextLoad: false,
             currentAnimationClass: null,
         };
         this.observer = new IntersectionObserver(this.handleObserver.bind(this), { rootMargin: '400px' });
-        
+
         // Yuuka: Grid zoom v2.0 - state
         this.zoomState = {
             active: false,
@@ -37,7 +37,7 @@ class CharacterListComponent {
             sizes: ['110px', '130px', '150px', '175px', '200px', '225px', '250px'],
             sensitivity: 40 // Pixels to drag per zoom level change
         };
-        
+
         this.bindEventHandlers();
     }
 
@@ -82,7 +82,7 @@ class CharacterListComponent {
         this.state.allCharacters = charResponse.characters;
         this.state.favourites = listsResponse.favourites || [];
         this.state.blacklist = listsResponse.blacklist || [];
-        
+
         this.attachEventListeners();
         this._updateNav();
 
@@ -94,7 +94,7 @@ class CharacterListComponent {
             this._shuffleSessionOrder();
             this.state.animateNextLoad = true;
             this.state.currentAnimationClass = 'card-anim-rise';
-            window.Yuuka.pluginState.characterList = { 
+            window.Yuuka.pluginState.characterList = {
                 initialized: true,
                 sessionBrowseOrder: this.state.sessionBrowseOrder
             };
@@ -123,7 +123,7 @@ class CharacterListComponent {
         this.observer.disconnect();
         this.detachEventListeners();
     }
-    
+
     attachEventListeners() {
         this.searchBox.addEventListener('input', this.handleSearchInput);
         this.searchBox.addEventListener('keydown', this.handleSearchKeyDown);
@@ -141,7 +141,7 @@ class CharacterListComponent {
         window.removeEventListener('pointermove', this.handleZoomMove);
         window.removeEventListener('pointerup', this.handleZoomEnd);
     }
-    
+
     _updateNav() {
         const navibar = window.Yuuka.services.navibar;
         if (!navibar) {
@@ -169,7 +169,7 @@ class CharacterListComponent {
                 this._updateNav();
             }
         });
-        
+
         // Register the tool button for Search
         navibar.registerButton({
             id: 'cl-search',
@@ -277,7 +277,7 @@ class CharacterListComponent {
     _shuffleSessionOrder() { let b = this.state.allCharacters.filter(c => !this.state.blacklist.includes(c.hash)); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[b[i], b[j]] = [b[j], b[i]]; } this.state.sessionBrowseOrder = b; }
     async _saveUserLists() { clearTimeout(this.state.syncTimeout); this.state.syncTimeout = setTimeout(async () => { try { await this.api['character-list'].post('/lists', { favourites: this.state.favourites, blacklist: this.state.blacklist }); } catch (e) { console.error("Failed to sync lists:", e); } }, 500); }
     handleSearchInput() { clearTimeout(this.state.debounceTimeout); this.state.debounceTimeout = setTimeout(() => { const q = this.searchBox.value.trim().toLowerCase(); if (q.startsWith('/') || this.state.currentSearchQuery === q) return; this.state.currentSearchQuery = q; this.resetAndLoad(); }, 300); }
-    
+
     handleSearchKeyDown(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -285,10 +285,10 @@ class CharacterListComponent {
         }
     }
 
-    async handleSearchSubmit(e) { 
-        e.preventDefault(); 
-        const q = this.searchBox.value.trim(); 
-        
+    async handleSearchSubmit(e) {
+        e.preventDefault();
+        const q = this.searchBox.value.trim();
+
         if (q === '/dark') {
             document.documentElement.classList.add('dark-mode');
             localStorage.setItem('yuuka-theme', 'dark');
@@ -304,7 +304,7 @@ class CharacterListComponent {
             this.searchBox.value = '';
             return;
         }
-        
+
         if (q === '/token') {
             const auth = window.Yuuka.services.auth;
             if (auth && auth.copyTokenToClipboard) {
@@ -320,7 +320,7 @@ class CharacterListComponent {
 
         if (q === '/blacklist share') {
             const s = 'BL-' + btoa(JSON.stringify(this.state.blacklist));
-             // Yuuka: auth rework v1.1 - Use global clipboard utility
+            // Yuuka: auth rework v1.1 - Use global clipboard utility
             Yuuka.ui.copyToClipboard(s)
                 .then(() => showError('Mã chia sẻ blacklist đã sao chép.'))
                 .catch(() => showError('Lỗi: Không thể sao chép.'));
@@ -330,7 +330,7 @@ class CharacterListComponent {
 
         if (q === '/favourite share') {
             const s = 'FV-' + btoa(JSON.stringify(this.state.favourites));
-             // Yuuka: auth rework v1.1 - Use global clipboard utility
+            // Yuuka: auth rework v1.1 - Use global clipboard utility
             Yuuka.ui.copyToClipboard(s)
                 .then(() => showError('Mã chia sẻ favourite đã sao chép.'))
                 .catch(() => showError('Lỗi: Không thể sao chép.'));
@@ -356,19 +356,19 @@ class CharacterListComponent {
         }
 
         if (q.startsWith('BL-')) {
-            try { const d = JSON.parse(atob(q.substring(3))); if (!Array.isArray(d)) throw new Error(); const c = new Set(this.state.blacklist); let a = 0; d.forEach(h => { if (!c.has(h)) { c.add(h); a++; } }); this.state.blacklist = Array.from(c); this._saveUserLists(); this._shuffleSessionOrder(); await this.resetAndLoad(); showError(`Đã thêm ${a} vào blacklist.`); } 
+            try { const d = JSON.parse(atob(q.substring(3))); if (!Array.isArray(d)) throw new Error(); const c = new Set(this.state.blacklist); let a = 0; d.forEach(h => { if (!c.has(h)) { c.add(h); a++; } }); this.state.blacklist = Array.from(c); this._saveUserLists(); this._shuffleSessionOrder(); await this.resetAndLoad(); showError(`Đã thêm ${a} vào blacklist.`); }
             catch (err) { showError("Mã blacklist không hợp lệ."); }
             this.searchBox.value = '';
             return;
         }
 
         if (q.startsWith('FV-')) {
-            try { const d = JSON.parse(atob(q.substring(3))); if (!Array.isArray(d)) throw new Error(); const c = new Set(this.state.favourites); let a = 0; d.forEach(h => { if (!c.has(h)) { c.add(h); a++; } }); this.state.favourites = Array.from(c); this._saveUserLists(); await this.resetAndLoad(); showError(`Đã thêm ${a} vào favourite.`); } 
+            try { const d = JSON.parse(atob(q.substring(3))); if (!Array.isArray(d)) throw new Error(); const c = new Set(this.state.favourites); let a = 0; d.forEach(h => { if (!c.has(h)) { c.add(h); a++; } }); this.state.favourites = Array.from(c); this._saveUserLists(); await this.resetAndLoad(); showError(`Đã thêm ${a} vào favourite.`); }
             catch (err) { showError("Mã favourite không hợp lệ."); }
             this.searchBox.value = '';
             return;
         }
-        
+
         if (q === '/logout') {
             const auth = window.Yuuka.services.auth;
             if (auth && auth.logout) {
@@ -399,7 +399,7 @@ class CharacterListComponent {
                             window.location.reload();
                         }
                     }, 1000);
-                    
+
                 }).catch(err => showError(`Lỗi: Không thể gửi lệnh tắt: ${err.message}`));
             }
             this.searchBox.value = '';
@@ -431,13 +431,13 @@ class CharacterListComponent {
         if (e.button !== 0 || e.target.closest('.character-card')) {
             return;
         }
-        
+
         e.preventDefault();
 
         this.zoomState.active = true;
         this.zoomState.startX = e.clientX;
         this.zoomState.startLevel = this.zoomState.currentLevel; // Remember level when drag started
-        
+
         document.body.classList.add('is-zooming');
 
         window.addEventListener('pointermove', this.handleZoomMove);
@@ -449,9 +449,9 @@ class CharacterListComponent {
 
         const deltaX = e.clientX - this.zoomState.startX;
         const levelChange = Math.round(deltaX / this.zoomState.sensitivity);
-        
+
         let newLevel = this.zoomState.startLevel + levelChange;
-        
+
         // Clamp the level between 0 and max level
         newLevel = Math.max(0, Math.min(this.zoomState.sizes.length - 1, newLevel));
 
@@ -463,13 +463,13 @@ class CharacterListComponent {
 
     handleZoomEnd(e) {
         if (!this.zoomState.active) return;
-        
+
         localStorage.setItem('yuuka-gallery-zoom-level', this.zoomState.currentLevel);
-        
+
         document.body.classList.remove('is-zooming');
 
         window.removeEventListener('pointermove', this.handleZoomMove);
-        
+
         this.zoomState.active = false;
     }
 
@@ -480,10 +480,10 @@ class CharacterListComponent {
         }
     }
 
-    handleGalleryClick(e) { 
+    handleGalleryClick(e) {
         const card = e.target.closest('.character-card');
         if (!card) return;
-        
+
         if (e.target.closest('.card-album-btn')) {
             e.stopPropagation();
             const viewMode = this._getPreferredAlbumOpenViewMode();
@@ -494,17 +494,27 @@ class CharacterListComponent {
             Yuuka.ui.switchTab('album');
             return;
         }
-        
+
+        if (e.target.closest('.card-chat-btn')) {
+            e.stopPropagation();
+            window.Yuuka.initialPluginState = window.Yuuka.initialPluginState || {};
+            window.Yuuka.initialPluginState.chat = {
+                character: { hash: card.dataset.hash, name: card.dataset.name }
+            };
+            Yuuka.ui.switchTab('chat');
+            return;
+        }
+
         this.openModal(card);
     }
-    handleObserver(entries) { if (entries[0]?.isIntersecting&&!this.state.isLoading&&this.state.hasMore)this.loadCharacters();}
-    createCharacterCard(char) { const c=document.createElement('div');c.className='character-card';c.dataset.hash=char.hash;c.dataset.name=char.name;const isAlbumPluginActive=this.activePlugins.some(p=>p.id==='album');const a=isAlbumPluginActive?`<button class="card-album-btn" title="Mở trong Album"><span class="material-symbols-outlined">photo_album</span></button>`:'';c.innerHTML=`<div class="image-container">${a}<img src="/image/${char.hash}" alt="${char.name}" loading="lazy"></div><div class="name">${char.name}</div>`;if(this.state.animateNextLoad&&this.state.currentAnimationClass){c.classList.add(this.state.currentAnimationClass);c.style.animationDelay=`${Math.random()*0.5}s`;}this.gallery.appendChild(c);}
-    async loadCharacters() { if(this.state.isLoading||!this.state.hasMore)return;this.state.isLoading=true;this.loader.classList.add('visible');this.resultFooter.style.display='none';let s=[];switch(this.state.displayMode){case'favourites':s=this.state.allCharacters.filter(c=>this.state.favourites.includes(c.hash));break;case'blacklist':s=this.state.allCharacters.filter(c=>this.state.blacklist.includes(c.hash));break;default:s=this.state.sessionBrowseOrder;}if(this.state.currentSearchQuery){s=s.filter(c=>c.name.toLowerCase().includes(this.state.currentSearchQuery));}const B=50;const i=(this.state.currentPage-1)*B;const r=s.slice(i,i+B);if(r.length===0){this.state.hasMore=false;}else{r.forEach(c=>this.createCharacterCard(c));this.state.currentPage++;this.state.hasMore=this.gallery.children.length<s.length;}this.state.isLoading=false;this.loader.classList.remove('visible');if(!this.state.hasMore){const t=this.gallery.getElementsByClassName('character-card').length;if(t>0){this.resultFooter.textContent=`Đã hiển thị ${t} kết quả.`;this.resultFooter.style.display='block';this.loader.style.display='none';}else{this.loader.textContent="Không tìm thấy.";this.loader.style.display='block';this.resultFooter.style.display='none';}}this.state.animateNextLoad=false;this.state.currentAnimationClass=null;}
-    async resetAndLoad() { this.observer.disconnect();this.gallery.innerHTML='';this.state.currentPage=1;this.state.hasMore=true;this.state.isLoading=false;this.loader.textContent='Đang tải...';this.loader.style.display='block';this.resultFooter.style.display='none';await this.loadCharacters();if(this.state.hasMore)this.observer.observe(this.loader);}
-    openModal(card) { this.state.currentModalCharacter={hash:card.dataset.hash,name:card.dataset.name};this.modalImage.src=card.querySelector('img').src;this.modalCaption.textContent=this.state.currentModalCharacter.name;this.updateModalActions();this.modal.style.display='flex';}
-    closeModal() { this.modal.style.display='none';this.state.currentModalCharacter=null;}
-    toggleFavourite() { const{hash,name}=this.state.currentModalCharacter;const i=this.state.favourites.indexOf(hash);if(i>-1){this.state.favourites.splice(i,1);showError(`${name} đã được xóa khỏi Yêu thích.`);}else{this.state.favourites.push(hash);showError(`${name} đã được thêm vào Yêu thích.`);}this._saveUserLists();this.updateModalActions();if(this.state.displayMode==='favourites'&&i>-1){this.gallery.querySelector(`.character-card[data-hash="${hash}"]`)?.remove();this.closeModal();}}
-    
+    handleObserver(entries) { if (entries[0]?.isIntersecting && !this.state.isLoading && this.state.hasMore) this.loadCharacters(); }
+    createCharacterCard(char) { const c = document.createElement('div'); c.className = 'character-card'; c.dataset.hash = char.hash; c.dataset.name = char.name; const isAlbumPluginActive = this.activePlugins.some(p => p.id === 'album'); const isChatPluginActive = this.activePlugins.some(p => p.id === 'chat'); const a = isAlbumPluginActive ? `<button class="card-album-btn" title="Mở trong Album"><span class="material-symbols-outlined">photo_album</span></button>` : ''; const ch = isChatPluginActive ? `<button class="card-chat-btn" title="Trò chuyện"><span class="material-symbols-outlined">person_heart</span></button>` : ''; c.innerHTML = `<div class="image-container">${a}${ch}<img src="/image/${char.hash}" alt="${char.name}" loading="lazy"></div><div class="name">${char.name}</div>`; if (this.state.animateNextLoad && this.state.currentAnimationClass) { c.classList.add(this.state.currentAnimationClass); c.style.animationDelay = `${Math.random() * 0.5}s`; } this.gallery.appendChild(c); }
+    async loadCharacters() { if (this.state.isLoading || !this.state.hasMore) return; this.state.isLoading = true; this.loader.classList.add('visible'); this.resultFooter.style.display = 'none'; let s = []; switch (this.state.displayMode) { case 'favourites': s = this.state.allCharacters.filter(c => this.state.favourites.includes(c.hash)); break; case 'blacklist': s = this.state.allCharacters.filter(c => this.state.blacklist.includes(c.hash)); break; default: s = this.state.sessionBrowseOrder; }if (this.state.currentSearchQuery) { s = s.filter(c => c.name.toLowerCase().includes(this.state.currentSearchQuery)); } const B = 50; const i = (this.state.currentPage - 1) * B; const r = s.slice(i, i + B); if (r.length === 0) { this.state.hasMore = false; } else { r.forEach(c => this.createCharacterCard(c)); this.state.currentPage++; this.state.hasMore = this.gallery.children.length < s.length; } this.state.isLoading = false; this.loader.classList.remove('visible'); if (!this.state.hasMore) { const t = this.gallery.getElementsByClassName('character-card').length; if (t > 0) { this.resultFooter.textContent = `Đã hiển thị ${t} kết quả.`; this.resultFooter.style.display = 'block'; this.loader.style.display = 'none'; } else { this.loader.textContent = "Không tìm thấy."; this.loader.style.display = 'block'; this.resultFooter.style.display = 'none'; } } this.state.animateNextLoad = false; this.state.currentAnimationClass = null; }
+    async resetAndLoad() { this.observer.disconnect(); this.gallery.innerHTML = ''; this.state.currentPage = 1; this.state.hasMore = true; this.state.isLoading = false; this.loader.textContent = 'Đang tải...'; this.loader.style.display = 'block'; this.resultFooter.style.display = 'none'; await this.loadCharacters(); if (this.state.hasMore) this.observer.observe(this.loader); }
+    openModal(card) { this.state.currentModalCharacter = { hash: card.dataset.hash, name: card.dataset.name }; this.modalImage.src = card.querySelector('img').src; this.modalCaption.textContent = this.state.currentModalCharacter.name; this.updateModalActions(); this.modal.style.display = 'flex'; }
+    closeModal() { this.modal.style.display = 'none'; this.state.currentModalCharacter = null; }
+    toggleFavourite() { const { hash, name } = this.state.currentModalCharacter; const i = this.state.favourites.indexOf(hash); if (i > -1) { this.state.favourites.splice(i, 1); showError(`${name} đã được xóa khỏi Yêu thích.`); } else { this.state.favourites.push(hash); showError(`${name} đã được thêm vào Yêu thích.`); } this._saveUserLists(); this.updateModalActions(); if (this.state.displayMode === 'favourites' && i > -1) { this.gallery.querySelector(`.character-card[data-hash="${hash}"]`)?.remove(); this.closeModal(); } }
+
     toggleBlacklist() {
         const { hash, name } = this.state.currentModalCharacter;
         const i = this.state.blacklist.indexOf(hash);
@@ -528,22 +538,22 @@ class CharacterListComponent {
         this.closeModal();
     }
 
-    updateModalActions() { 
+    updateModalActions() {
         if (!this.state.currentModalCharacter) return;
         const { hash } = this.state.currentModalCharacter;
         const isF = this.state.favourites.includes(hash);
         const isB = this.state.blacklist.includes(hash);
         const isAlbumPluginActive = this.activePlugins.some(p => p.id === 'album');
-        
+
         const aB = isAlbumPluginActive ? `<button class="modal-action-btn" data-action="album" title="Mở trong Album"><span class="material-symbols-outlined">photo_album</span></button>` : '';
         const sB = `<button class="modal-action-btn" data-action="search" title="Search Online"><span class="material-symbols-outlined">search</span></button>`;
         const fB = (this.state.displayMode !== 'blacklist') ? `<button class="modal-action-btn ${isF ? 'is-active' : ''}" data-action="favourite" title="Yêu thích"><span class="material-symbols-outlined">favorite</span></button>` : '';
         const bB = (this.state.displayMode !== 'favourites') ? `<button class="modal-action-btn ${isB ? 'is-active' : ''}" data-action="blacklist" title="Thêm vào danh sách đen"><span class="material-symbols-outlined">block</span></button>` : '';
-        
+
         this.modalActions.innerHTML = aB + sB + fB + bB;
 
         this.modalActions.querySelector('[data-action="search"]')?.addEventListener('click', () => { window.open(`https://www.google.com/search?q=${encodeURIComponent(this.state.currentModalCharacter.name)}`, '_blank'); });
-        
+
         this.modalActions.querySelector('[data-action="album"]')?.addEventListener('click', () => {
             const viewMode = this._getPreferredAlbumOpenViewMode();
             window.Yuuka.initialPluginState.album = {
