@@ -18,10 +18,9 @@ Object.assign(window.ChatComponent.prototype, {
         if (s.avatar) {
             avatarUrl = s.avatar;
         } else if (s.member_hashes && s.member_hashes.length > 0) {
-            const firstChar = this.state.personas.characters[s.member_hashes[0]];
-            if (firstChar && firstChar.avatar) {
-                avatarUrl = firstChar.avatar;
-            }
+            const firstCharHash = s.member_hashes[0];
+            const firstChar = this.state.personas.characters[firstCharHash];
+            avatarUrl = (firstChar && firstChar.avatar) ? firstChar.avatar : `/image/${firstCharHash}`;
         }
 
         // Clean last message preview

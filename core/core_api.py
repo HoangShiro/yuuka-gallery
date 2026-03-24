@@ -55,7 +55,7 @@ class CoreAPI:
         
         # Yuuka: Thêm các hằng số URL từ phiên bản cũ
         self.CSV_CHARACTERS_URL = "https://raw.githubusercontent.com/mirabarukaso/character_select_stand_alone_app/refs/heads/main/data/wai_characters.csv"
-        self.JSON_THUMBNAILS_URL = "https://huggingface.co/datasets/flagrantia/character_select_stand_alone_app/resolve/main/wai_character_thumbs.json"
+        self.JSON_THUMBNAILS_URL = None  # URL đã hết hạn, tạm thời bỏ qua
         self.CACHE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 ngày
 
     # --- 1. Dịch vụ Dữ liệu (Data Services) ---
@@ -494,8 +494,19 @@ class CoreAPI:
         
         self._load_tags_data()
         try:
-            thumbs_content = self._fetch_or_read_from_cache("Thumbnails JSON", self.JSON_THUMBNAILS_URL, "wai_character_thumbs.json")
-            self._thumbnails_data_dict = json.loads(thumbs_content)
+            # Tải thumbnails JSON nếu URL còn hợp lệ, ngược lại dùng cache hoặc dict rỗng
+            if self.JSON_THUMBNAILS_URL:
+                thumbs_content = self._fetch_or_read_from_cache("Thumbnails JSON", self.JSON_THUMBNAILS_URL, "wai_character_thumbs.json")
+                self._thumbnails_data_dict = json.loads(thumbs_content)
+            else:
+                local_thumbs_path = self.data_manager.get_path("wai_character_thumbs.json")
+                if os.path.exists(local_thumbs_path):
+                    with open(local_thumbs_path, 'r', encoding='utf-8') as f:
+                        self._thumbnails_data_dict = json.load(f)
+                    print(f"[CoreAPI] Thumbnails URL disabled, loaded from existing cache.")
+                else:
+                    self._thumbnails_data_dict = {}
+                    print(f"[CoreAPI] Thumbnails URL disabled and no cache found, skipping thumbnails.")
             chars_content = self._fetch_or_read_from_cache("Characters CSV", self.CSV_CHARACTERS_URL, "wai_characters.csv")
             reader = csv.reader(io.StringIO(chars_content))
             next(reader, None)

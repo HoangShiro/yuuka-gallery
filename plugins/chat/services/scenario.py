@@ -295,9 +295,16 @@ class ChatScenarioMixin:
         return rule_data
 
     def get_rule_content(self, user_hash, rule_id):
-        """Get a single rule's content by ID, used by scripting system."""
+        """Get a single rule's content by ID, checking apply_to overrides first."""
         data = self.get_all_scenarios(user_hash)
-        rule = data.get("rules", {}).get(rule_id)
+        rules = data.get("rules", {})
+        
+        # Check if any custom rule overrides this rule_id via apply_to
+        for custom_rule_id, custom_rule in rules.items():
+            if not custom_rule.get("is_default") and custom_rule.get("apply_to") == rule_id:
+                return custom_rule.get("content", "")
+                
+        rule = rules.get(rule_id)
         if rule:
             return rule.get("content", "")
         return ""

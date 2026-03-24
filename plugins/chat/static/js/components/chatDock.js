@@ -110,9 +110,21 @@ Object.assign(window.ChatComponent.prototype, {
     },
 
     _handleDockSend(textarea) {
+        if (this.state.isStreaming) return;
+
         const hasPending = (this.state.pendingActions?.length ?? 0) > 0;
         const content = textarea.value.trim();
-        if ((!content && !hasPending) || this.state.isStreaming) return;
+
+        if (!content && !hasPending) {
+            // If in Group chat but somehow not intercepted by chatGroupView override
+            if (this.state.activeChatGroupId && this._triggerGroupContinue) {
+                const selection = this.state.groupCharacterBarSelection || null;
+                if (selection) this._triggerGroupContinue(selection);
+            } else if (this._triggerContinue) {
+                this._triggerContinue();
+            }
+            return;
+        }
 
         textarea.value = '';
         textarea.style.height = '24px';

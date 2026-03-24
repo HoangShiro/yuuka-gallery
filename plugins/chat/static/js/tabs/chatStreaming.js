@@ -55,6 +55,63 @@ Object.assign(window.ChatComponent.prototype, {
         this._streamChatResponse(charObj, userObj, contextMessages, assistantIndex, statusBefore, pendingActionsSnapshot);
     },
 
+    async _triggerContinue() {
+        if (this.state.isStreaming) return;
+
+        const charHash = this.state.activeChatCharacterHash;
+        const session = this.state.activeChatSession;
+        if (!session || !charHash) return;
+
+        // Ensure scenarios (which contain rules) are loaded
+        if (!this.state.scenarios && this._loadScenarios) {
+            await this._loadScenarios();
+        }
+
+        // "Chat Continue" rule — check for custom override first, then fall back to default
+        const rules = this.state.scenarios?.rules || {};
+        let continueRuleText = rules['chat_continue']?.content || '';
+        for (const r of Object.values(rules)) {
+            if (!r.is_default && r.apply_to === 'chat_continue') {
+                continueRuleText = r.content;
+                break;
+            }
+        }
+
+        const charObj = this.state.personas.characters[charHash] || {};
+        const userObj = this.state.personas.users[this.state.activeUserPersonaId] || {};
+
+        // Replace {{char}} / {{user}} placeholders
+        if (continueRuleText) {
+            continueRuleText = continueRuleText
+                .replace(/\{\{char\}\}/g, charObj.name || 'Character')
+                .replace(/\{\{user\}\}/g, userObj.name || 'User');
+        }
+
+        const statusBefore = window.HistoryStateEngine.capture(session, charHash);
+        const pendingActionsSnapshot = this.state.pendingActions ? [...this.state.pendingActions] : [];
+        this._clearPendingActions && this._clearPendingActions();
+
+        session.messages.push({
+            role: 'assistant',
+            snapshots: [''],
+            activeIndex: 0
+        });
+
+        this.renderMessages();
+
+        const contextMessages = this.flattenMessages(session.messages.slice(0, -1));
+
+        if (continueRuleText) {
+            contextMessages.push({
+                role: 'user',
+                content: continueRuleText
+            });
+        }
+
+        const assistantIndex = session.messages.length - 1;
+        this._streamChatResponse(charObj, userObj, contextMessages, assistantIndex, statusBefore, pendingActionsSnapshot);
+    },
+
     async _streamChatResponse(charObj, userObj, contextMessages, targetIndex, statusBefore = null, pendingActions = []) {
         this.state.isStreaming = true;
         this._setStreamingUI(true);

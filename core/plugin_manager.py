@@ -420,11 +420,21 @@ class PluginManager:
         for plugin in self._plugins.values():
             if "assets" in plugin.metadata:
                 for js_file in plugin.metadata["assets"].get("js", []):
-                    assets["js"].append(f"/plugins/{plugin.id}/static/{js_file}")
+                    # Giữ nguyên URL tuyệt đối, chỉ thêm prefix cho file tương đối
+                    if js_file.startswith("http://") or js_file.startswith("https://"):
+                        assets["js"].append(js_file)
+                    else:
+                        assets["js"].append(f"/plugins/{plugin.id}/static/{js_file}")
                 for js_module_file in plugin.metadata["assets"].get("js_modules", []):
-                    assets["js_modules"].append(f"/plugins/{plugin.id}/static/{js_module_file}")
+                    if js_module_file.startswith("http://") or js_module_file.startswith("https://"):
+                        assets["js_modules"].append(js_module_file)
+                    else:
+                        assets["js_modules"].append(f"/plugins/{plugin.id}/static/{js_module_file}")
                 for css_file in plugin.metadata["assets"].get("css", []):
-                    assets["css"].append(f"/plugins/{plugin.id}/static/{css_file}")
+                    if css_file.startswith("http://") or css_file.startswith("https://"):
+                        assets["css"].append(css_file)
+                    else:
+                        assets["css"].append(f"/plugins/{plugin.id}/static/{css_file}")
         return assets
 
     def get_ui_components(self):

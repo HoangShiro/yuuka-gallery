@@ -22,3 +22,10 @@ venv/
 test.py
 .env
 .kiro
+.pytest_cache
+.hypothesis
+python_modules/
+pytest_cache/
+pytest_out.txt
+pytest.txt
+tests/

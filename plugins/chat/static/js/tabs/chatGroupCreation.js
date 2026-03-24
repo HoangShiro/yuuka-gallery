@@ -315,9 +315,8 @@ Object.assign(window.ChatComponent.prototype, {
                 const item = document.createElement('div');
                 item.className = 'autocomplete-item';
                 item.style.cssText = 'padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;';
-                const avatarHtml = p.avatar
-                    ? `<img src="${p.avatar}" style="width:24px;height:24px;border-radius:50%;object-fit:cover;" />`
-                    : `<span class="material-symbols-outlined" style="font-size:20px;opacity:0.4;">person</span>`;
+                const avatarSrc = p.avatar || `/image/${hash}`;
+                const avatarHtml = `<img src="${avatarSrc}" style="width:24px;height:24px;border-radius:50%;object-fit:cover;" onerror="this.outerHTML='<span class=\\'material-symbols-outlined\\' style=\\'font-size:20px;opacity:0.4;\\'>person</span>'" />`;
                 item.innerHTML = `${avatarHtml}<span>${this.escapeHTML(p.name || hash)}</span>`;
                 item.addEventListener('mousedown', (e) => {
                     e.preventDefault();
@@ -343,7 +342,7 @@ Object.assign(window.ChatComponent.prototype, {
         // Override .chat-card fixed height/overflow so expanded content shows fully
         card.style.cssText = 'display:flex;flex-direction:column;gap:0;padding:8px 10px;cursor:pointer;height:auto;overflow:visible;align-items:stretch;';
 
-        const avatarUrl = (persona && persona.avatar) ? persona.avatar : '';
+        const avatarUrl = (persona && persona.avatar) ? persona.avatar : `/image/${charHash}`;
         const name = (persona && persona.name) ? this.escapeHTML(persona.name) : charHash;
 
         const session = this.state.editingGroupSession;

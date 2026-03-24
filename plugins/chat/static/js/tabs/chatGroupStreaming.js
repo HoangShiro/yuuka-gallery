@@ -536,9 +536,16 @@ Object.assign(window.ChatComponent.prototype, {
                 if (jsonStart === -1 || jsonEnd === -1) throw new SyntaxError('No JSON object found in system_update');
                 const updates = JSON.parse(rawContent.slice(jsonStart, jsonEnd + 1));
 
-                // Location is per-character (same as single mode)
+                // Location is updated for the character and synchronized to the global group session
+                // We sync it to ALL character states so the next responder sees the new location.
                 if (updates.location) {
                     charState.location = updates.location;
+                    groupSession.location = updates.location;
+                    if (groupSession.character_states) {
+                        for (const h in groupSession.character_states) {
+                            groupSession.character_states[h].location = updates.location;
+                        }
+                    }
                 }
 
                 // Outfit changes go to this character's state only
@@ -999,12 +1006,16 @@ Object.assign(window.ChatComponent.prototype, {
         const groupSession = this.state.activeChatGroupSession;
         if (!groupSession) return;
 
-        // Only auto-follow the last speaker if no character is currently selected in the panel.
-        // Once the user has opened the panel (which auto-selects a character), we leave their
-        // selection alone so the panel doesn't jump while they're interacting with it.
         if (this.state.activeGroupInventoryCharHash) {
-            // Still re-render the picker to keep button highlights in sync, but don't change selection
+            // Still re-render the picker to keep button highlights in sync
             this._renderGroupMemberPicker && this._renderGroupMemberPicker();
+
+            // Always sync the group location label
+            const locationLabel = this.container.querySelector('#inventory-location-label');
+            if (locationLabel) locationLabel.textContent = groupSession.location || 'Unknown';
+
+            // Sync the active character's status so the stats UI updates in real-time
+            this._syncGroupStatusToUI && this._syncGroupStatusToUI(this.state.activeGroupInventoryCharHash);
             return;
         }
 
@@ -1018,6 +1029,10 @@ Object.assign(window.ChatComponent.prototype, {
         }
 
         this._renderGroupMemberPicker && this._renderGroupMemberPicker();
+        
+        const locationLabel = this.container.querySelector('#inventory-location-label');
+        if (locationLabel) locationLabel.textContent = groupSession.location || 'Unknown';
+
         const activeHash = this.state.activeGroupInventoryCharHash;
         if (activeHash) {
             this._syncGroupStatusToUI && this._syncGroupStatusToUI(activeHash);

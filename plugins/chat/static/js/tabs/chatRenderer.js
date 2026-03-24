@@ -44,7 +44,7 @@ Object.assign(window.ChatComponent.prototype, {
         };
 
         const charPersona = this.state.personas.characters[this.state.activeChatCharacterHash] || {};
-        const charAvatar = charPersona.avatar || '';
+        const charAvatar = charPersona.avatar || (this.state.activeChatCharacterHash ? `/image/${this.state.activeChatCharacterHash}` : '');
         const isGroupMode = !!this.state.activeChatGroupId;
 
         // Meet button — show if no first message and no user messages (only in single-character mode)
@@ -142,15 +142,17 @@ Object.assign(window.ChatComponent.prototype, {
                         <div class="narrator-content">${this.formatMessageContent(content)}</div>
                         ${mediaHtml}
                         <div class="narrator-actions msg-actions">
-                            <button class="narrator-action-btn msg-action-btn" data-action="regen" title="Regenerate">
-                                <span class="material-symbols-outlined">refresh</span>
-                            </button>
-                            <button class="narrator-action-btn msg-action-btn" data-action="edit" title="Edit">
-                                <span class="material-symbols-outlined">edit</span>
-                            </button>
-                            <button class="narrator-action-btn msg-action-btn" data-action="remove" title="Remove">
-                                <span class="material-symbols-outlined">delete</span>
-                            </button>
+                            <div class="msg-actions-inner">
+                                <button class="narrator-action-btn msg-action-btn" data-action="regen" title="Regenerate">
+                                    <span class="material-symbols-outlined">refresh</span>
+                                </button>
+                                <button class="narrator-action-btn msg-action-btn" data-action="edit" title="Edit">
+                                    <span class="material-symbols-outlined">edit</span>
+                                </button>
+                                <button class="narrator-action-btn msg-action-btn" data-action="remove" title="Remove">
+                                    <span class="material-symbols-outlined">delete</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -253,6 +255,20 @@ Object.assign(window.ChatComponent.prototype, {
 
                 this._bindMediaListeners(card, index, allMediaItems);
 
+                if (this.state.activeActionIndex === index) {
+                    card.classList.add('show-actions');
+                }
+
+                card.addEventListener('click', (e) => {
+                    if (e.target.closest('.msg-actions')) return;
+                    if (!e.target.closest('.narrator-bubble')) return;
+
+                    this.state.activeActionIndex = index;
+                    const activeWrappers = container.querySelectorAll('.show-actions');
+                    activeWrappers.forEach(w => w.classList.remove('show-actions'));
+                    card.classList.add('show-actions');
+                });
+
                 container.appendChild(card);
                 return;
             }
@@ -315,6 +331,7 @@ Object.assign(window.ChatComponent.prototype, {
             let actionsHtml = `<div class="msg-actions"><div class="msg-actions-inner">`;
             if (isAssistant) {
                 actionsHtml += `
+                    <button class="msg-action-btn msg-image-btn" title="Generate Image"><span class="material-symbols-outlined">image</span></button>
                     <button class="msg-action-btn msg-edit-btn" title="Edit"><span class="material-symbols-outlined">edit</span></button>
                     <button class="msg-action-btn msg-delete-btn" title="Delete"><span class="material-symbols-outlined">delete</span></button>
                     ${snapshotNavHtml}

@@ -23,7 +23,7 @@ Object.assign(window.ChatComponent.prototype, {
                 const charPersona = this.state.personas.characters[s.char_hash];
                 const info = this.state.charactersInfo[s.char_hash];
                 const charName = charPersona ? charPersona.name : (info ? info.name : s.char_hash);
-                const charAvatar = (charPersona && charPersona.avatar) ? charPersona.avatar : '';
+                const charAvatar = (charPersona && charPersona.avatar) ? charPersona.avatar : `/image/${s.char_hash}`;
 
                 let cleanMsg = s.last_message || "...";
                 if (cleanMsg !== "...") {

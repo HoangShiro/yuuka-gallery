@@ -1,0 +1,825 @@
+/* ─── world.css — Stylesheet cho World Plugin ─────────────────────────────── */
+/* Phong cách thị trấn Nhật Bản: màu ấm, pastel nhẹ, tương thích dark theme */
+
+/* ─── Layout gốc ─────────────────────────────────────────────────────────── */
+
+/* Fill toàn viewport, không phụ thuộc vào chain height của .container */
+#world-root {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    display: flex;
+    gap: 8px;
+    padding: 8px;
+    box-sizing: border-box;
+    background: #1a1a1a;
+    overflow: hidden;
+}
+
+/* ─── Khu vực bản đồ ─────────────────────────────────────────────────────── */
+
+#world-map-area {
+    flex: 1;
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #2a2520;
+    border: 1px solid #3a3530;
+    min-width: 0;
+    min-height: 0;
+}
+
+#world-canvas {
+    display: block;
+    /* Không set width/height CSS — JS dùng ResizeObserver để set attribute */
+}
+
+/* ─── Sidebar NPC ─────────────────────────────────────────────────────────── */
+
+#world-sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    overflow: hidden;
+}
+
+@media (max-width: 768px) {
+    #world-sidebar {
+        display: none;
+    }
+}
+
+/* ─── Overlay: hiển thị thời gian world ──────────────────────────────────── */
+
+#world-time-display {
+    position: absolute;
+    top: 38px;
+    right: 8px;
+    background: rgba(30, 25, 20, 0.75);
+    color: #e8d5b0;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: monospace;
+    pointer-events: none;
+    backdrop-filter: blur(2px);
+    z-index: 10;
+}
+
+/* ─── Overlay: nút điều khiển ────────────────────────────────────────────── */
+
+#world-controls {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 6px;
+    z-index: 10;
+}
+
+/* ─── Nút chung ──────────────────────────────────────────────────────────── */
+
+#world-controls button {
+    background: rgba(60, 50, 40, 0.85);
+    color: #e8d5b0;
+    border: 1px solid #5a4a38;
+    border-radius: 5px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    backdrop-filter: blur(2px);
+    transition: background 0.15s;
+}
+
+#world-controls button:hover {
+    background: rgba(90, 75, 58, 0.9);
+}
+
+/* ─── Danh sách NPC ──────────────────────────────────────────────────────── */
+
+#world-npc-list {
+    flex: 1;
+    overflow-y: auto;
+    background: #222018;
+    border-radius: 8px;
+    border: 1px solid #3a3530;
+    padding: 4px 0;
+}
+
+/* Mỗi hàng NPC */
+.world-npc-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+    color: #d4c4a0;
+}
+
+.world-npc-item:nth-child(even) {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.world-npc-item:hover {
+    background: rgba(200, 160, 100, 0.12);
+}
+
+/* Ba cột: tên, hoạt động, địa điểm */
+.world-npc-item .npc-name {
+    flex: 2;
+    font-weight: 600;
+    color: #e8d5b0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.world-npc-item .npc-activity {
+    flex: 2;
+    color: #b8a880;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.world-npc-item .npc-location {
+    flex: 2;
+    color: #8a7a60;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+}
+
+/* ─── Config panel ───────────────────────────────────────────────────────── */
+
+/* Panel cấu hình — hiện ra phía trên controls, cuộn được */
+#world-config-panel {
+    position: absolute;
+    top: 44px;
+    right: 8px;
+    width: 260px;
+    max-height: calc(100% - 60px);
+    overflow-y: auto;
+    background: #2e2820;
+    border: 1px solid #5a4a38;
+    border-radius: 8px;
+    padding: 12px;
+    z-index: 20;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    color: #e8d5b0;
+}
+
+#world-config-panel h3 {
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    color: #f0e0c0;
+    border-bottom: 1px solid #4a3a28;
+    padding-bottom: 6px;
+}
+
+/* Mỗi trường config */
+.world-config-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+}
+
+.world-config-field label {
+    font-size: 11px;
+    color: #b8a880;
+}
+
+.world-config-field input[type="number"] {
+    background: #1e1a14;
+    border: 1px solid #4a3a28;
+    border-radius: 4px;
+    color: #e8d5b0;
+    padding: 4px 8px;
+    font-size: 12px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.world-config-field input[type="number"]:focus {
+    outline: none;
+    border-color: #8a6a48;
+}
+
+/* Range input */
+.world-config-field input[type="range"] {
+    width: 100%;
+    accent-color: #c8a060;
+    cursor: pointer;
+}
+
+/* Nút hành động trong config */
+.world-config-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.world-config-actions button {
+    flex: 1;
+    background: #4a3828;
+    color: #e8d5b0;
+    border: 1px solid #6a5038;
+    border-radius: 5px;
+    padding: 6px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.world-config-actions button:hover {
+    background: #6a5038;
+}
+
+/* ─── Popup NPC / Location ───────────────────────────────────────────────── */
+
+/* Backdrop toàn màn hình */
+#world-popup {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 8, 6, 0.55);
+    backdrop-filter: blur(3px);
+}
+
+/* Card nội dung popup (location popup) */
+.world-popup-inner {
+    position: relative;
+    background: #2e2820;
+    border: 1px solid #5a4a38;
+    border-radius: 12px;
+    padding: 20px;
+    max-width: 320px;
+    width: 90%;
+    color: #e8d5b0;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.world-popup-inner h4 {
+    margin: 0 0 10px 0;
+    font-size: 15px;
+    color: #f0e0c0;
+}
+
+.world-popup-inner p {
+    margin: 4px 0;
+    font-size: 12px;
+    color: #c0b090;
+}
+
+/* Nút đóng popup — góc trên phải */
+.world-popup-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: transparent;
+    border: none;
+    color: #a09070;
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+    z-index: 5;
+}
+
+.world-popup-close:hover {
+    color: #e8d5b0;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ─── NPC Status Panel ─────────────────────────────────────────────────────
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Container wraps one or two panels */
+.status-container {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.status-container.status-animate {
+    animation: statusPanelIn 0.2s ease-out;
+}
+
+@keyframes statusPanelIn {
+    from { opacity: 0; transform: scale(0.95) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Close button on the container */
+.status-container > .world-popup-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 10;
+}
+
+/* ─── Tabs (hidden by default on PC, shown on mobile for pairs) ─────── */
+
+.status-tabs {
+    display: none; /* hidden on PC */
+}
+
+/* ─── Panels wrapper ────────────────────────────────────────────────── */
+
+.status-panels {
+    display: flex;
+    gap: 12px;
+}
+
+/* Individual panel */
+.status-panel {
+    position: relative;
+    background: linear-gradient(170deg, #302820 0%, #252018 100%);
+    border: 1px solid #5a4a38;
+    border-radius: 14px;
+    padding: 20px;
+    width: 340px;
+    color: #e8d5b0;
+    box-shadow:
+        0 8px 40px rgba(0, 0, 0, 0.65),
+        0 0 0 1px rgba(255, 220, 160, 0.05) inset;
+    max-height: 85vh;
+    overflow-y: auto;
+    flex-shrink: 0;
+}
+
+.status-panel::-webkit-scrollbar { width: 4px; }
+.status-panel::-webkit-scrollbar-track { background: transparent; }
+.status-panel::-webkit-scrollbar-thumb { background: #4a3a28; border-radius: 2px; }
+
+/* Single NPC: only one panel */
+.status-container:not(.status-pair) .status-panels {
+    justify-content: center;
+}
+
+/* ─── PC pair: side by side ─────────────────────────────────────────── */
+
+@media (min-width: 769px) {
+    .status-pair .status-panels {
+        display: flex;
+        gap: 12px;
+    }
+    .status-pair .status-tabs {
+        display: none !important;
+    }
+}
+
+/* ─── Mobile: fullscreen + tabs for pair ───────────────────────────── */
+
+@media (max-width: 768px) {
+    .status-container {
+        width: 100%;
+        height: 100%;
+        animation: none;
+    }
+
+    .status-panels {
+        flex: 1;
+        gap: 0;
+        min-height: 0;
+    }
+
+    .status-panel {
+        width: 100%;
+        max-height: none;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+        flex: 1;
+        min-height: 0;
+    }
+
+    /* Single: show the panel */
+    .status-container:not(.status-pair) .status-panel {
+        display: block;
+    }
+
+    /* Pair on mobile: show tabs, only active panel visible */
+    .status-pair .status-tabs {
+        display: flex;
+        gap: 0;
+        background: #252018;
+        border-bottom: 1px solid #3a3028;
+        flex-shrink: 0;
+    }
+
+    .status-pair .status-panel {
+        display: none;
+    }
+
+    .status-pair .status-panel.active {
+        display: block;
+    }
+}
+
+/* ─── Tab bar styles ────────────────────────────────────────────────── */
+
+.status-tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #8a7a60;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-tab:hover {
+    color: #c8b888;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.status-tab.active {
+    color: #f0e0c0;
+    border-bottom-color: #c8a060;
+    background: rgba(200, 160, 100, 0.08);
+}
+
+.status-tab-thumb {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #3a3028;
+    border: 1px solid #5a4a38;
+}
+
+.status-tab-thumb-ph {
+    display: inline-block;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #3a3028;
+    border: 1px solid #5a4a38;
+}
+
+/* ─── Header: Avatar + Name + Zodiac ───────────────────────────────────── */
+
+.status-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(200, 160, 100, 0.15);
+}
+
+.status-avatar {
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    object-fit: cover;
+    background: #3a3028;
+    border: 2px solid #6a5838;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+    flex-shrink: 0;
+}
+
+.status-avatar-placeholder {
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    background: #3a3028;
+    border: 2px solid #6a5838;
+    flex-shrink: 0;
+}
+
+.status-header-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.status-name {
+    margin: 0 0 3px 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: #f5e8cc;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-zodiac {
+    font-size: 11px;
+    color: #b8a880;
+    margin-bottom: 2px;
+}
+
+.status-activity {
+    font-size: 12px;
+    color: #c8a860;
+    font-weight: 500;
+}
+
+/* ─── Info chips (location, home, money, energy) ──────────────────────── */
+
+.status-info-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.status-info-chip {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(200, 160, 100, 0.12);
+    border-radius: 8px;
+    padding: 6px 10px;
+    min-width: 0;
+}
+
+.status-chip-label {
+    display: block;
+    font-size: 9px;
+    color: #8a7a60;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+}
+
+.status-chip-value {
+    display: block;
+    font-size: 12px;
+    color: #d8c8a0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ─── Sections ──────────────────────────────────────────────────────────── */
+
+.status-section {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(200, 160, 100, 0.1);
+}
+
+.status-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #c8b888;
+    margin-bottom: 8px;
+}
+
+/* ─── Need bars (status panel) ──────────────────────────────────────────── */
+
+.status-needs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.status-need-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #b8a880;
+}
+
+.status-need-icon {
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 13px;
+}
+
+.status-need-label {
+    width: 40px;
+    flex-shrink: 0;
+    font-size: 11px;
+}
+
+.status-need-pct {
+    width: 32px;
+    text-align: right;
+    flex-shrink: 0;
+    font-size: 11px;
+    font-family: monospace;
+}
+
+/* Track (nền xám) */
+.need-bar-track {
+    flex: 1;
+    height: 8px;
+    background: #3a3028;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+/* Fill chung */
+.need-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+/* Named need fill colors */
+.need-fill-hunger { background: #d4782a; }
+.need-fill-social { background: #c8607a; }
+.need-fill-rest   { background: #4a90c8; }
+.need-fill-work   { background: #8a8a40; }
+
+/* ─── Preference bars ───────────────────────────────────────────────────── */
+
+.status-prefs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.status-pref {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #b8a880;
+}
+
+.status-pref > span:first-child {
+    width: 80px;
+    flex-shrink: 0;
+}
+
+.status-pref > span:last-child {
+    width: 32px;
+    text-align: right;
+    flex-shrink: 0;
+    font-family: monospace;
+}
+
+.status-pref-bar {
+    flex: 1;
+    height: 6px;
+    background: #3a3028;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.status-pref-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #8a7a50, #c8a860);
+    transition: width 0.3s ease;
+}
+
+/* ─── Relationships section ─────────────────────────────────────────────── */
+
+.status-relationships {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.status-rel-group {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.status-rel-label {
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.status-rel-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.status-rel-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #3a3028;
+    border: 1px solid #5a4a38;
+}
+
+.status-rel-thumb-placeholder {
+    display: inline-block;
+}
+
+.status-rel-name {
+    flex: 1;
+    font-size: 12px;
+    color: #d8c8a0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-rel-score {
+    font-size: 11px;
+    font-family: monospace;
+    flex-shrink: 0;
+}
+
+.status-rel-empty {
+    font-size: 11px;
+    color: #8a7a60;
+    font-style: italic;
+    margin: 0;
+}
+
+/* ─── Nút Chat trong popup ───────────────────────────────────────────────── */
+
+.world-btn-chat {
+    display: block;
+    width: 100%;
+    margin-top: 14px;
+    background: linear-gradient(135deg, #4a3828, #5a4838);
+    color: #e8d5b0;
+    border: 1px solid #6a5038;
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    text-align: center;
+}
+
+.world-btn-chat:hover {
+    background: linear-gradient(135deg, #6a5038, #7a6048);
+}
+
+.world-btn-chat:active {
+    transform: scale(0.98);
+}
+
+/* ─── Scrollbar tùy chỉnh (dark theme) ──────────────────────────────────── */
+
+#world-npc-list::-webkit-scrollbar,
+#world-config-panel::-webkit-scrollbar {
+    width: 5px;
+}
+
+#world-npc-list::-webkit-scrollbar-track,
+#world-config-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#world-npc-list::-webkit-scrollbar-thumb,
+#world-config-panel::-webkit-scrollbar-thumb {
+    background: #4a3a28;
+    border-radius: 3px;
+}
+
+/* ─── NPC Thumbnail (sidebar) ────────────────────────────────────────────── */
+
+.npc-thumb {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: #3a3028;
+    border: 1px solid #5a4a38;
+}
+
+.npc-thumb-placeholder {
+    display: inline-block;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #3a3028;
+    border: 1px solid #5a4a38;
+    flex-shrink: 0;
+}

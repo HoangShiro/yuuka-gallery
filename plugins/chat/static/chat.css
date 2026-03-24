@@ -829,7 +829,9 @@ html.dark-mode .yuuka-home-card:hover {
 }
 
 .chat-bubble-wrapper:hover .msg-actions,
-.chat-bubble-wrapper.show-actions .msg-actions {
+.chat-bubble-wrapper.show-actions .msg-actions,
+.narrator-bubble-wrapper:hover .msg-actions,
+.narrator-bubble-wrapper.show-actions .msg-actions {
     opacity: 1;
     pointer-events: auto;
 }
@@ -1605,7 +1607,11 @@ html.dark-mode .inline-edit-cancel:hover {
     padding: 6px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
     animation: menu-slide-up 0.2s ease-out;
-    overflow: hidden;
+    max-height: 440px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 @keyframes menu-slide-up {
@@ -1630,6 +1636,10 @@ html.dark-mode .inline-edit-cancel:hover {
     font-weight: 600;
     color: var(--chat-text, #fff);
     border-bottom: 1px solid var(--chat-border, #333);
+    position: sticky;
+    top: -6px;
+    background: var(--chat-panel-bg, #1e1e2e);
+    z-index: 10;
 }
 
 .system-action-back-btn {
@@ -1970,6 +1980,12 @@ html.dark-mode .inline-edit-cancel:hover {
     margin-top: 10px;
     opacity: 0;
     transition: opacity 0.2s;
+}
+
+.narrator-actions.msg-actions {
+    position: static;
+    background-color: transparent;
+    border-radius: 0;
 }
 
 .narrator-bubble:hover .narrator-actions {

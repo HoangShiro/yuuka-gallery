@@ -15,7 +15,7 @@ Object.assign(window.ChatComponent.prototype, {
             charsToDisplay.push({
                 hash: hash,
                 name: p.name || (info ? info.name : hash),
-                avatar: p.avatar || '',
+                avatar: p.avatar || `/image/${hash}`,
                 hasPersona: true,
                 persona: p.persona || ''
             });

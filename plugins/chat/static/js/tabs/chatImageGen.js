@@ -48,12 +48,15 @@ Object.assign(window.ChatComponent.prototype, {
 
             const session = this.state.activeChatSession;
 
+            // Đọc state từ character_states[charHash] — source of truth (không dùng session top-level)
+            const cs = window.HistoryStateEngine.ensureCharState(session, charHash);
+
             // Use overrideStatus for emotion/action/stamina if provided (e.g. pre-stamina-exhaustion state)
-            const emotionState = overrideStatus ? overrideStatus.emotion_state : session.emotion_state;
-            const actionState = overrideStatus ? overrideStatus.action_state : session.action_state;
-            const stamina = overrideStatus ? overrideStatus.stamina : session.stamina;
-            const outfits = overrideStatus ? overrideStatus.outfits : session.outfits;
-            const location = overrideStatus ? overrideStatus.location : session.location;
+            const emotionState = overrideStatus ? overrideStatus.emotion_state : cs.emotion_state;
+            const actionState = overrideStatus ? overrideStatus.action_state : cs.action_state;
+            const stamina = overrideStatus ? overrideStatus.stamina : cs.stamina;
+            const outfits = overrideStatus ? overrideStatus.outfits : cs.outfits;
+            const location = overrideStatus ? overrideStatus.location : cs.location;
 
             let currentOutfits = this._resolveOutfitTags(outfits).join(', ');
 
@@ -264,20 +267,91 @@ Object.assign(window.ChatComponent.prototype, {
         }
     },
 
+    /**
+     * Manually generate an image for a specific message index.
+     * Uses the same context as auto-gen (outfits, emotion, action, location from snapshot status).
+     * Replaces any existing images on the current snapshot.
+     *
+     * Works for both single and group chat modes.
+     */
+    async _manualGenerateImageForMessage(index, msg) {
+        const isGroup = !!this.state.activeChatGroupId;
+        const session = isGroup ? this.state.activeChatGroupSession : this.state.activeChatSession;
+        if (!session) return;
+
+        const migrated = this.migrateMessage(msg);
+        const snap = migrated.snapshots[migrated.activeIndex];
+
+        // Clear existing images on this snapshot so the new one replaces them
+        if (Array.isArray(snap)) {
+            snap[1] = [];
+        }
+        session.messages[index] = migrated;
+
+        if (isGroup) {
+            // Determine character hash from the message (assistant) or last assistant before it (user)
+            let charHash = migrated.character_hash || null;
+            if (!charHash) {
+                // For user messages, find the last assistant message before this index
+                for (let i = index - 1; i >= 0; i--) {
+                    const m = session.messages[i];
+                    if (m.role === 'assistant' && m.character_hash) {
+                        charHash = m.character_hash;
+                        break;
+                    }
+                }
+            }
+            if (!charHash) {
+                // Fallback: first member
+                charHash = (session.member_hashes || [])[0];
+            }
+            if (!charHash) return;
+
+            // Read status from the message's snapshot if available, otherwise use live state
+            const status = window.HistoryStateEngine.readStatus(migrated, migrated.activeIndex);
+            await this._saveGroupSession();
+            this.renderMessages();
+            await this._autoGenerateGroupImage(charHash, index, status || null);
+        } else {
+            const charHash = this.state.activeChatCharacterHash;
+            const charObj = this.state.personas.characters[charHash] || {};
+
+            // Read status from the message's snapshot if available, otherwise use live state
+            const status = window.HistoryStateEngine.readStatus(migrated, migrated.activeIndex);
+            this._saveCurrentSession();
+            this.renderMessages();
+            await this._autoGenerateImageForMessage(charObj, index, null, status || null);
+        }
+    },
+
     handleImageGeneratedEvent(data) {
         if (!this.state.pendingImageGenerations || !this.state.pendingImageGenerations.length) return;
 
         const now = Date.now();
-        // Find the oldest matching pending entry (FIFO)
-        const queue = this.state.pendingImageGenerations;
 
-        // Remove expired entries (> 5 minutes)
-        this.state.pendingImageGenerations = queue.filter(p => now - p.time <= 5 * 60 * 1000);
+        // Xóa các entry đã hết hạn (> 5 phút)
+        this.state.pendingImageGenerations = this.state.pendingImageGenerations.filter(p => now - p.time <= 5 * 60 * 1000);
 
         if (!this.state.pendingImageGenerations.length) return;
 
-        // Pop the oldest entry
-        const pending = this.state.pendingImageGenerations.shift();
+        // Lấy character_hash từ ảnh vừa được tạo (nếu có)
+        const incomingCharHash = data?.image_data?.character_hash || null;
+
+        // Tìm entry khớp: ưu tiên match theo characterHash (group mode), fallback FIFO (single mode)
+        const queue = this.state.pendingImageGenerations;
+        let pendingIdx = -1;
+
+        if (incomingCharHash) {
+            // Tìm entry cũ nhất có characterHash khớp
+            pendingIdx = queue.findIndex(p => p.characterHash === incomingCharHash);
+        }
+
+        // Fallback: nếu không tìm được theo hash (single mode hoặc hash không có), dùng entry đầu tiên
+        if (pendingIdx === -1) {
+            pendingIdx = 0;
+        }
+
+        const pending = queue.splice(pendingIdx, 1)[0];
 
         // --- Group mode path ---
         if (this.state.activeChatGroupId) {

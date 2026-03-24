@@ -37,6 +37,15 @@ Object.assign(window.ChatComponent.prototype, {
             });
         }
 
+        const imageBtn = wrapper.querySelector('.msg-image-btn');
+        if (imageBtn) {
+            imageBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                markActive();
+                this._manualGenerateImageForMessage(index, msg);
+            });
+        }
+
         if (isAssistant) {
 
             const prevBtn = wrapper.querySelector('.snapshot-prev');

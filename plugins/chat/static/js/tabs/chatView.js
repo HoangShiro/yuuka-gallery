@@ -50,7 +50,7 @@ Object.assign(window.ChatComponent.prototype, {
         const nameEl = this.container.querySelector('#chat-header-name');
         nameEl.textContent = charPersona.name;
         nameEl.title = charPersona.name;
-        this.container.querySelector('#chat-header-avatar').src = charPersona.avatar || '';
+        this.container.querySelector('#chat-header-avatar').src = charPersona.avatar || `/image/${charHash}`;
 
         // Restore edit character button visibility (may have been hidden in group mode)
         const editCharBtn = this.container.querySelector('#btn-edit-active-character');
@@ -540,11 +540,9 @@ Object.assign(window.ChatComponent.prototype, {
             'box-shadow:0 0 0 2px var(--accent,#7c6af7)',
         ].join(';');
 
-        if (persona.avatar) {
-            btn.style.backgroundImage = `url('${persona.avatar}')`;
-        } else {
-            btn.innerHTML = '<span class="material-symbols-outlined" style="font-size:22px;color:var(--chat-text-secondary,#aaa);pointer-events:none;">person</span>';
-        }
+        const avatarSrc = persona.avatar || `/image/${charHash}`;
+        btn.style.backgroundImage = `url('${avatarSrc}')`;
+        btn.innerHTML = '';
 
         const nameSpan = document.createElement('span');
         nameSpan.textContent = persona.name || '';

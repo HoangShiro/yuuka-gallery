@@ -26,11 +26,11 @@ Object.assign(window.ChatComponent.prototype, {
         const chars = (this.state.personas && this.state.personas.characters) || {};
         if (this.state.activeChatGroupId && msg && msg.character_hash) {
             const p = chars[msg.character_hash] || {};
-            return { avatar: p.avatar || '', name: p.name || '' };
+            return { avatar: p.avatar || `/image/${msg.character_hash}`, name: p.name || '' };
         }
         const charHash = this.state.activeChatCharacterHash;
         const p = chars[charHash] || {};
-        return { avatar: p.avatar || '', name: p.name || '' };
+        return { avatar: p.avatar || `/image/${charHash}`, name: p.name || '' };
     },
 
     async openGroupChat(groupId) {
@@ -73,7 +73,7 @@ Object.assign(window.ChatComponent.prototype, {
                 // Use first member's avatar as fallback, or empty
                 const firstHash = groupSession.member_hashes && groupSession.member_hashes[0];
                 const firstChar = firstHash && this.state.personas && this.state.personas.characters && this.state.personas.characters[firstHash];
-                avatarEl.src = (firstChar && firstChar.avatar) ? firstChar.avatar : '';
+                avatarEl.src = (firstChar && firstChar.avatar) ? firstChar.avatar : (firstHash ? `/image/${firstHash}` : '');
             }
         }
 
@@ -238,9 +238,18 @@ Object.assign(window.ChatComponent.prototype, {
                 const intercepted = await this._cmdState.submitForm();
                 if (intercepted) return;
             }
+            if (this.state.isStreaming) return;
+
             const hasPending = (this.state.pendingActions?.length ?? 0) > 0;
             const content = textarea.value.trim();
-            if ((!content && !hasPending) || this.state.isStreaming) return;
+
+            if (!content && !hasPending) {
+                const selection = this.state.groupCharacterBarSelection || null;
+                if (selection && this._triggerGroupContinue) {
+                    this._triggerGroupContinue(selection);
+                }
+                return;
+            }
 
             textarea.value = '';
             textarea.style.height = '24px';
@@ -349,11 +358,8 @@ Object.assign(window.ChatComponent.prototype, {
                 'flex-shrink:0',
             ].join(';');
 
-            if (persona && persona.avatar) {
-                btn.innerHTML = `<img src="${persona.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="${this.escapeHTML(persona.name || '')}" />`;
-            } else {
-                btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:22px;line-height:40px;color:var(--chat-text-secondary,#aaa);">person</span>`;
-            }
+            const avatarSrc = (persona && persona.avatar) ? persona.avatar : `/image/${charHash}`;
+            btn.innerHTML = `<img src="${avatarSrc}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="${this.escapeHTML((persona && persona.name) ? persona.name : '')}" onerror="this.outerHTML='<span class=\\'material-symbols-outlined\\' style=\\'font-size:22px;line-height:40px;color:var(--chat-text-secondary,#aaa);\\'>person</span>'" />`;
 
             btn.addEventListener('click', () => this._selectCharacterBarItem(charHash));
             this._attachCharBarLongPress(btn, charHash);
