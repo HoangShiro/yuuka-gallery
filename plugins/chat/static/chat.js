@@ -549,7 +549,7 @@ class ChatComponent {
                                         <div class="inventory-location-row">
                                             <div>
                                                 <h3 style="margin: 0;">Location</h3>
-                                                <div id="inventory-location-label" class="location-label">Unknown</div>
+                                                <input id="inventory-location-label" class="location-label" value="Unknown" style="background:transparent; border:none; outline:none; color:inherit; font:inherit; width:100%;">
                                             </div>
                                             <span id="inventory-stamina-label" style="font-size: 0.9em; color: var(--chat-primary); font-weight: 600;">⚡ 100</span>
                                         </div>

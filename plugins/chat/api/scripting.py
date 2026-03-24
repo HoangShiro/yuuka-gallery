@@ -98,6 +98,8 @@ def _gather_session_context(data, personas):
         state_parts = []
         if session_state.get('location'):
             state_parts.append(f"Location: {session_state['location']}")
+        if session_state.get('action'):
+            state_parts.append(f"Current Action: {session_state['action']}")
         if session_state.get('outfits'):
             state_parts.append(f"Currently Worn Outfits: {', '.join(session_state['outfits'])}")
         if state_parts:

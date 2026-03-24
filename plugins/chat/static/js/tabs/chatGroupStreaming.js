@@ -1012,7 +1012,7 @@ Object.assign(window.ChatComponent.prototype, {
 
             // Always sync the group location label
             const locationLabel = this.container.querySelector('#inventory-location-label');
-            if (locationLabel) locationLabel.textContent = groupSession.location || 'Unknown';
+            if (locationLabel) locationLabel.value = groupSession.location || 'Unknown';
 
             // Sync the active character's status so the stats UI updates in real-time
             this._syncGroupStatusToUI && this._syncGroupStatusToUI(this.state.activeGroupInventoryCharHash);
@@ -1031,7 +1031,7 @@ Object.assign(window.ChatComponent.prototype, {
         this._renderGroupMemberPicker && this._renderGroupMemberPicker();
         
         const locationLabel = this.container.querySelector('#inventory-location-label');
-        if (locationLabel) locationLabel.textContent = groupSession.location || 'Unknown';
+        if (locationLabel) locationLabel.value = groupSession.location || 'Unknown';
 
         const activeHash = this.state.activeGroupInventoryCharHash;
         if (activeHash) {

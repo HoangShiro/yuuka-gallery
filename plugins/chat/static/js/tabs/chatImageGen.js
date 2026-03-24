@@ -300,6 +300,16 @@ Object.assign(window.ChatComponent.prototype, {
         }
         session.messages[index] = migrated;
 
+        const messages = session.messages || [];
+        let lastAssistantIndex = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant' && messages[i].type !== 'narrator') {
+                lastAssistantIndex = i;
+                break;
+            }
+        }
+        const isLatestAssistant = (index === lastAssistantIndex);
+
         if (isGroup) {
             // Determine character hash from the message (assistant) or last assistant before it (user)
             let charHash = migrated.character_hash || null;
@@ -319,16 +329,33 @@ Object.assign(window.ChatComponent.prototype, {
             }
             if (!charHash) return;
 
-            // Read status from the message's snapshot if available, otherwise use live state
+            // Only update history status from live state if regenerating the latest assistant message.
+            // Historical messages should stay in their original context.
+            if (isLatestAssistant) {
+                const liveStatus = window.HistoryStateEngine.capture(session, charHash);
+                if (liveStatus) {
+                    window.HistoryStateEngine.writeStatus(migrated, migrated.activeIndex, liveStatus);
+                }
+            }
+
+            // Now read it back (it will now contain the latest edits if isLatestAssistant, or old context)
             const status = window.HistoryStateEngine.readStatus(migrated, migrated.activeIndex);
             await this._saveGroupSession();
             this.renderMessages();
             await this._autoGenerateGroupImage(charHash, index, status || null);
         } else {
-            const charHash = this.state.activeChatCharacterHash;
+            const charHash = this.state.activeChatCharacterHash || (migrated.character_hash);
             const charObj = this.state.personas.characters[charHash] || {};
 
-            // Read status from the message's snapshot if available, otherwise use live state
+            // Only update history status from live state if regenerating the latest assistant message.
+            if (isLatestAssistant) {
+                const liveStatus = window.HistoryStateEngine.capture(session, charHash);
+                if (liveStatus) {
+                    window.HistoryStateEngine.writeStatus(migrated, migrated.activeIndex, liveStatus);
+                }
+            }
+
+            // Now read it back (it will now contain the latest edits if isLatestAssistant, or old context)
             const status = window.HistoryStateEngine.readStatus(migrated, migrated.activeIndex);
             this._saveCurrentSession();
             this.renderMessages();

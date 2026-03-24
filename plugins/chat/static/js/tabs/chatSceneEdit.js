@@ -256,7 +256,8 @@ Object.assign(window.ChatComponent.prototype, {
                     session_state: {
                         location: this.state.activeChatSession.character_states?.[charHash]?.location || '',
                         outfits: this.state.activeChatSession.character_states?.[charHash]?.outfits || [],
-                        inventory: this.state.activeChatSession.character_states?.[charHash]?.inventory || []
+                        inventory: this.state.activeChatSession.character_states?.[charHash]?.inventory || [],
+                        action: this._getActiveActionString ? this._getActiveActionString(this.state.activeChatSession.character_states?.[charHash]) : 'Idle'
                     },
                     model: localStorage.getItem('chat-llm-model') || undefined,
                     temperature: parseFloat(localStorage.getItem('chat-llm-temperature')) || -1

@@ -126,7 +126,13 @@ class GroupContextBuilder:
         location = char_state.get('location') or group_session.get('location', '') or 'Unknown'
         outfits = char_state.get('outfits') or group_session.get('outfits', []) or []
         inventory = char_state.get('inventory') or group_session.get('inventory', []) or []
-        parts.append(_format_current_state_from_values(location, outfits, inventory))
+        
+        # Get active actions (keys with value > 0)
+        action_state = char_state.get('action_state') or {}
+        active_actions = [k.replace('_', ' ') for k, v in action_state.items() if v > 0]
+        action_str = ', '.join(active_actions) if active_actions else 'Idle'
+        
+        parts.append(_format_current_state_from_values(location, outfits, inventory, action=action_str))
 
         system_prompt = "\n\n".join(p for p in parts if p)
 
@@ -329,10 +335,13 @@ def _format_current_state(group_session: dict) -> str:
     location = group_session.get('location', '') or 'Unknown'
     outfits = group_session.get('outfits', []) or []
     inventory = group_session.get('inventory', []) or []
+    
+    # We don't have per-character live action/emotion in the global group session keys directly
+    # but we can check if it's stored in character_states (usually not synced to session top-level)
     return _format_current_state_from_values(location, outfits, inventory)
 
 
-def _format_current_state_from_values(location: str, outfits: list, inventory: list) -> str:
+def _format_current_state_from_values(location: str, outfits: list, inventory: list, action: str = 'Idle') -> str:
     """Format current state block từ các giá trị cụ thể."""
     outfits_str = ', '.join(outfits) if outfits else 'None'
     inventory_str = ', '.join(inventory) if inventory else 'Empty'
@@ -340,6 +349,7 @@ def _format_current_state_from_values(location: str, outfits: list, inventory: l
     return (
         "<current_state>\n"
         f"Current Location: {location}\n"
+        f"Current Action: {action}\n"
         f"Currently Worn Outfits: {outfits_str}\n"
         f"Inventory/Bag: {inventory_str}\n"
         "</current_state>"

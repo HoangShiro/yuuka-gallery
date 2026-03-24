@@ -42,7 +42,7 @@ Object.assign(window.ChatComponent.prototype, {
 
         // Sync location from group session
         const locationLabel = this.container.querySelector('#inventory-location-label');
-        if (locationLabel) locationLabel.textContent = session.location || 'Unknown';
+        if (locationLabel) locationLabel.value = session.location || 'Unknown';
 
         // Render member section (name/delete controls + avatar picker)
         this._renderGroupMemberPicker();

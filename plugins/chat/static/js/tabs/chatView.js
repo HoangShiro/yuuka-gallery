@@ -412,7 +412,8 @@ Object.assign(window.ChatComponent.prototype, {
                 session_state: {
                     location: session.character_states?.[charHash]?.location || '',
                     outfits: session.character_states?.[charHash]?.outfits || [],
-                    inventory: session.character_states?.[charHash]?.inventory || []
+                    inventory: session.character_states?.[charHash]?.inventory || [],
+                    action: this._getActiveActionString ? this._getActiveActionString(session.character_states?.[charHash]) : 'Idle'
                 },
                 scene_ids: session.scenes || [],
                 emotion_rules: (this.emotionEngine && this.emotionEngine.rules) ? this.emotionEngine.rules : null,

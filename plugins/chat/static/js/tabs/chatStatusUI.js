@@ -226,7 +226,29 @@ Object.assign(window.ChatComponent.prototype, {
         // Location UI
         const locLabel = this.container.querySelector('#inventory-location-label');
         if (locLabel) {
-            locLabel.textContent = cs.location || "Unknown";
+            locLabel.value = cs.location || "Unknown";
+
+            // Add auto-save if not already bound
+            if (!locLabel._bound) {
+                locLabel.addEventListener('input', () => {
+                    const newLoc = locLabel.value.trim();
+                    const session = this._getActiveSession();
+                    if (!session) return;
+                    
+                    if (this.state.activeChatGroupId) {
+                        session.location = newLoc;
+                        this._saveSession();
+                    } else {
+                        const charHash = this.state.activeChatCharacterHash;
+                        if (charHash) {
+                            const state = window.HistoryStateEngine.ensureCharState(session, charHash);
+                            state.location = newLoc;
+                            this._saveSession();
+                        }
+                    }
+                });
+                locLabel._bound = true;
+            }
         }
 
         // Stamina UI

@@ -84,6 +84,7 @@ def _build_persona_prompt(data, plugin=None, user_hash=None):
     state_desc = [
         f"<current_state>",
         f"Current Location: {session_state.get('location', 'Unknown')}",
+        f"Current Action: {session_state.get('action', 'Idle')}",
         f"Currently Worn Outfits: {', '.join(session_state.get('outfits', [])) or 'None'}",
         f"Inventory/Bag: {', '.join(session_state.get('inventory', [])) or 'Empty'}",
         f"</current_state>"

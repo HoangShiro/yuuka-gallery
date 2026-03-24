@@ -169,7 +169,8 @@ Object.assign(window.ChatComponent.prototype, {
                     session_state: {
                         location: statusBefore.location,
                         outfits: statusBefore.outfits,
-                        inventory: statusBefore.inventory
+                        inventory: statusBefore.inventory,
+                        action: this._getActiveActionString(statusBefore)
                     },
                     available_capabilities: (window.Yuuka?.services?.capabilities?.getCapabilities && window.Yuuka.services.capabilities.getCapabilities()) || [],
                     emotion_rules: (this.emotionEngine && this.emotionEngine.rules) ? this.emotionEngine.rules : null,
@@ -517,7 +518,8 @@ Object.assign(window.ChatComponent.prototype, {
                 session_state: {
                     location: session.character_states?.[charHash]?.location || '',
                     outfits: session.character_states?.[charHash]?.outfits || [],
-                    inventory: session.character_states?.[charHash]?.inventory || []
+                    inventory: session.character_states?.[charHash]?.inventory || [],
+                    action: this._getActiveActionString(session.character_states?.[charHash])
                 },
                 scene_ids: session.scenes || [],
                 emotion_rules: (this.emotionEngine && this.emotionEngine.rules) ? this.emotionEngine.rules : null,
@@ -730,5 +732,13 @@ Object.assign(window.ChatComponent.prototype, {
         this._syncStatusToUI();
 
         return fullText;
+    },
+
+    _getActiveActionString(cs) {
+        if (!cs || !cs.action_state) return 'Idle';
+        const activeActions = Object.entries(cs.action_state)
+            .filter(([k, v]) => v > 0)
+            .map(([k]) => k.replaceAll('_', ' '));
+        return activeActions.join(', ') || 'Idle';
     }
 });
