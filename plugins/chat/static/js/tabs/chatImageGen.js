@@ -68,6 +68,12 @@ Object.assign(window.ChatComponent.prototype, {
 
             if (!currentOutfits) currentOutfits = nonOutfits;
 
+            // Append additional tags (user-defined, always included)
+            const additionalTags = this.container.querySelector('#chat-image-gen-additional-tags')?.value || '';
+            if (additionalTags.trim()) {
+                currentOutfits = currentOutfits ? currentOutfits + ', ' + additionalTags.trim() : additionalTags.trim();
+            }
+
             let dynamicContext = overrideContext !== null ? overrideContext : (location || '');
             let dynamicExpression = '';
             let dynamicAction = '';
@@ -196,6 +202,12 @@ Object.assign(window.ChatComponent.prototype, {
             }
 
             if (!currentOutfits) currentOutfits = nonOutfits;
+
+            // Append additional tags (user-defined, always included)
+            const additionalTags = this.container.querySelector('#chat-image-gen-additional-tags')?.value || '';
+            if (additionalTags.trim()) {
+                currentOutfits = currentOutfits ? currentOutfits + ', ' + additionalTags.trim() : additionalTags.trim();
+            }
 
             let dynamicContext = location;
             let dynamicExpression = '';

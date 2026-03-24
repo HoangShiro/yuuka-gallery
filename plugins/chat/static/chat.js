@@ -256,6 +256,11 @@ class ChatComponent {
                                 </div>
 
                                 <div class="form-group" style="margin-top: 1rem;">
+                                    <label>Additional tags (appended to all generations)</label>
+                                    <input type="text" id="chat-image-gen-additional-tags" placeholder="e.g. solo, solo focus, 1girl..." value="">
+                                </div>
+
+                                <div class="form-group" style="margin-top: 1rem;">
                                     <label>Checkpoint</label>
                                     <div style="position: relative;">
                                         <select id="chat-image-gen-ckpt_name">

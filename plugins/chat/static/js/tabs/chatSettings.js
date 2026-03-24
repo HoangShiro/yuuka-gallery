@@ -220,6 +220,7 @@ Object.assign(window.ChatComponent.prototype, {
         initToggle('chat-image-gen-use-quality', true);
         initToggle('chat-image-gen-use-negative', true);
         initText('chat-image-gen-non-outfits', '');
+        initText('chat-image-gen-additional-tags', '');
 
         const viewModeSelect = this.container.querySelector('#chat-image-gen-view-mode');
         if (viewModeSelect) {
