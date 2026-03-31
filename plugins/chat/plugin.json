@@ -11,6 +11,7 @@
     },
     "assets": {
         "js": [
+            "capabilities.js",
             "js/emotion_engine/engine.js",
             "js/emotion_engine/emotion_editor.js",
             "js/action_engine/engine.js",

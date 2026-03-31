@@ -1,0 +1,24 @@
+{
+    "id": "account",
+    "name": "Quản lý Tài khoản",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Hệ thống quản lý người dùng và phân quyền tập trung.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:AccountPlugin",
+        "frontend_component": "AccountComponent"
+    },
+    "assets": {
+        "js": ["account.js"],
+        "css": ["account.css"]
+    },
+    "ui": {
+        "tab": {
+            "id": "account",
+            "label": "Tài khoản",
+            "icon": "manage_accounts"
+        },
+        "order": 100
+    }
+}

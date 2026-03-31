@@ -548,27 +548,34 @@ Object.assign(window.ChatComponent.prototype, {
                     }
                 }
 
-                // Outfit changes go to this character's state only
                 if (updates.put_on && Array.isArray(updates.put_on)) {
                     if (!charState.outfits) charState.outfits = [];
                     if (!charState.inventory) charState.inventory = [];
+                    // Normalize LLM output to lowercase
+                    updates.put_on = updates.put_on.map(i => i.toLowerCase());
                     updates.put_on.forEach(item => {
-                        if (!charState.outfits.includes(item)) {
+                        // Skip if already in outfits (fuzzy check)
+                        if (!this._hasItemInList(charState.outfits, item)) {
                             charState.outfits.push(item);
                         }
-                        const invIdx = charState.inventory.indexOf(item);
-                        if (invIdx > -1) charState.inventory.splice(invIdx, 1);
+                        // Remove from inventory if present (fuzzy check)
+                        const normalizedItem = this._normalizeItemName(item);
+                        charState.inventory = charState.inventory.filter(invItem => this._normalizeItemName(invItem) !== normalizedItem);
                     });
                 }
                 if (updates.take_off && Array.isArray(updates.take_off)) {
                     if (!charState.outfits) charState.outfits = [];
                     if (!charState.inventory) charState.inventory = [];
+                    // Normalize LLM output to lowercase
+                    updates.take_off = updates.take_off.map(i => i.toLowerCase());
                     updates.take_off.forEach(item => {
-                        const outIdx = charState.outfits.indexOf(item);
-                        if (outIdx > -1) charState.outfits.splice(outIdx, 1);
-                        if (!charState.inventory.includes(item)) {
+                        // Skip if already in inventory (fuzzy check)
+                        if (!this._hasItemInList(charState.inventory, item)) {
                             charState.inventory.push(item);
                         }
+                        // Remove from outfits if present (fuzzy check)
+                        const normalizedItem = this._normalizeItemName(item);
+                        charState.outfits = charState.outfits.filter(outItem => this._normalizeItemName(outItem) !== normalizedItem);
                     });
                 }
 

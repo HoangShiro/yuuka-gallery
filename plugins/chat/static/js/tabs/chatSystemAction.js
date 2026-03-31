@@ -442,6 +442,7 @@ Object.assign(window.ChatComponent.prototype, {
         cs.stamina       = this.actionEngine?.getMaxStamina?.() || 100;
         cs.outfits       = [...(charObj?.default_outfits || [])];
         cs.inventory     = [];
+        cs.location      = '';
         // memory_summary, memory_name, last_summarized_index and scenes are preserved
 
         this._closeSystemActionMenu();
@@ -567,6 +568,7 @@ Object.assign(window.ChatComponent.prototype, {
         groupSession.messages = [];
         groupSession.memory_summary = '';
         groupSession.last_summarized_index = 0;
+        groupSession.location = '';
 
         // Reset per-character states via engine
         if (!groupSession.character_states) groupSession.character_states = {};
@@ -582,6 +584,7 @@ Object.assign(window.ChatComponent.prototype, {
         });
 
         this._closeSystemActionMenu();
+        this._syncStatusToUI();
         this._saveGroupSession && this._saveGroupSession();
         this.renderMessages();
     },

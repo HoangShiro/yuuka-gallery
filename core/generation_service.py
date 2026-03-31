@@ -204,6 +204,29 @@ class GenerationService:
             return f"{base} + LoRA"
         return base
 
+    def _friendly_node_label(self, node_type: str) -> str:
+        if not isinstance(node_type, str) or not node_type.strip():
+            return "Đang xử lý"
+        mapping = {
+            "checkpointloadersimple": "Nạp checkpoint",
+            "cliptextencode": "Mã hóa prompt",
+            "emptylatentimage": "Tạo latent",
+            "ksampler": "Sampling",
+            "vaedecode": "Giải mã VAE",
+            "upscalemodelloader": "Nạp model upscale",
+            "imageupscalewithmodel": "Upscale bằng model",
+            "image_scale": "Resize ảnh",
+            "imagescaleby": "Resize ảnh",
+            "loadimage": "Nạp ảnh nguồn",
+            "imagetobase64_yuuka": "Đóng gói ảnh",
+            "videotobase64_yuuka": "Đóng gói video",
+            "loraloader": "Nạp LoRA",
+            "power lora loader (rgthree)": "Nạp LoRA",
+            "rmbg": "Tách nền",
+        }
+        key = node_type.strip().lower()
+        return mapping.get(key, node_type)
+
     def _run_task(self, user_hash, task_id, character_hash, cfg_data):
         ws = None
         execution_successful = False
@@ -233,6 +256,11 @@ class GenerationService:
                 original_lora_tags = []
 
             workflow, output_node_id = self.core_api.workflow_builder.build_workflow(cfg_data, seed)
+            workflow_node_types = {}
+            if isinstance(workflow, dict):
+                for node_id, node_data in workflow.items():
+                    if isinstance(node_data, dict):
+                        workflow_node_types[str(node_id)] = str(node_data.get('class_type') or '').strip()
             
             prompt_info = self.core_api.comfy_api_client.queue_prompt(workflow, client_id, target_address)
             prompt_id = prompt_info['prompt_id']
@@ -241,6 +269,15 @@ class GenerationService:
                 task = self.user_states[user_hash]["tasks"][task_id]
                 task['prompt_id'] = prompt_id
                 task['progress_message'] = "Đã gửi, đang chờ trong hàng đợi..."
+                task['workflow_label'] = workflow_label_display
+                task['comfy_event_type'] = 'queued'
+                task['queue_position'] = 0
+                task['current_node'] = None
+                task['current_node_type'] = None
+                task['current_node_label'] = None
+                task['step_value'] = 0
+                task['step_max'] = 0
+                task['workflow_node_types'] = workflow_node_types
 
             # YUUKA: QUEUE POLLING LOGIC v1.0
             while True:
@@ -264,6 +301,8 @@ class GenerationService:
                         total_ahead = len(running_prompts) + queue_pos
                         with self._get_user_lock(user_hash):
                             self.user_states[user_hash]["tasks"][task_id]['progress_message'] = f"Trong hàng đợi ({total_ahead} trước)..."
+                            self.user_states[user_hash]["tasks"][task_id]['comfy_event_type'] = 'queued'
+                            self.user_states[user_hash]["tasks"][task_id]['queue_position'] = total_ahead
                         # Dynamic generation-style progress (0%) while in queue
                         self._render_generation_progress(user_tail, workflow_label_display, size_label_display, 0)
                     except ValueError:
@@ -312,14 +351,57 @@ class GenerationService:
                     if msg_data.get('prompt_id') == prompt_id:
                         if msg_type == 'execution_start':
                             task['progress_message'] = "Bắt đầu xử lý..."
+                            task['comfy_event_type'] = 'execution_start'
+                            task['queue_position'] = 0
+                            task['current_node'] = None
+                            task['current_node_type'] = None
+                            task['current_node_label'] = None
+                            task['step_value'] = 0
+                            task['step_max'] = 0
                             self._render_generation_progress(user_tail, workflow_label_display, size_label_display, 0)
+                        elif msg_type == 'executing' and msg_data.get('node') is not None:
+                            current_node = str(msg_data.get('node'))
+                            node_type = workflow_node_types.get(current_node, '')
+                            task['comfy_event_type'] = 'executing'
+                            task['queue_position'] = 0
+                            task['current_node'] = current_node
+                            task['current_node_type'] = node_type or None
+                            task['current_node_label'] = self._friendly_node_label(node_type)
+                            if task.get('step_max') and task.get('step_value'):
+                                task['progress_message'] = f"{task['current_node_label']}... {task['progress_percent']}%"
+                            else:
+                                task['progress_message'] = f"{task['current_node_label']}..."
+                        elif msg_type == 'execution_cached':
+                            current_node = str(msg_data.get('node') or '')
+                            node_type = workflow_node_types.get(current_node, '') if current_node else ''
+                            task['comfy_event_type'] = 'execution_cached'
+                            if current_node:
+                                task['current_node'] = current_node
+                            if node_type:
+                                task['current_node_type'] = node_type
+                                task['current_node_label'] = f"{self._friendly_node_label(node_type)} (cache)"
+                                task['progress_message'] = task['current_node_label']
                         elif msg_type == 'progress':
                             v, m = msg_data.get('value',0), msg_data.get('max',1)
                             p = int(v/m*100) if m>0 else 0
-                            task['progress_percent'] = p; task['progress_message'] = f"Đang tạo... {p}%"
+                            task['comfy_event_type'] = 'progress'
+                            task['step_value'] = v
+                            task['step_max'] = m
+                            task['progress_percent'] = p
+                            node_label = task.get('current_node_label') or 'Đang tạo'
+                            if m and m > 0:
+                                task['progress_message'] = f"{node_label}... bước {v}/{m} · {p}%"
+                            else:
+                                task['progress_message'] = f"{node_label}... {p}%"
                             self._render_generation_progress(user_tail, workflow_label_display, size_label_display, p)
                         elif msg_type in ('executing', 'execution_done', 'execution_end') and msg_data.get('node') is None:
                             # move to 100% visually as execution ends
+                            task['comfy_event_type'] = msg_type
+                            task['current_node'] = None
+                            task['current_node_type'] = None
+                            task['current_node_label'] = 'Hoàn tất thực thi'
+                            task['progress_percent'] = 100
+                            task['progress_message'] = 'Hoàn tất thực thi, đang lấy kết quả...'
                             self._render_generation_progress(user_tail, workflow_label_display, size_label_display, 100)
                             execution_successful = True
                             break
@@ -369,6 +451,10 @@ class GenerationService:
                 # Clear progress line before final output
                 self._clear_progress_line()
                 with self._get_user_lock(user_hash):
+                    self.user_states[user_hash]["tasks"][task_id]['comfy_event_type'] = 'history'
+                    self.user_states[user_hash]["tasks"][task_id]['current_node'] = output_node_id
+                    self.user_states[user_hash]["tasks"][task_id]['current_node_type'] = workflow_node_types.get(str(output_node_id)) or None
+                    self.user_states[user_hash]["tasks"][task_id]['current_node_label'] = 'Đọc kết quả đầu ra'
                     self.user_states[user_hash]["tasks"][task_id]['progress_message'] = "\u0110ang x\u1eed l\u00fd k\u1ebft qu\u1ea3..."
 
                 creation_duration = (time.time() - start_time) - 0.3 # tru do tre websocket

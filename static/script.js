@@ -332,8 +332,8 @@ window.showSuccess = showSuccess;
 // Auth UI removed; managed by AuthPluginComponent
 
 async function switchTab(tabName) {
-    // Yuuka: reload on active tab click v1.0 - Gỡ bỏ điều kiện return sớm để cho phép tải lại.
     state.activeTab = tabName;
+    localStorage.setItem('yuuka-last-tab', tabName);
 
     // Yuuka: scroll restoration fix v1.0 - Cuộn lên đầu trang
     window.scrollTo(0, 0);
@@ -511,9 +511,12 @@ async function initializeAppUI() {
         }
     });
 
+    const savedTab = localStorage.getItem('yuuka-last-tab');
     const firstTab = state.activePlugins.find(p => p.ui?.tab)?.ui?.tab?.id;
-    if (firstTab) {
-        await switchTab(firstTab);
+    const tabToOpen = (savedTab && state.activePlugins.some(p => p.ui?.tab?.id === savedTab)) ? savedTab : firstTab;
+
+    if (tabToOpen) {
+        await switchTab(tabToOpen);
     } else {
         showError("Lỗi: Không tìm thấy tab nào để hiển thị.");
     }

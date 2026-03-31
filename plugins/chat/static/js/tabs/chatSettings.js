@@ -89,7 +89,106 @@ Object.assign(window.ChatComponent.prototype, {
         }
     },
 
+    renderChatFormatRules() {
+        const tbody = this.container.querySelector('#chat-rules-tbody');
+        if (!tbody) return;
+
+        let rules = JSON.parse(localStorage.getItem('chat-format-rules'));
+        if (!rules) {
+            rules = [
+                { rule: '**', type: 'Italic', linebreak: true, keep: false },
+                { rule: '****', type: 'Bold', linebreak: false, keep: false },
+                { rule: '""', type: 'Dialogue', linebreak: true, keep: true },
+            ];
+            localStorage.setItem('chat-format-rules', JSON.stringify(rules));
+        }
+
+        tbody.innerHTML = '';
+        rules.forEach((r, idx) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="text" class="rule-input" placeholder="e.g. **" style="width: 100%; box-sizing: border-box; padding: 6px 8px; background: transparent; border: 1px solid var(--chat-border); color: var(--chat-text); border-radius: 4px; font-family: monospace; font-size: 0.9rem;"></td>
+                <td>
+                    <div style="position: relative;">
+                        <select class="type-select" style="width: 100%; padding: 6px 28px 6px 8px; background: var(--chat-panel-bg); border: 1px solid var(--chat-border); color: var(--chat-text); border-radius: 4px; cursor: pointer; appearance: none; font-size: 0.9rem;">
+                            <option value="Normal" ${r.type === 'Normal' ? 'selected' : ''}>Normal</option>
+                            <option value="Italic" ${r.type === 'Italic' ? 'selected' : ''}>Italic</option>
+                            <option value="Bold" ${r.type === 'Bold' ? 'selected' : ''}>Bold</option>
+                            <option value="Dialogue" ${r.type === 'Dialogue' ? 'selected' : ''}>Dialogue</option>
+                            <option value="Codemark" ${r.type === 'Codemark' ? 'selected' : ''}>Codemark</option>
+                            <option value="Title" ${r.type === 'Title' ? 'selected' : ''}>Title</option>
+                            <option value="Subtitle" ${r.type === 'Subtitle' ? 'selected' : ''}>Subtitle</option>
+                        </select>
+                        <span class="material-symbols-outlined" style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--chat-text-secondary); font-size: 18px;">expand_more</span>
+                    </div>
+                </td>
+                <td style="text-align: center;">
+                    <label class="switch" style="transform: scale(0.85);">
+                        <input type="checkbox" class="keep-checkbox" ${r.keep ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                </td>
+                <td style="text-align: center;">
+                    <label class="switch" style="transform: scale(0.85);">
+                        <input type="checkbox" class="linebreak-checkbox" ${r.linebreak ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                </td>
+                <td style="text-align: right;">
+                    <button class="icon-btn btn-delete-rule" title="Remove rule" style="padding: 4px; margin-left: auto;">
+                        <span class="material-symbols-outlined" style="font-size: 20px;">delete</span>
+                    </button>
+                </td>
+            `;
+
+            const ruleInput = tr.querySelector('.rule-input');
+            ruleInput.value = r.rule || '';
+
+            const saveRow = () => {
+                const updatedRules = JSON.parse(localStorage.getItem('chat-format-rules'));
+                updatedRules[idx] = {
+                    rule: ruleInput.value,
+                    type: tr.querySelector('.type-select').value,
+                    keep: tr.querySelector('.keep-checkbox').checked,
+                    linebreak: tr.querySelector('.linebreak-checkbox').checked
+                };
+                localStorage.setItem('chat-format-rules', JSON.stringify(updatedRules));
+            };
+
+            ruleInput.addEventListener('input', saveRow);
+            tr.querySelector('.type-select').addEventListener('change', saveRow);
+            tr.querySelector('.keep-checkbox').addEventListener('change', saveRow);
+            tr.querySelector('.linebreak-checkbox').addEventListener('change', saveRow);
+
+            tr.querySelector('.btn-delete-rule').addEventListener('click', () => {
+                const updatedRules = JSON.parse(localStorage.getItem('chat-format-rules'));
+                updatedRules.splice(idx, 1);
+                localStorage.setItem('chat-format-rules', JSON.stringify(updatedRules));
+                this.renderChatFormatRules();
+            });
+
+            tbody.appendChild(tr);
+        });
+    },
+
     initSettings() {
+        // Tab switching for settings
+        this.container.querySelectorAll('.settings-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.container.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const tab = btn.dataset.tab;
+                const groups = this.container.querySelectorAll('#view-settings .settings-group');
+                groups.forEach(g => {
+                    if (g.id === `settings-group-${tab}`) {
+                        g.style.display = '';
+                    } else {
+                        g.style.display = 'none';
+                    }
+                });
+            });
+        });
+
         const autoLineBreakToggle = this.container.querySelector('#chat-auto-line-break');
         if (autoLineBreakToggle) {
             const savedSetting = localStorage.getItem('chat-auto-line-break');
@@ -100,6 +199,17 @@ Object.assign(window.ChatComponent.prototype, {
                 localStorage.setItem('chat-auto-line-break', e.target.checked);
             });
         }
+
+        const btnAddRule = this.container.querySelector('#btn-chat-add-rule');
+        if (btnAddRule) {
+            btnAddRule.addEventListener('click', () => {
+                const rules = JSON.parse(localStorage.getItem('chat-format-rules')) || [];
+                rules.push({ rule: '', type: 'Dialogue', linebreak: true });
+                localStorage.setItem('chat-format-rules', JSON.stringify(rules));
+                this.renderChatFormatRules();
+            });
+        }
+        this.renderChatFormatRules();
 
         const systemPromptTextarea = this.container.querySelector('#chat-system-prompt');
         if (systemPromptTextarea) {

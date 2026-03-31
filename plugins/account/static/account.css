@@ -1,0 +1,233 @@
+/* --- plugins/account/static/account.css --- */
+body.account-plugin-active {
+    overflow: hidden;
+}
+
+.account-container {
+    padding: var(--spacing-6);
+    background: var(--color-card-bg);
+    border-radius: var(--rounded-lg);
+    box-shadow: 0 4px 15px var(--color-shadow);
+    width: 100%;
+    margin: 0;
+    height: calc(100dvh - 170px);
+    max-height: calc(100dvh - 170px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.account-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-4);
+    border-bottom: 2px solid var(--color-border);
+    padding-bottom: var(--spacing-4);
+    gap: var(--spacing-4);
+}
+
+.account-search-wrapper {
+    position: relative;
+    flex-grow: 1;
+    max-width: 400px;
+}
+
+.account-search-input {
+    width: 100%;
+    padding: 10px 40px 10px 15px;
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.account-search-input:focus {
+    border-color: var(--color-accent);
+}
+
+.btn-clear-search {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--color-secondary-text);
+    display: none; /* Hidden by default */
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+}
+
+.btn-clear-search:hover {
+    background: var(--color-border);
+    color: var(--color-accent);
+}
+
+.btn-clear-search.visible {
+    display: flex;
+}
+
+.account-title {
+    font-size: 1.8rem;
+    font-weight: var(--font-weight-bold);
+    color: var(--color-primary-text);
+}
+
+.user-table-wrapper {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding-top: var(--spacing-4);
+}
+
+.user-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0;
+    table-layout: fixed;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.user-table thead,
+.user-table tbody tr {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+}
+
+#user-list-body {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.user-table th {
+    text-align: left;
+    padding: var(--spacing-4);
+    background-color: var(--color-primary-bg);
+    border-bottom: 2px solid var(--color-border);
+    font-weight: var(--font-weight-medium);
+}
+
+.user-table td {
+    padding: var(--spacing-4);
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: middle;
+}
+
+.user-row:hover {
+    background-color: rgba(255, 138, 117, 0.05); /* subtle primary hover */
+}
+
+.badge {
+    padding: 4px 10px;
+    border-radius: var(--rounded-full);
+    font-size: 0.8rem;
+    font-weight: var(--font-weight-medium);
+    text-transform: uppercase;
+}
+
+.badge-admin { 
+    background: var(--color-accent); 
+    color: white; 
+}
+
+.badge-user { 
+    background: var(--color-border); 
+    color: var(--color-secondary-text); 
+}
+
+.badge-waiting {
+    background: #ffcc00;
+    color: #333;
+}
+
+.hash-cell {
+    font-family: monospace;
+    color: var(--color-secondary-text);
+}
+
+.user-actions {
+    display: flex;
+    gap: var(--spacing-2);
+    justify-content: flex-end;
+}
+
+.action-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--rounded-md);
+    border: 1px solid var(--color-border);
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-secondary-text);
+    transition: all 0.2s;
+}
+
+.action-btn:hover {
+    background: var(--color-border);
+    color: var(--color-accent);
+}
+
+.action-btn.btn-delete:hover {
+    color: #ff4d4d;
+    background: #ffe6e6;
+}
+
+.action-btn.btn-promote:hover {
+    color: #2ecc71;
+    background: #eafaf1;
+}
+
+.action-btn.btn-revoke:hover {
+    color: #e67e22;
+    background: #fdf2e9;
+}
+
+.action-btn[disabled] {
+    opacity: 0.3;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.admin-only-alert {
+    text-align: center;
+    padding: 50px;
+    background: var(--color-card-bg);
+    border-radius: var(--rounded-lg);
+    border: 1px dashed var(--color-accent);
+}
+
+/* Animations */
+@keyframes rowFadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.user-row {
+    animation: rowFadeIn 0.3s ease forwards;
+}
+
+@media (max-width: 640px) {
+    .account-container {
+        height: calc(100dvh - 140px);
+        max-height: calc(100dvh - 140px);
+        padding: var(--spacing-4);
+    }
+}

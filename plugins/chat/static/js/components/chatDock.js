@@ -36,17 +36,53 @@ Object.assign(window.ChatComponent.prototype, {
                 sendBtn.title = 'Send';
                 sendBtn.innerHTML = '<span class="material-symbols-outlined">send</span>';
 
-                // Auto-expand textarea + toggle add button
-                textarea.addEventListener('input', function () {
-                    this.style.height = 'auto';
-                    this.style.height = Math.min(this.scrollHeight, 190) + 'px';
-                    if (this.value === '') {
-                        this.style.height = '24px';
+                const getSessionAutoSaveKey = () => {
+                    if (this.state.activeChatGroupId) return `chat-autosave-group-${this.state.activeChatGroupId}`;
+                    if (this.state.activeChatCharacterHash) return `chat-autosave-char-${this.state.activeChatCharacterHash}`;
+                    return null;
+                };
+
+                const updateHeight = () => {
+                    if (textarea.offsetWidth === 0) return;
+                    textarea.style.height = 'auto';
+                    textarea.style.height = Math.min(textarea.scrollHeight, 190) + 'px';
+                    if (textarea.value === '') {
+                        textarea.style.height = '24px';
                         addBtn.classList.remove('is-hidden');
                     } else {
                         addBtn.classList.add('is-hidden');
                     }
+                };
+
+                // Restore autosave
+                const saveKey = getSessionAutoSaveKey();
+                if (saveKey) {
+                    const saved = localStorage.getItem(saveKey);
+                    if (saved) {
+                        textarea.value = saved;
+                    }
+                }
+
+                // Auto-expand textarea + toggle add button + autosave
+                textarea.addEventListener('input', () => {
+                    updateHeight();
+                    const key = getSessionAutoSaveKey();
+                    if (key) {
+                        localStorage.setItem(key, textarea.value);
+                    }
                 });
+
+                // Use ResizeObserver to handle initial dock expansion and mobile layout shifts
+                // This prevents the height from being miscalculated when width is 0 or animating
+                let lastWidth = 0;
+                const resizeObserver = new ResizeObserver((entries) => {
+                    const width = entries[0]?.contentRect?.width || 0;
+                    if (width !== lastWidth) {
+                        lastWidth = width;
+                        updateHeight();
+                    }
+                });
+                resizeObserver.observe(textarea);
 
                 // Enter to send
                 textarea.addEventListener('keydown', (e) => {
@@ -89,12 +125,14 @@ Object.assign(window.ChatComponent.prototype, {
                 return {
                     element: composer,
                     cleanup: () => {
+                        resizeObserver.disconnect();
                         this._dockHandle = null;
                     }
                 };
             },
             focusSelector: '#chat-dock-input',
         });
+
 
         // Dock content is visible via is-dock-active class.
         // Do NOT call setDockPeekOpen(true) — that would show the main bar.
@@ -126,6 +164,12 @@ Object.assign(window.ChatComponent.prototype, {
             return;
         }
 
+        // Clear autosave
+        const saveKey = this.state.activeChatGroupId ? `chat-autosave-group-${this.state.activeChatGroupId}` : (this.state.activeChatCharacterHash ? `chat-autosave-char-${this.state.activeChatCharacterHash}` : null);
+        if (saveKey) {
+            localStorage.removeItem(saveKey);
+        }
+
         textarea.value = '';
         textarea.style.height = '24px';
 
@@ -135,4 +179,5 @@ Object.assign(window.ChatComponent.prototype, {
 
         this._sendMessage(content);
     }
+
 });

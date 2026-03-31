@@ -6,6 +6,88 @@
 
     const proto = AlbumComponent.prototype;
 
+    const normalizeTaskId = (taskOrId) => {
+        if (taskOrId && typeof taskOrId === 'object') {
+            return String(taskOrId.task_id || taskOrId.taskId || '').trim();
+        }
+        return String(taskOrId || '').trim();
+    };
+
+    const getTaskConfig = (task) => {
+        if (!task || typeof task !== 'object') return {};
+        const cfg = task.generation_config;
+        return (cfg && typeof cfg === 'object') ? cfg : {};
+    };
+
+    const getPlaceholderTitle = (task) => {
+        const cfg = getTaskConfig(task);
+        const workflowType = String(cfg.workflow_type || cfg._workflow_type || '').trim().toLowerCase();
+        const workflowTemplate = String(cfg.workflow_template || cfg._workflow_template || '').trim().toLowerCase();
+        if (workflowType === 'hires_input_image' || workflowType === 'hires_input_image_lora') return 'Hires x2';
+        if (workflowType.includes('hires') || workflowTemplate.includes('hiresfix')) return 'Đang tạo ảnh hires';
+        if (workflowType === 'dasiwa_wan2_i2v') return 'Đang tạo video';
+        return 'Đang tạo ảnh';
+    };
+
+    const getPlaceholderPhase = (task) => {
+        const cfg = getTaskConfig(task);
+        const workflowType = String(cfg.workflow_type || cfg._workflow_type || '').trim().toLowerCase();
+        const workflowTemplate = String(cfg.workflow_template || cfg._workflow_template || '').trim().toLowerCase();
+        const message = String(task?.progress_message || '').trim();
+        const lowered = message.toLowerCase();
+
+        if (lowered.includes('hàng đợi')) return 'Xếp hàng';
+        if (lowered.includes('khởi tạo')) return 'Khởi tạo';
+        if (lowered.includes('xử lý kết quả')) return 'Hoàn tất';
+        if (lowered.includes('bắt đầu xử lý')) {
+            if (workflowType === 'hires_input_image' || workflowType === 'hires_input_image_lora') return 'Bước 1/2 · Nạp ảnh nguồn';
+            if (workflowType.includes('hires') || workflowTemplate.includes('hiresfix')) return 'Bước 1/2 · Tạo ảnh gốc';
+            return 'Đang xử lý';
+        }
+        if (lowered.includes('đang tạo')) {
+            if (workflowType === 'hires_input_image' || workflowType === 'hires_input_image_lora') return 'Bước 2/2 · Upscale hires';
+            if (workflowType.includes('hires') || workflowTemplate.includes('hiresfix')) return 'Bước 2/2 · Hires fix';
+            return 'Đang tạo';
+        }
+        if (workflowType === 'hires_input_image' || workflowType === 'hires_input_image_lora') return 'Bước 1/2 · Chuẩn bị';
+        if (workflowType.includes('hires') || workflowTemplate.includes('hiresfix')) return 'Bước 1/2 · Chuẩn bị';
+        return 'Đang xử lý';
+    };
+
+    const getTaskWorkflowLabel = (task) => {
+        const directLabel = String(task?.workflow_label || '').trim();
+        if (directLabel) return directLabel;
+        const cfg = getTaskConfig(task);
+        return String(cfg.workflow_template || cfg.workflow_type || cfg._workflow_template || cfg._workflow_type || '').trim();
+    };
+
+    const getTaskNodeSummary = (task) => {
+        const eventType = String(task?.comfy_event_type || '').trim();
+        const queuePositionRaw = Number(task?.queue_position);
+        const queuePosition = Number.isFinite(queuePositionRaw) ? Math.max(0, Math.round(queuePositionRaw)) : null;
+        const nodeLabel = String(task?.current_node_label || task?.current_node_type || '').trim();
+        const stepValueRaw = Number(task?.step_value);
+        const stepMaxRaw = Number(task?.step_max);
+        const stepValue = Number.isFinite(stepValueRaw) ? Math.max(0, Math.round(stepValueRaw)) : null;
+        const stepMax = Number.isFinite(stepMaxRaw) ? Math.max(0, Math.round(stepMaxRaw)) : null;
+
+        if (eventType === 'queued') {
+            if (queuePosition !== null && queuePosition > 0) return `Queue - ${queuePosition} ahead`;
+            return 'Queue - waiting';
+        }
+
+        if (nodeLabel) {
+            if (stepValue !== null && stepMax !== null && stepMax > 0) {
+                return `${nodeLabel} - ${stepValue}/${stepMax}`;
+            }
+            return `${nodeLabel} - ...`;
+        }
+
+        const message = String(task?.progress_message || '').trim();
+        if (message) return message;
+        return 'Preparing - ...';
+    };
+
     Object.assign(proto, {
         async loadAndDisplayCharacterAlbum() {
             try {
@@ -63,6 +145,41 @@
                 const { last_config } = await this.api.album.get(`/comfyui/info?character_hash=${this.state.selectedCharacter.hash}`);
                 const payload = { ...last_config, ...configOverrides, character: this.state.selectedCharacter.name };
                 this._normalizeGenerationPayload(payload, configOverrides);
+
+                try {
+                    const explicitWorkflowType = String(configOverrides.workflow_type || configOverrides._workflow_type || '').trim().toLowerCase();
+                    const explicitWorkflowTemplate = String(configOverrides.workflow_template || configOverrides._workflow_template || '').trim().toLowerCase();
+                    const explicitInputImage = String(configOverrides._input_image_name || '').trim();
+                    const explicitHires = (
+                        configOverrides.hires_enabled === true ||
+                        explicitWorkflowType.includes('hires') ||
+                        explicitWorkflowTemplate.includes('hiresfix') ||
+                        Boolean(explicitInputImage)
+                    );
+
+                    if (!explicitHires) {
+                        const workflowType = String(payload.workflow_type || payload._workflow_type || '').trim().toLowerCase();
+                        const workflowTemplate = String(payload.workflow_template || payload._workflow_template || '').trim().toLowerCase();
+                        const staleHiresWorkflow = (
+                            workflowType.includes('hires') ||
+                            workflowTemplate.includes('hiresfix') ||
+                            Boolean(payload._input_image_name)
+                        );
+
+                        if (staleHiresWorkflow) {
+                            payload.hires_enabled = false;
+                            try { delete payload.workflow_template; } catch { }
+                            try { delete payload._workflow_template; } catch { }
+                            try { delete payload._workflow_type; } catch { }
+                            try { delete payload._input_image_name; } catch { }
+                            try { delete payload._input_image_width; } catch { }
+                            try { delete payload._input_image_height; } catch { }
+                            if (typeof payload.workflow_type === 'string' && payload.workflow_type.trim().toLowerCase().includes('hires')) {
+                                payload.workflow_type = 'standard';
+                            }
+                        }
+                    }
+                } catch { }
 
                 // Album grid view must never request alpha/transparent output.
                 // The backend's /comfyui/info merges the latest image's generationConfig.
@@ -140,11 +257,9 @@
                     if (emptyMsg) emptyMsg.style.display = 'none';
 
                     runningTasksForChar.forEach(task => {
-                        const placeholder = this._createPlaceholderCard(task.task_id);
+                        const placeholder = this._createPlaceholderCard(task);
                         grid.prepend(placeholder); // Luôn thêm vào đầu
-                        // Cập nhật ngay trạng thái cho placeholder vừa tạo
-                        placeholder.querySelector('.plugin-album__progress-bar').style.width = `${task.progress_percent || 0}%`;
-                        placeholder.querySelector('.plugin-album__progress-text').textContent = task.progress_message || '...';
+                        this._updatePlaceholderCardState(placeholder, task);
                     });
                 }
             } catch (e) {
@@ -247,14 +362,20 @@
             return c;
         },
 
-        _createPlaceholderCard(taskId) {
+        _createPlaceholderCard(taskOrId) {
+            const taskId = normalizeTaskId(taskOrId);
             const placeholder = document.createElement('div');
             placeholder.className = 'plugin-album__album-card placeholder-card';
             placeholder.id = taskId;
             // Yuuka: global cancel v1.0
             placeholder.innerHTML = `
-                <div class="plugin-album__progress-bar-container"><div class="plugin-album__progress-bar"></div></div>
-                <div class="plugin-album__progress-text">Đang khởi tạo...</div>
+                <div class="plugin-album__placeholder-body">
+                    <div class="plugin-album__progress-title">workflow</div>
+                    <div class="plugin-album__progress-row">
+                        <div class="plugin-album__progress-bar-container"><div class="plugin-album__progress-bar"></div></div>
+                    </div>
+                    <div class="plugin-album__progress-text">Preparing - ...</div>
+                </div>
                 <button class="plugin-album__cancel-btn" data-task-id="${taskId}"><span class="material-symbols-outlined">stop</span> Hủy</button>
             `;
             placeholder.querySelector('.plugin-album__cancel-btn').addEventListener('click', (e) => {
@@ -263,7 +384,28 @@
                 const currentTaskId = e.currentTarget.dataset.taskId;
                 this.api.generation.cancel(currentTaskId).catch(err => showError(`Lỗi hủy: ${err.message}`));
             });
+            if (taskOrId && typeof taskOrId === 'object') {
+                this._updatePlaceholderCardState(placeholder, taskOrId);
+            }
             return placeholder;
+        },
+
+        _updatePlaceholderCardState(placeholder, task = {}) {
+            if (!placeholder) return;
+            const progressBar = placeholder.querySelector('.plugin-album__progress-bar');
+            const progressTitle = placeholder.querySelector('.plugin-album__progress-title');
+            const progressText = placeholder.querySelector('.plugin-album__progress-text');
+            const rawPercent = Number(task?.progress_percent ?? 0);
+            const progressPercent = Number.isFinite(rawPercent) ? Math.max(0, Math.min(100, rawPercent)) : 0;
+            if (progressBar) {
+                progressBar.style.width = `${progressPercent}%`;
+            }
+            if (progressTitle) {
+                progressTitle.textContent = getTaskWorkflowLabel(task) || getPlaceholderTitle(task);
+            }
+            if (progressText) {
+                progressText.textContent = getTaskNodeSummary(task);
+            }
         },
     });
 })();

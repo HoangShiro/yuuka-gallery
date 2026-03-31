@@ -3,18 +3,29 @@ Object.assign(window.ChatComponent.prototype, {
         const grid = this.container.querySelector('#grid-chat_list');
         grid.innerHTML = '<div class="loader-text">Loading sessions...</div>';
 
+        const tab = this.state.chatListTab || 'single';
+        this.container.querySelectorAll('.chat-list-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+
         try {
             // /sessions already includes group sessions merged in
             const charRes = await this.api['chat'].get('/sessions');
             const sessions = charRes.sessions || [];
 
             grid.innerHTML = '';
-            if (sessions.length === 0) {
-                grid.innerHTML = '<div class="empty-state">No active chats. Start one from Home!</div>';
+            
+            const filteredSessions = sessions.filter(s => {
+                if (tab === 'group') return s.is_group;
+                return !s.is_group;
+            });
+
+            if (filteredSessions.length === 0) {
+                grid.innerHTML = `<div class="empty-state">No ${tab} chats yet.</div>`;
                 return;
             }
 
-            sessions.forEach(s => {
+            filteredSessions.forEach(s => {
                 if (s.is_group) {
                     grid.appendChild(this._renderGroupSessionCard(s));
                     return;

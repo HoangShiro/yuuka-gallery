@@ -19,7 +19,7 @@ from .layers import (
 )
 
 
-FUNCTIONAL_TYPES = ("cafe", "shop", "park", "shrine", "school", "library", "gym", "arcade", "hospital", "office", "factory", "studio")
+FUNCTIONAL_TYPES = ("cafe", "shop", "park", "shrine", "school", "library", "gym", "arcade", "hospital", "office", "factory", "studio", "museum", "cinema")
 HOUSE_BASE_SIZE = (28, 22)
 BUILDING_FOOTPRINTS = {
     "house": (1, 1),
@@ -35,6 +35,9 @@ BUILDING_FOOTPRINTS = {
     "office": (2, 2),
     "factory": (3, 3),
     "studio": (2, 1),
+    "builder_hq": (2, 2),
+    "museum": (3, 2),
+    "cinema": (3, 2),
 }
 BUILDING_SIZES = {
     building_type: (
@@ -57,6 +60,9 @@ FIXED_CAPACITY = {
     "office": 20,
     "factory": 30,
     "studio": 10,
+    "builder_hq": 12,
+    "museum": 24,
+    "cinema": 28,
 }
 VALID_PERSONALITIES = {"Balanced", "Introverted", "Extroverted"}
 LAYER_SEQUENCE = (
@@ -233,6 +239,8 @@ class WorldGenerator:
         office = scale * 0.6
         factory = scale * 0.4
         studio = scale * 0.3
+        museum = scale * 0.22
+        cinema = scale * 0.28
 
         if self.personality == "Extroverted":
             cafe *= 1.6
@@ -241,12 +249,14 @@ class WorldGenerator:
             gym *= 1.3
             office *= 1.4
             studio *= 1.5
+            cinema *= 1.6
         elif self.personality == "Introverted":
             park *= 1.5
             shrine *= 1.5
             library *= 1.5
             factory *= 1.5
             office *= 1.2
+            museum *= 1.5
 
         self.building_counts["cafe"] = max(1, round(cafe))
         self.building_counts["shop"] = max(1, round(shop))
@@ -260,6 +270,8 @@ class WorldGenerator:
         self.building_counts["office"] = max(1, round(office))
         self.building_counts["factory"] = max(1, round(factory))
         self.building_counts["studio"] = max(1, round(studio))
+        self.building_counts["museum"] = max(1, round(museum))
+        self.building_counts["cinema"] = max(1, round(cinema))
 
     def _calculate_map_size(self) -> None:
         total_buildings = sum(self.building_counts.values())
@@ -892,6 +904,17 @@ class WorldGenerator:
             score += candidate["primaryDist"] * 0.20
             score -= candidate["frontage"] * 18.0
             score -= candidate["junctionScore"] * 0.3
+        elif building_type in {"library", "museum", "hospital"}:
+            score += candidate["junctionScore"] * 1.0
+            score -= candidate["junctionIndex"] * 40.0
+            score -= abs(candidate["ring"] - 2.8) * 70.0
+            score += min(candidate["primaryDist"], 180.0) * 0.10
+            score -= candidate["frontage"] * 6.0
+        elif building_type in {"gym", "arcade", "cinema"}:
+            score += candidate["junctionScore"] * 1.8
+            score -= candidate["junctionIndex"] * 100.0
+            score -= abs(candidate["ring"] - 1.8) * 52.0
+            score -= candidate["primaryDist"] * 0.18
 
         return score
 
@@ -1917,7 +1940,7 @@ class WorldGenerator:
     def _district_type_for_building(building_type: str) -> str:
         if building_type in {"park"}:
             return "nature"
-        if building_type in {"cafe", "shop", "shrine"}:
+        if building_type in {"cafe", "shop", "shrine", "gym", "arcade", "museum", "cinema"}:
             return "entertainment"
         return "residential"
 

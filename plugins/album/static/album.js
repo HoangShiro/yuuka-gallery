@@ -401,10 +401,14 @@ class AlbumComponent {
 
                 const placeholder = document.getElementById(task.task_id);
                 if (placeholder) {
-                    placeholder.querySelector('.plugin-album__progress-bar').style.width = `${task.progress_percent || 0}%`;
-                    placeholder.querySelector('.plugin-album__progress-text').textContent = task.progress_message || '...';
+                    if (typeof this._updatePlaceholderCardState === 'function') {
+                        this._updatePlaceholderCardState(placeholder, task);
+                    } else {
+                        placeholder.querySelector('.plugin-album__progress-bar').style.width = `${task.progress_percent || 0}%`;
+                        placeholder.querySelector('.plugin-album__progress-text').textContent = task.progress_message || '...';
+                    }
                 } else if (grid) {
-                    const newPlaceholder = this._createPlaceholderCard?.(task.task_id);
+                    const newPlaceholder = this._createPlaceholderCard?.(task);
                     if (newPlaceholder) {
                         grid.prepend(newPlaceholder);
                         const emptyMsg = grid.querySelector('.plugin-album__empty-msg');
@@ -431,7 +435,7 @@ class AlbumComponent {
             if (this.state.viewMode === 'album' && this.state.selectedCharacter?.hash === charHash) {
                 const grid = this.contentArea?.querySelector('.plugin-album__grid');
                 if (grid && !document.getElementById(taskId)) {
-                    const placeholder = this._createPlaceholderCard?.(taskId);
+                    const placeholder = this._createPlaceholderCard?.(payload);
                     if (placeholder) {
                         grid.prepend(placeholder);
                         const emptyMsg = grid.querySelector('.plugin-album__empty-msg');

@@ -6,11 +6,9 @@ Object.assign(window.ChatComponent.prototype, {
     },
 
     _setStreamingUI(isStreaming) {
-        // Disable the dock input if available
+        // Keep the dock input enabled even while streaming so users can type drafts
         const dockInput = document.querySelector('#chat-dock-input');
-        if (dockInput) {
-            dockInput.disabled = isStreaming;
-        }
+        
         // Change send button icon
         const dockSendBtn = dockInput?.parentElement?.querySelector('.nav-btn--submit');
         if (dockSendBtn) {
@@ -142,7 +140,43 @@ Object.assign(window.ChatComponent.prototype, {
         const session = this.state.activeChatSession;
         if (!session) return;
 
-        // In group mode, delegate entirely to the group-aware version
+        // Location UI — Shared across both modes
+        const locLabel = this.container.querySelector('#inventory-location-label');
+        if (locLabel) {
+            let currentLoc = "";
+            if (this.state.activeChatGroupId) {
+                currentLoc = session.location || "";
+            } else {
+                const charHash = this.state.activeChatCharacterHash;
+                const cs = window.HistoryStateEngine.ensureCharState(session, charHash);
+                currentLoc = cs.location || "";
+            }
+            locLabel.value = currentLoc || "Unknown";
+
+            // Add auto-save if not already bound — handles both modes internally
+            if (!locLabel._bound) {
+                locLabel.addEventListener('input', () => {
+                    const newLoc = locLabel.value.trim();
+                    const s = this._getActiveSession();
+                    if (!s) return;
+                    
+                    if (this.state.activeChatGroupId) {
+                        s.location = newLoc;
+                        this._saveSession();
+                    } else {
+                        const ch = this.state.activeChatCharacterHash;
+                        if (ch) {
+                            const cs = window.HistoryStateEngine.ensureCharState(s, ch);
+                            cs.location = newLoc;
+                            this._saveSession();
+                        }
+                    }
+                });
+                locLabel._bound = true;
+            }
+        }
+
+        // In group mode, delegate character-specific UI to the group-aware version
         if (this.state.activeChatGroupId) {
             const activeHash = this.state.activeGroupInventoryCharHash;
             if (activeHash && this._syncGroupStatusToUI) {
@@ -221,34 +255,6 @@ Object.assign(window.ChatComponent.prototype, {
             }
 
             moodContainer.style.display = hasContent ? 'flex' : 'none';
-        }
-
-        // Location UI
-        const locLabel = this.container.querySelector('#inventory-location-label');
-        if (locLabel) {
-            locLabel.value = cs.location || "Unknown";
-
-            // Add auto-save if not already bound
-            if (!locLabel._bound) {
-                locLabel.addEventListener('input', () => {
-                    const newLoc = locLabel.value.trim();
-                    const session = this._getActiveSession();
-                    if (!session) return;
-                    
-                    if (this.state.activeChatGroupId) {
-                        session.location = newLoc;
-                        this._saveSession();
-                    } else {
-                        const charHash = this.state.activeChatCharacterHash;
-                        if (charHash) {
-                            const state = window.HistoryStateEngine.ensureCharState(session, charHash);
-                            state.location = newLoc;
-                            this._saveSession();
-                        }
-                    }
-                });
-                locLabel._bound = true;
-            }
         }
 
         // Stamina UI

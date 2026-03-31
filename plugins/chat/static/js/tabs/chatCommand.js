@@ -467,6 +467,9 @@ Object.assign(window.ChatComponent.prototype, {
                 if (isGiftOnly) {
                     // Pure gift command: delegate fully to group gift handler
                     textarea.value = '';
+                    if (this.state.activeChatGroupId) {
+                        localStorage.removeItem(`chat-autosave-group-${this.state.activeChatGroupId}`);
+                    }
                     const addBtn = textarea.parentElement?.querySelector('.nav-btn--system-action');
                     if (addBtn) addBtn.classList.remove('is-hidden');
                     this._executeGroupGiftAction(itemDef);
@@ -493,6 +496,9 @@ Object.assign(window.ChatComponent.prototype, {
             if (currentText === '@gift') {
                 // Pure @gift with no other text — clear textarea, pending action will be sent on next Send
                 textarea.value = '';
+                if (this.state.activeChatCharacterHash) {
+                    localStorage.removeItem(`chat-autosave-char-${this.state.activeChatCharacterHash}`);
+                }
                 textarea.style.height = '24px';
                 const addBtn = textarea.parentElement?.querySelector('.nav-btn--system-action');
                 if (addBtn) addBtn.classList.remove('is-hidden');

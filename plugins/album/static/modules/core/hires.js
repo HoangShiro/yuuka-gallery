@@ -77,8 +77,6 @@
                 throw new Error(response?.error || 'Không thể bắt đầu hires.');
             }
 
-            Yuuka.events.emit('generation:task_created_locally', response);
-
             if (placeholder) {
                 placeholder.id = response.task_id;
                 const cancelButton = placeholder.querySelector('.plugin-album__cancel-btn');
@@ -86,6 +84,8 @@
                     cancelButton.dataset.taskId = response.task_id;
                 }
             }
+
+            Yuuka.events.emit('generation:task_created_locally', response);
         } catch (err) {
             if (placeholder) {
                 placeholder.remove();

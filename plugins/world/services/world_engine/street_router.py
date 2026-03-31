@@ -70,6 +70,7 @@ class StreetRouter:
         self._graph = {}
         self._nodes = {}
         self._location_frontages = {}
+        self._location_centers = {}
         self._route_cache = {}
         self._build(map_data or {})
 
@@ -118,6 +119,10 @@ class StreetRouter:
                     breakpoints[right["id"]].append((right_t, point))
 
         for loc in locations:
+            self._location_centers[int(loc["id"])] = {
+                "x": float(loc["x"]),
+                "y": float(loc["y"]),
+            }
             loc_frontages = []
             for frontage in loc.get("frontages", []):
                 road_point = frontage.get("roadPt")
@@ -228,6 +233,10 @@ class StreetRouter:
         to_frontages = self.get_location_frontages(to_location_id)
         if not from_frontages or not to_frontages:
             return None
+        from_center = self._location_centers.get(int(from_location_id))
+        to_center = self._location_centers.get(int(to_location_id))
+        if not from_center or not to_center:
+            return None
 
         best = None
         for source in from_frontages:
@@ -235,22 +244,23 @@ class StreetRouter:
                 road_distance, node_path = self._shortest_path(source["node_id"], target["node_id"])
                 if road_distance is None:
                     continue
-                total_distance = road_distance + _point_distance(source["edgePt"], source["roadPt"]) + _point_distance(
-                    target["roadPt"], target["edgePt"]
-                )
+                path_points = [dict(from_center), dict(source["edgePt"]), dict(source["roadPt"])]
+                for node_id in node_path[1:-1]:
+                    node = self._nodes[node_id]
+                    path_points.append({"x": node["x"], "y": node["y"]})
+                path_points.extend([dict(target["roadPt"]), dict(target["edgePt"]), dict(to_center)])
+
+                dedup = []
+                for point in path_points:
+                    if dedup and _point_distance(dedup[-1], point) <= 1e-6:
+                        continue
+                    dedup.append(point)
+
+                total_distance = 0.0
+                for idx in range(len(dedup) - 1):
+                    total_distance += _point_distance(dedup[idx], dedup[idx + 1])
+
                 if best is None or total_distance < best["distance_px"]:
-                    path_points = [dict(source["edgePt"]), dict(source["roadPt"])]
-                    for node_id in node_path[1:-1]:
-                        node = self._nodes[node_id]
-                        path_points.append({"x": node["x"], "y": node["y"]})
-                    path_points.extend([dict(target["roadPt"]), dict(target["edgePt"])])
-
-                    dedup = []
-                    for point in path_points:
-                        if dedup and _point_distance(dedup[-1], point) <= 1e-6:
-                            continue
-                        dedup.append(point)
-
                     best = {
                         "from_location": int(from_location_id),
                         "to_location": int(to_location_id),

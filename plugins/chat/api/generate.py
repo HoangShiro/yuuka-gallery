@@ -93,6 +93,18 @@ def _build_persona_prompt(data, plugin=None, user_hash=None):
 
     return "\n\n".join(prompt_parts)
 
+
+def _extract_chat_text(response):
+    text = ""
+    if isinstance(response, dict) and "choices" in response:
+        text = response["choices"][0].get("message", {}).get("content", "")
+    elif hasattr(response, 'choices') and len(response.choices) > 0:
+        if isinstance(response.choices[0], dict):
+            text = response.choices[0].get("message", {}).get("content", "")
+        else:
+            text = response.choices[0].message.content
+    return text or ""
+
 def register_routes(blueprint, plugin):
     @blueprint.route('/generate/models', methods=['GET'])
     def list_models():
@@ -345,6 +357,231 @@ def register_routes(blueprint, plugin):
             
             return Response(stream_with_context(generate()), mimetype='text/plain')
             
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": str(e)}), 500
+
+    @blueprint.route('/generate/discord_bridge', methods=['POST'])
+    def generate_discord_bridge():
+        try:
+            data = request.json or {}
+
+            bridge_key = os.getenv("CHAT_BRIDGE_KEY", "").strip()
+            request_bridge_key = str(request.headers.get("X-Discord-Bot-Bridge-Key", "")).strip()
+            trusted_bridge = bool(bridge_key and request_bridge_key and request_bridge_key == bridge_key)
+
+            # Allow localhost bridge requests when no bridge key is configured
+            if not trusted_bridge and not bridge_key and request.remote_addr == '127.0.0.1':
+                trusted_bridge = True
+
+            if trusted_bridge:
+                user_hash = str(data.get("user_hash", "")).strip()
+                if not user_hash:
+                    return jsonify({"error": "Missing user_hash for trusted bridge request."}), 400
+
+                mode = data.get('mode')
+                if mode in {'summarize_conversation', 'summarize_actor'}:
+                    history_text = data.get('history', '')
+                    if not history_text:
+                        return jsonify({"status": "ignored", "reason": "empty_history"})
+                    
+                    if mode == 'summarize_conversation':
+                        system_content = "You are a professional conversation summarizer. Summarize the provided history into a single concise paragraph (max 3 sentences). Output ONLY the summary text."
+                    else:
+                        actor_name = data.get('actor_name', 'This user')
+                        system_content = f"You are a specialized character memory system. Summarize these recent messages from {actor_name} into a single concise paragraph of facts/traits about them. Output ONLY the summary text."
+
+                    summarize_prompt = [
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": f"History:\n{history_text}"}
+                    ]
+                    
+                    model = data.get('model') or 'deepseek-v3.1:671b-cloud'
+                    summary_resp = plugin.core_api.ai_service.request(
+                        provider='ollama', 
+                        operation='chat',
+                        payload={'model': model, 'messages': summarize_prompt}, 
+                        user_hash=user_hash
+                    )
+                    summary_text = _extract_chat_text(summary_resp).strip()
+                    return jsonify({"status": "success", "summary": summary_text, "mode": mode})
+            else:
+                user_hash = plugin.core_api.verify_token_and_get_user_hash()
+
+            character_id = str(data.get('character_id') or '').strip()
+            user_message = str(data.get('user_message') or '').strip()
+            session_id = str(data.get('session_id') or '').strip()
+            reset_session = bool(data.get('reset_session', False))
+
+            if not character_id:
+                return jsonify({"error": "character_id is required."}), 400
+
+            if not session_id:
+                session_id = f"bridge:{character_id}"
+
+            personas = plugin.get_all_personas(user_hash)
+            characters = personas.get("characters", {}) if isinstance(personas, dict) else {}
+            users = personas.get("users", {}) if isinstance(personas, dict) else {}
+            character = characters.get(character_id)
+            if not character:
+                return jsonify({"error": f"Character '{character_id}' not found."}), 404
+
+            user_persona_id = data.get('user_persona_id')
+            user_persona_obj = users.get(user_persona_id, {}) if user_persona_id else {}
+
+            if reset_session:
+                session_data = {
+                    "id": session_id,
+                    "messages": [],
+                    "discord_context": data.get('discord_context', {}),
+                    "updated_at": 0,
+                }
+                saved = plugin.save_session(user_hash, character_id, session_id, session_data)
+                return jsonify({"status": "success", "session_id": saved.get("id", session_id), "reset": True})
+
+            if not user_message:
+                return jsonify({"error": "user_message is required."}), 400
+
+            existing_session = plugin.get_session(user_hash, character_id, session_id) or {}
+            history = list(existing_session.get('messages') or [])
+
+            discord_context = data.get('discord_context', {})
+            if not isinstance(discord_context, dict):
+                discord_context = {}
+
+            # JS puts base info in the 'base' dictionary
+            base_ctx = discord_context.get('base', {})
+            guild_name = str(base_ctx.get('guild_name') or discord_context.get('guild_name') or 'DM')
+            channel_name = str(base_ctx.get('channel_name') or discord_context.get('channel_name') or 'unknown-channel')
+            author_tag = str(base_ctx.get('author_tag') or discord_context.get('author_tag') or data.get('user_name') or 'User')
+            author_name = str(base_ctx.get('author_name') or author_tag)
+
+            if not user_message.startswith(f"{author_name}: "):
+                user_message = f"{author_name}: {user_message}"
+
+            user_turn = {
+                'role': 'user',
+                'content': user_message,
+            }
+            history.append(user_turn)
+
+            compact_history = []
+            for m in history:
+                if isinstance(m, dict) and m.get('role') in {'system', 'user', 'assistant'} and m.get('content'):
+                    compact_history.append(dict(m))
+            compact_history = compact_history[-24:]
+
+            author_id = str(base_ctx.get('author_id') or discord_context.get('author_id') or 'unknown')
+            memo_ctx = discord_context.get('long_memo_context', {})
+            
+            # Enrich the actual user prompt rather than the system prompt
+            if compact_history and compact_history[-1]['role'] == 'user':
+                user_info_lines = [
+                    "",
+                    "<user_info>",
+                    f"Name: {author_name}",
+                    f"Discord UID: {author_id}"
+                ]
+                actor_global = (memo_ctx.get('actor_global_summary') or {}).get('summary')
+                if actor_global:
+                    user_info_lines.append(f"Fact about {author_name}: {actor_global}")
+                user_info_lines.append("</user_info>")
+                compact_history[-1]['content'] += "\n".join(user_info_lines)
+
+            # Extract memory context elements
+            info_ctx = discord_context.get('info_context', {})
+            facts = discord_context.get('selected_facts', [])
+
+            ctx_lines = [
+                "<discord_context>",
+                f"Guild/Server: {guild_name}",
+                f"Channel: {channel_name}",
+            ]
+
+            # Format context blocks
+            voice_info = info_ctx.get('voice')
+            if voice_info:
+                ctx_lines.append(f"Speaker Voice Activity: in '{voice_info.get('voice_channel_name')}' with {voice_info.get('member_count', 0)} members.")
+
+            conv_summary = (memo_ctx.get('conversation_summary') or {}).get('summary')
+            if conv_summary:
+                ctx_lines.append(f"Conversation Summary: {conv_summary}")
+
+            actor_summaries = memo_ctx.get('actor_summaries', [])
+            relevant_participants = [a for a in actor_summaries if str(a.get('actor_uid')) != author_id]
+            if relevant_participants:
+                ctx_lines.append("Recent Participants in channel:")
+                for p in relevant_participants:
+                    p_name = p.get('actor_name') or f"User-{p.get('actor_uid')}"
+                    p_summ = p.get('summary')
+                    if p_summ:
+                        ctx_lines.append(f" - {p_name}: {p_summ}")
+
+            if facts and isinstance(facts, list):
+                ctx_lines.append("Recent Environment Facts:")
+                for fact in facts[:5]:
+                    ctx_lines.append(f" - {fact.get('value', '')}")
+
+            ctx_lines.append("</discord_context>")
+
+            bridge_system = "\n".join(ctx_lines)
+
+            prompt_data = {
+                'character_name': character.get('name', 'Character'),
+                'character_persona': character.get('persona', ''),
+                'character_appearance': character.get('appearance', []),
+                'chat_sample': character.get('chat_sample', ''),
+                'user_name': data.get('user_name') or author_tag,
+                'user_persona': user_persona_obj.get('persona', '') if isinstance(user_persona_obj, dict) else '',
+                'system_prompt': bridge_system,
+                'session_state': data.get('session_state') or {},
+            }
+            system_prompt = _build_persona_prompt(prompt_data, plugin, user_hash)
+
+            model = data.get('model') or 'deepseek-v3.1:671b-cloud'
+            kwargs = {}
+            try:
+                temp = float(data.get('temperature', -1))
+                if temp != -1:
+                    kwargs['temperature'] = temp
+            except Exception:
+                pass
+
+            llm_messages = [{'role': 'system', 'content': system_prompt}]
+            llm_messages.extend(compact_history)
+
+            response = plugin.core_api.ai_service.request(
+                provider='ollama',
+                operation='chat',
+                payload={
+                    'model': model,
+                    'messages': llm_messages,
+                    'timeout': 60,
+                    'kwargs': kwargs,
+                },
+                user_hash=user_hash,
+            )
+            text = _extract_chat_text(response).strip()
+
+            if not text:
+                return jsonify({"error": "Empty response from model."}), 502
+
+            history.append({'role': 'assistant', 'content': text})
+            session_data = {
+                'id': session_id,
+                'messages': history[-40:],
+                'discord_context': discord_context,
+            }
+            saved_session = plugin.save_session(user_hash, character_id, session_id, session_data)
+
+            return jsonify({
+                "status": "success",
+                "session_id": saved_session.get('id', session_id),
+                "character_id": character_id,
+                "response": text,
+                "llm_input": llm_messages,
+            })
         except Exception as e:
             import traceback
             traceback.print_exc()

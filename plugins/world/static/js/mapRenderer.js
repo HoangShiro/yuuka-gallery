@@ -10,8 +10,15 @@ class MapRenderer {
         this._simulationSpeed = 1;
         this._lastSnapshotAtMs = performance.now();
         this._npcInterp = {};
+        this._moveBridgeInterp = {};
+        this._layoutInterp = {};
+        this._pairLayoutInterp = {};
+        this._pairMemberInterp = {};
         this._avatarCache = {};
+        this._paused = false;
         this._animationHandle = null;
+        this._timeSkipMode = false;
+        this._lastAnimatedDrawAtMs = 0;
 
         this._tx = 0;
         this._ty = 0;
@@ -113,6 +120,13 @@ class MapRenderer {
             gym: "#d4a373",
             arcade: "#846bb1",
             hospital: "#e6f2f2",
+            office: "#90a4ae",
+            factory: "#9aa0a6",
+            studio: "#c97bb4",
+            builder_hq: "#d0a85b",
+            construction_site: "#c78f3f",
+            museum: "#7aa6c2",
+            cinema: "#7a4b63",
         }[type] || "#a0a4a8";
     }
 
@@ -128,6 +142,13 @@ class MapRenderer {
             gym: "#9e774f",
             arcade: "#594380",
             hospital: "#accad1",
+            office: "#647781",
+            factory: "#6b7076",
+            studio: "#8f4d7f",
+            builder_hq: "#8f7132",
+            construction_site: "#8e6527",
+            museum: "#56768b",
+            cinema: "#5b3248",
         }[type] || "#707070";
     }
 
@@ -137,6 +158,8 @@ class MapRenderer {
             sleep: "#1565c0",
             socialize: "#c2185b",
             relax: "#2e7d32",
+            study: "#6d4cbb",
+            birth_prep: "#d81b60",
             walk: "#f9a825",
             run: "#ef5350",
             idle: "#9e9e9e",
@@ -858,6 +881,13 @@ class MapRenderer {
             gym: "🏋️",
             arcade: "🕹️",
             hospital: "🏥",
+            office: "🏢",
+            factory: "🏭",
+            studio: "🎨",
+            builder_hq: "🦺",
+            construction_site: "🏗️",
+            museum: "🏛️",
+            cinema: "🎬",
         };
 
         const houseOwners = {};
@@ -871,27 +901,35 @@ class MapRenderer {
 
         for (const loc of this.world.locations || []) {
             const { bx: x, by: y, bw, bh, type } = loc;
-
-            ctx.save();
-            ctx.shadowColor = "rgba(0,0,0,0.18)";
-            ctx.shadowBlur = 4;
-            ctx.shadowOffsetX = 1.5;
-            ctx.shadowOffsetY = 2;
             const scaleFactor = 1 / Math.pow(this._scale || 1, 0.6);
-            ctx.fillStyle = this._buildingFill(type);
-            ctx.strokeStyle = this._buildingStroke(type);
-            ctx.lineWidth = 1 * scaleFactor;
-            this._traceBuildingShape(ctx, loc);
-            ctx.fill();
-            ctx.restore();
+
+            if (type !== "construction_site") {
+                ctx.save();
+                ctx.shadowColor = "rgba(0,0,0,0.18)";
+                ctx.shadowBlur = 4;
+                ctx.shadowOffsetX = 1.5;
+                ctx.shadowOffsetY = 2;
+                ctx.fillStyle = this._buildingFill(type);
+                ctx.strokeStyle = this._buildingStroke(type);
+                ctx.lineWidth = 1 * scaleFactor;
+                this._traceBuildingShape(ctx, loc);
+                ctx.fill();
+                ctx.restore();
+            }
 
             ctx.strokeStyle = this._buildingStroke(type);
             ctx.lineWidth = 1 * scaleFactor;
+            if (type === "construction_site") {
+                ctx.setLineDash([5 * scaleFactor, 3 * scaleFactor]);
+            }
             this._traceBuildingShape(ctx, loc);
             ctx.stroke();
+            if (type === "construction_site") {
+                ctx.setLineDash([]);
+            }
 
             // Add simple roof ridge line or inner detail to sell the "roof" look
-            if (type !== "park") {
+            if (type !== "park" && type !== "construction_site") {
                 ctx.save();
                 ctx.strokeStyle = "rgba(255,255,255,0.15)";
                 ctx.lineWidth = 1.5 * scaleFactor;
@@ -923,6 +961,13 @@ class MapRenderer {
             gym: "🏋️",
             arcade: "🕹️",
             hospital: "🏥",
+            office: "🏢",
+            factory: "🏭",
+            studio: "🎨",
+            builder_hq: "🦺",
+            construction_site: "🏗️",
+            museum: "🏛️",
+            cinema: "🎬",
         };
 
         const houseOwners = {};
@@ -960,7 +1005,66 @@ class MapRenderer {
                 ctx.textBaseline = "top";
                 ctx.fillText(displayName, loc.x, loc.y + 2 * scaleFactor);
             }
+
+            if (type === "construction_site") {
+                this._drawConstructionProgress(ctx, loc, scaleFactor);
+            }
         }
+    }
+
+    _drawConstructionProgress(ctx, loc, scaleFactor) {
+        const required = Number(loc.construction_required_hours) || 0;
+        const progress = Number(loc.construction_progress_hours) || 0;
+        if (required <= 0) return;
+
+        const pct = Math.max(0, Math.min(1, progress / required));
+        const pctText = `${Math.round(pct * 100)}%`;
+        const label = `🏗 ${pctText}`;
+        const fontSize = Math.max(4, 7 * scaleFactor);
+        const pillH = Math.max(11, 13 * scaleFactor);
+        const y = loc.y - loc.bh * 0.52 - pillH * 1.4;
+
+        ctx.save();
+        ctx.font = `700 ${fontSize}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+        const measured = ctx.measureText(label);
+        const pillW = Math.max(24, measured.width + 12 * scaleFactor);
+        const pillX = loc.x - pillW / 2;
+        const radius = pillH / 2;
+
+        ctx.fillStyle = "rgba(64, 40, 10, 0.16)";
+        this._roundRect(ctx, pillX - 2, y - 2, pillW + 4, pillH + 4, radius + 2);
+        ctx.fill();
+
+        const track = ctx.createLinearGradient(pillX, y, pillX, y + pillH);
+        track.addColorStop(0, "#f4dfb7");
+        track.addColorStop(1, "#d4b07b");
+        ctx.fillStyle = track;
+        this._roundRect(ctx, pillX, y, pillW, pillH, radius);
+        ctx.fill();
+
+        if (pct > 0) {
+            ctx.save();
+            this._roundRect(ctx, pillX, y, pillW, pillH, radius);
+            ctx.clip();
+            const fillW = Math.max(pillH, pillW * pct);
+            const fill = ctx.createLinearGradient(pillX, y, pillX + fillW, y);
+            fill.addColorStop(0, "#ffe28f");
+            fill.addColorStop(1, "#d98921");
+            ctx.fillStyle = fill;
+            ctx.fillRect(pillX, y, fillW, pillH);
+            ctx.restore();
+        }
+
+        ctx.strokeStyle = "rgba(110, 69, 19, 0.42)";
+        ctx.lineWidth = Math.max(0.75, 1 * scaleFactor);
+        this._roundRect(ctx, pillX, y, pillW, pillH, radius);
+        ctx.stroke();
+
+        ctx.fillStyle = "#6e4513";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, loc.x, y + pillH / 2 + 0.5);
+        ctx.restore();
     }
 
     _getAvatar(hash) {
@@ -1071,6 +1175,17 @@ class MapRenderer {
                     house: "🏠",
                     shrine: "⛩",
                     school: "🏫",
+                    library: "📚",
+                    gym: "🏋️",
+                    arcade: "🕹️",
+                    hospital: "🏥",
+                    office: "🏢",
+                    factory: "🏭",
+                    studio: "🎨",
+                    builder_hq: "🦺",
+                    construction_site: "🏗️",
+                    museum: "🏛️",
+                    cinema: "🎬",
                 };
                 const iconStr = iconMap[targetLoc.type] || "📍";
                 ctx.save();
@@ -1119,6 +1234,48 @@ class MapRenderer {
                 ctx.restore();
             }
         }
+
+        if (npc && npc.activity === "birth_prep") {
+            this._drawNpcStatusBadge(ctx, x, y - radius * 1.95, "🏥 Chuẩn bị sinh", "#ff86bf", "#761743");
+        }
+    }
+
+    _drawNpcStatusBadge(ctx, x, y, text, color = "#ff7cc8", textColor = "#6b1240") {
+        const scaleComp = 1 / Math.pow(this._scale || 1, 0.7);
+        const fontSize = Math.max(4, 8.5 * scaleComp);
+        const phase = performance.now() / 260 + x * 0.01 + y * 0.01;
+        const floatOffset = Math.sin(phase) * 1.1;
+        const drawY = y + floatOffset;
+
+        ctx.save();
+        ctx.font = `700 ${fontSize}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+        const metrics = ctx.measureText(text);
+        const width = Math.max(36, metrics.width + fontSize * 1.3);
+        const height = fontSize * 1.65;
+        const left = x - width / 2;
+        const top = drawY - height / 2;
+        const radius = height / 2;
+
+        ctx.fillStyle = "rgba(65, 16, 38, 0.15)";
+        this._roundRect(ctx, left - 2, top - 2, width + 4, height + 4, radius + 2);
+        ctx.fill();
+
+        const fill = ctx.createLinearGradient(left, top, left, top + height);
+        fill.addColorStop(0, "#fff5fb");
+        fill.addColorStop(1, color);
+        ctx.fillStyle = fill;
+        this._roundRect(ctx, left, top, width, height, radius);
+        ctx.fill();
+
+        ctx.fillStyle = "rgba(255,255,255,0.42)";
+        this._roundRect(ctx, left + 2, top + 2, width - 4, height * 0.42, radius * 0.7);
+        ctx.fill();
+
+        ctx.fillStyle = textColor;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, x, drawY + 0.5);
+        ctx.restore();
     }
 
     _pointDistance(left, right) {
@@ -1158,10 +1315,11 @@ class MapRenderer {
         return npc.activity;
     }
 
-    _movingNpcPosition(npc) {
+    _movingNpcPosition(npc, prevPos, now) {
         const movement = npc.movement || {};
         if (!movement.active || !Array.isArray(movement.route_points) || movement.route_points.length < 2) {
             delete this._npcInterp[npc.id];
+            delete this._moveBridgeInterp[npc.id];
             return null;
         }
         if (this._simulationSpeed >= 5) return null;
@@ -1170,7 +1328,6 @@ class MapRenderer {
         const serverProgress = Number(movement.progress_px) || 0;
         const speed = Number(movement.speed_px_per_sec) || 0;
         const totalDist = Number(movement.distance_px) || 0;
-        const now = performance.now();
 
         let interp = this._npcInterp[npcId];
         if (!interp ||
@@ -1194,12 +1351,159 @@ class MapRenderer {
         }
         interp.lastServerProgress = serverProgress;
 
-        const elapsedSec = Math.max(0, (now - interp.baseTime) / 1000);
+        const elapsedSec = this._paused ? 0 : Math.max(0, (now - interp.baseTime) / 1000);
         const progressPx = Math.min(totalDist, interp.baseProgress + speed * elapsedSec);
-        return this._pointAlongPolyline(movement.route_points, progressPx);
+        const routePos = this._pointAlongPolyline(movement.route_points, progressPx);
+
+        const bridgeKey = `${movement.origin_location}:${movement.target_location}:${movement.mode || "walk"}`;
+        let bridge = this._moveBridgeInterp[npcId];
+        if (!bridge || bridge.key !== bridgeKey) {
+            if (prevPos) {
+                const dist = Math.hypot(routePos.x - prevPos.x, routePos.y - prevPos.y);
+                if (dist > 1.5) {
+                    bridge = {
+                        key: bridgeKey,
+                        fromX: prevPos.x,
+                        fromY: prevPos.y,
+                        startAt: now,
+                        durationMs: 220,
+                    };
+                    this._moveBridgeInterp[npcId] = bridge;
+                } else {
+                    delete this._moveBridgeInterp[npcId];
+                    bridge = null;
+                }
+            } else {
+                delete this._moveBridgeInterp[npcId];
+                bridge = null;
+            }
+        }
+
+        if (bridge) {
+            const t = this._paused ? 0 : Math.max(0, Math.min(1, (now - bridge.startAt) / bridge.durationMs));
+            if (t >= 1.0) {
+                delete this._moveBridgeInterp[npcId];
+                return routePos;
+            }
+            const eased = this._easeOutCubic(t);
+            return {
+                x: bridge.fromX + (routePos.x - bridge.fromX) * eased,
+                y: bridge.fromY + (routePos.y - bridge.fromY) * eased,
+            };
+        }
+
+        return routePos;
+    }
+
+    _easeOutCubic(t) {
+        const clamped = Math.max(0, Math.min(1, t));
+        return 1 - Math.pow(1 - clamped, 3);
+    }
+
+    _layoutPoint(entry, now) {
+        const duration = Math.max(1, entry.durationMs || 1);
+        const t = this._paused ? 0 : Math.max(0, Math.min(1, (now - entry.startAt) / duration));
+        const eased = this._easeOutCubic(t);
+        return {
+            x: entry.fromX + (entry.targetX - entry.fromX) * eased,
+            y: entry.fromY + (entry.targetY - entry.fromY) * eased,
+        };
+    }
+
+    _stationaryNpcPosition(npc, target, now, prevPos) {
+        const key = String(npc.id);
+        let entry = this._layoutInterp[key];
+        const targetChanged = !entry ||
+            entry.locId !== npc.current_location ||
+            Math.abs(entry.targetX - target.x) > 0.01 ||
+            Math.abs(entry.targetY - target.y) > 0.01;
+
+        if (targetChanged) {
+            const start = entry
+                ? this._layoutPoint(entry, now)
+                : (prevPos || target);
+            entry = {
+                fromX: start.x,
+                fromY: start.y,
+                targetX: target.x,
+                targetY: target.y,
+                startAt: now,
+                durationMs: npc._arrived_this_tick ? 320 : 240,
+                locId: npc.current_location,
+            };
+            this._layoutInterp[key] = entry;
+        }
+
+        return this._layoutPoint(entry, now);
+    }
+
+    _stationaryPairPosition(pair, target, now, prevNpcRenderPos) {
+        const ids = [Number(pair.a.id), Number(pair.b.id)].sort((a, b) => a - b);
+        const key = `${ids[0]}:${ids[1]}`;
+        let entry = this._pairLayoutInterp[key];
+        const targetChanged = !entry ||
+            entry.locId !== pair.a.current_location ||
+            Math.abs(entry.targetX - target.x) > 0.01 ||
+            Math.abs(entry.targetY - target.y) > 0.01;
+
+        if (targetChanged) {
+            let start = entry ? this._layoutPoint(entry, now) : null;
+            if (!start) {
+                const prevA = prevNpcRenderPos[pair.a.id];
+                const prevB = prevNpcRenderPos[pair.b.id];
+                if (prevA && prevB) {
+                    start = {
+                        x: (prevA.x + prevB.x) / 2,
+                        y: (prevA.y + prevB.y) / 2,
+                    };
+                } else if (prevA || prevB) {
+                    start = prevA || prevB;
+                } else {
+                    start = target;
+                }
+            }
+            entry = {
+                fromX: start.x,
+                fromY: start.y,
+                targetX: target.x,
+                targetY: target.y,
+                startAt: now,
+                durationMs: (pair.a._arrived_this_tick || pair.b._arrived_this_tick) ? 340 : 260,
+                locId: pair.a.current_location,
+            };
+            this._pairLayoutInterp[key] = entry;
+        }
+
+        return { key, pos: this._layoutPoint(entry, now) };
+    }
+
+    _pairMemberPosition(npc, modeKey, target, now, prevPos) {
+        const key = String(npc.id);
+        let entry = this._pairMemberInterp[key];
+        const targetChanged = !entry ||
+            entry.modeKey !== modeKey ||
+            Math.abs(entry.targetX - target.x) > 0.01 ||
+            Math.abs(entry.targetY - target.y) > 0.01;
+
+        if (targetChanged) {
+            const start = entry ? this._layoutPoint(entry, now) : (prevPos || target);
+            entry = {
+                fromX: start.x,
+                fromY: start.y,
+                targetX: target.x,
+                targetY: target.y,
+                startAt: now,
+                durationMs: npc._arrived_this_tick ? 320 : 240,
+                modeKey,
+            };
+            this._pairMemberInterp[key] = entry;
+        }
+
+        return this._layoutPoint(entry, now);
     }
 
     _drawNpcs(ctx) {
+        const previousNpcRenderPos = this._npcRenderPos || {};
         this._npcRenderPos = {};
         const locMap = Object.fromEntries((this.world.locations || []).map((loc) => [loc.id, loc]));
         const stationaryByLoc = {};
@@ -1207,28 +1511,42 @@ class MapRenderer {
         const roadSocialPairs = [];
         const socialPairs = [];
         const handledSocialIds = new Set();
+        const now = performance.now();
+        const usedLayoutKeys = new Set();
+        const usedPairKeys = new Set();
+        const usedPairMemberKeys = new Set();
+        
+        const scaleFactor = 1 / Math.pow(this._scale || 1, 0.6);
+        const radius = 9 * scaleFactor;
+        const spacing = radius * 2.4;
+        const ySpacing = radius * 2.8;
 
         for (const npc of this.npcStates) {
-            const pos = this._movingNpcPosition(npc);
-            if (pos) {
-                moving.push({ npc, pos });
-            } else if (npc.social_pair && !handledSocialIds.has(npc.id)) {
-                // Find partner
-                const partnerId = npc.social_pair.partner_id;
-                const partner = this.npcStates.find(n => n.id === partnerId);
+            if (handledSocialIds.has(npc.id)) continue;
+
+            const partnerId = npc.social_pair?.partner_id;
+            if (partnerId != null) {
+                const partner = this.npcStates.find(n => n.id == partnerId);
                 if (partner) {
                     handledSocialIds.add(npc.id);
                     handledSocialIds.add(partner.id);
                     
-                    if (npc.movement && npc.movement.render_position && !npc.movement.active && npc.movement.render_position.x !== undefined) {
+                    // Priority: If the server says they're paired, they are stationary locally.
+                    // Use render_position as the meeting point if they are on a journey.
+                    const journeyInProgress = npc.movement && Array.isArray(npc.movement.route_points) && npc.movement.route_points.length > 0;
+                    if (journeyInProgress && npc.movement.render_position && npc.movement.render_position.x !== undefined) {
                         roadSocialPairs.push({ a: npc, b: partner, pos: npc.movement.render_position });
                     } else {
                         socialPairs.push({ a: npc, b: partner, locId: npc.current_location });
                     }
-                } else {
-                    (stationaryByLoc[npc.current_location] = stationaryByLoc[npc.current_location] || []).push(npc);
+                    continue;
                 }
-            } else if (!handledSocialIds.has(npc.id)) {
+            }
+
+            const pos = this._movingNpcPosition(npc, previousNpcRenderPos[npc.id], now);
+            if (pos) {
+                moving.push({ npc, pos });
+            } else {
                 (stationaryByLoc[npc.current_location] = stationaryByLoc[npc.current_location] || []).push(npc);
             }
         }
@@ -1237,18 +1555,18 @@ class MapRenderer {
             this._drawNpcMarker(ctx, item.pos.x, item.pos.y, this._npcVisualState(item.npc), item.npc);
             this._npcRenderPos[item.npc.id] = { x: item.pos.x, y: item.pos.y };
         }
-        
         // Group stationary and social pairs by location to draw
-        const scaleFactor = 1 / Math.pow(this._scale || 1, 0.6);
-        const radius = 9 * scaleFactor;
         
         // Draw road social pairs exactly where they met
         for (const pair of roadSocialPairs) {
-            this._drawSocialPair(ctx, pair, pair.pos.x, pair.pos.y, radius);
+            const pairModeKey = `pair:${Math.min(pair.a.id, pair.b.id)}:${Math.max(pair.a.id, pair.b.id)}:road`;
+            this._drawSocialPair(ctx, pair, pair.pos.x, pair.pos.y, radius, {
+                modeKey: pairModeKey,
+                now,
+                previousNpcRenderPos,
+                usedPairMemberKeys,
+            });
         }
-
-        const spacing = radius * 2.4;
-        const ySpacing = radius * 2.8;
         
         // Convert socialPairs into pseudo-NPC items that take up 2 horizontal slots
         for (const pair of socialPairs) {
@@ -1259,12 +1577,7 @@ class MapRenderer {
         for (const [locId, items] of Object.entries(stationaryByLoc)) {
             const loc = locMap[locId];
             if (!loc) continue;
-
-            const scaleFactor = 1 / Math.pow(this._scale || 1, 0.6);
-            const radius = 9 * scaleFactor;
-            const spacing = radius * 2.4;
-            const ySpacing = radius * 2.8;
-
+            
             const maxPerRow = loc.type === "house" ? 3 : 6;
             
             const rows = [];
@@ -1331,36 +1644,120 @@ class MapRenderer {
             
             for (const q of drawQueue) {
                 if (q.item.isPair) {
-                    this._drawSocialPair(ctx, q.item.data, q.x, q.y, radius);
+                    const layout = this._stationaryPairPosition(
+                        q.item.data,
+                        { x: q.x, y: q.y },
+                        now,
+                        previousNpcRenderPos,
+                    );
+                    usedPairKeys.add(layout.key);
+                    const pairModeKey = `pair:${Math.min(q.item.data.a.id, q.item.data.b.id)}:${Math.max(q.item.data.a.id, q.item.data.b.id)}:loc:${q.item.data.a.current_location}`;
+                    this._drawSocialPair(ctx, q.item.data, layout.pos.x, layout.pos.y, radius, {
+                        modeKey: pairModeKey,
+                        now,
+                        previousNpcRenderPos,
+                        usedPairMemberKeys,
+                    });
                 } else {
                     const npc = q.item;
-                    this._drawNpcMarker(ctx, q.x, q.y, this._npcVisualState(npc), npc);
-                    this._npcRenderPos[npc.id] = { x: q.x, y: q.y };
+                    const pos = this._stationaryNpcPosition(
+                        npc,
+                        { x: q.x, y: q.y },
+                        now,
+                        previousNpcRenderPos[npc.id],
+                    );
+                    usedLayoutKeys.add(String(npc.id));
+                    this._drawNpcMarker(ctx, pos.x, pos.y, this._npcVisualState(npc), npc);
+                    this._npcRenderPos[npc.id] = { x: pos.x, y: pos.y };
                 }
             }
         }
+
+        for (const key of Object.keys(this._layoutInterp)) {
+            if (!usedLayoutKeys.has(key)) delete this._layoutInterp[key];
+        }
+        for (const key of Object.keys(this._pairLayoutInterp)) {
+            if (!usedPairKeys.has(key)) delete this._pairLayoutInterp[key];
+        }
+        for (const key of Object.keys(this._pairMemberInterp)) {
+            if (!usedPairMemberKeys.has(key)) delete this._pairMemberInterp[key];
+        }
     }
 
-    _drawSocialPair(ctx, pair, cx, cy, radius) {
+    _drawSocialPair(ctx, pair, cx, cy, radius, options = {}) {
         const offset = radius * 0.6;
-        const x1 = cx - offset;
-        const y1 = cy;
-        const x2 = cx + offset;
-        const y2 = cy;
+        const now = options.now || performance.now();
+        const previousNpcRenderPos = options.previousNpcRenderPos || {};
+        const usedPairMemberKeys = options.usedPairMemberKeys;
+        const modeKey = options.modeKey || `pair:${Math.min(pair.a.id, pair.b.id)}:${Math.max(pair.a.id, pair.b.id)}`;
 
-        // Determine relationship color between the pair
-        const partnerId = String(pair.b.id);
-        const relScore = (pair.a.relationships && pair.a.relationships[partnerId]) || 0.35;
-        const relColor = this._relationshipColor(relScore);
+        const targetA = { x: cx - offset, y: cy };
+        const targetB = { x: cx + offset, y: cy };
+        const posA = this._pairMemberPosition(
+            pair.a,
+            `${modeKey}:a`,
+            targetA,
+            now,
+            previousNpcRenderPos[pair.a.id],
+        );
+        const posB = this._pairMemberPosition(
+            pair.b,
+            `${modeKey}:b`,
+            targetB,
+            now,
+            previousNpcRenderPos[pair.b.id],
+        );
+        if (usedPairMemberKeys) {
+            usedPairMemberKeys.add(String(pair.a.id));
+            usedPairMemberKeys.add(String(pair.b.id));
+        }
+
+        const x1 = posA.x;
+        const y1 = posA.y;
+        const x2 = posB.x;
+        const y2 = posB.y;
+        const centerX = (x1 + x2) / 2;
+        const centerY = (y1 + y2) / 2;
+
+        // Determine relationship color based on the most significant perspective
+        const idA = String(pair.a.id);
+        const idB = String(pair.b.id);
+        const relAtoB = (pair.a.relationships && pair.a.relationships[idB]) || {};
+        const relBtoA = (pair.b.relationships && pair.b.relationships[idA]) || {};
+        
+        const typeOrder = ["partner", "dating", "crush", "enemy", "rival", "close_friend", "friend", "ex", "acquaintance", "stranger"];
+        const priorityA = typeOrder.indexOf(relAtoB.type || "stranger");
+        const priorityB = typeOrder.indexOf(relBtoA.type || "stranger");
+        
+        // Determine the "True" pair status based on mutual ground
+        let bestType = "stranger";
+        const isOfficialLover = ["dating", "partner"].includes(relAtoB.type) || ["dating", "partner"].includes(relBtoA.type);
+        const isEnemy = ["enemy", "rival"].includes(relAtoB.type) || ["enemy", "rival"].includes(relBtoA.type);
+        
+        if (isOfficialLover) {
+            // If either is dating/partner, they are a Lover Pair
+            bestType = (relAtoB.type === "partner" || relBtoA.type === "partner") ? "partner" : "dating";
+        } else if (isEnemy) {
+            // If either is an enemy, mark as Enemy Pair
+            bestType = (relAtoB.type === "enemy" || relBtoA.type === "enemy") ? "enemy" : "rival";
+        } else {
+            // For friendships and crushes, use the "lowest common denominator" (max index)
+            // This prevents a one-sided crush from turning the pair pink
+            const maxIdx = Math.max(priorityA !== -1 ? priorityA : 9, priorityB !== -1 ? priorityB : 9);
+            bestType = typeOrder[maxIdx] || "stranger";
+        }
+        
+        const relColor = this._relationshipColor({type: bestType, trust: (relAtoB.trust + relBtoA.trust) / 2});
         
         ctx.save();
         const barH = radius * 2.2;
         const barW = (x2 - x1) + radius * 2.5;
-        ctx.fillStyle = "rgba(100, 100, 100, 0.4)";
+        // Background color based on relationship (using faint version of relColor)
+        ctx.fillStyle = relColor + "33"; // Approx 20% opacity
         this._roundRect(ctx, x1 - radius * 1.25, y1 - radius * 1.1, barW, barH, barH / 2);
         ctx.fill();
         
-        const progress = pair.a.social_pair.progress || 0;
+        const progress = (pair.a.social_pair && pair.a.social_pair.progress) || 0;
         if (progress > 0) {
             ctx.save();
             this._roundRect(ctx, x1 - radius * 1.25, y1 - radius * 1.1, barW, barH, barH / 2);
@@ -1373,18 +1770,77 @@ class MapRenderer {
         
         this._drawNpcMarker(ctx, x2, y2, "socialize", pair.b, true);
         this._drawNpcMarker(ctx, x1, y1, "socialize", pair.a, true);
+        this._drawSocialPairPreviewBadge(ctx, pair, centerX, centerY, radius);
         
         this._npcRenderPos[pair.a.id] = { x: x1, y: y1 };
         this._npcRenderPos[pair.b.id] = { x: x2, y: y2 };
     }
 
-    _relationshipColor(score) {
-        if (score <= 0.1)  return "#ff4444";  // Kẻ thù — đỏ
-        if (score <= 0.25) return "#ff8844";  // Ghét — cam
-        if (score <= 0.45) return "#aaaaaa";  // Người lạ — xám
-        if (score <= 0.65) return "#88cc44";  // Bạn — xanh lá
-        if (score <= 0.85) return "#44cc88";  // Bạn thân — ngọc lam
-        return "#ff88ff";                     // Người yêu — hồng
+    _drawSocialPairPreviewBadge(ctx, pair, cx, cy, radius) {
+        const badge = pair.a?.social_pair?.preview_badge || pair.b?.social_pair?.preview_badge;
+        if (!badge || !badge.text) return;
+
+        const phase = performance.now() / 220 + ((pair.a?.id || 0) + (pair.b?.id || 0)) * 0.13;
+        const floatOffset = Math.sin(phase) * 1.5;
+        const pulse = 0.78 + (Math.sin(phase * 1.6) + 1) * 0.11;
+        const scaleComp = 1 / Math.pow(this._scale || 1, 0.7);
+        const fontSize = Math.max(4, 10 * scaleComp);
+        const text = badge.text;
+        const y = cy - radius * 2.55 + floatOffset;
+        const color = badge.color || "#ff7cc8";
+        const trendIsUp = badge.trend !== "down";
+
+        ctx.save();
+        ctx.font = `700 ${fontSize}px "Segoe UI Emoji", "Segoe UI", sans-serif`;
+        const metrics = ctx.measureText(text);
+        const width = Math.max(34, metrics.width + fontSize * 1.45);
+        const height = fontSize * 1.75;
+        const left = cx - width / 2;
+        const top = y - height / 2;
+        const radiusPx = height / 2;
+
+        ctx.globalAlpha = 0.18 * pulse;
+        ctx.fillStyle = color;
+        this._roundRect(ctx, left - 3, top - 3, width + 6, height + 6, radiusPx + 3);
+        ctx.fill();
+
+        const fill = ctx.createLinearGradient(left, top, left, top + height);
+        fill.addColorStop(0, trendIsUp ? "#fff4fb" : "#fff6ef");
+        fill.addColorStop(1, color);
+        ctx.globalAlpha = 0.96;
+        ctx.fillStyle = fill;
+        this._roundRect(ctx, left, top, width, height, radiusPx);
+        ctx.fill();
+
+        ctx.globalAlpha = 0.22 + pulse * 0.1;
+        ctx.fillStyle = "#ffffff";
+        this._roundRect(ctx, left + 2, top + 2, width - 4, height * 0.43, radiusPx * 0.72);
+        ctx.fill();
+
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = trendIsUp ? "#7b134f" : "#7a2a18";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, cx, y + 0.5);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.arc(left + 9, y, Math.max(1.2, 1.6 * pulse), 0, Math.PI * 2);
+        ctx.arc(left + width - 9, y, Math.max(1.1, 1.4 * pulse), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    _relationshipColor(relData) {
+        const type = typeof relData === 'object' ? (relData.type || "stranger") : "stranger";
+        const trust = typeof relData === 'object' ? (relData.trust ?? 0.0) : (relData - 0.3);
+
+        if (["partner", "dating", "crush"].includes(type)) return "#ff88ff"; // Pink (Lover/Crush)
+        if (type === "close_friend") return "#44cc88"; // Turquoise (Best Friend)
+        if (type === "friend") return "#66bbff"; // Blue (Friend)
+        if (["enemy", "rival"].includes(type) || trust < -0.3) return "#ff4444"; // Red (Enemy)
+        if (["ex", "acquaintance"].includes(type)) return "#aaaaaa"; // Grey (Ex/Acquaintance)
+        return "#cccccc"; // Default stranger
     }
 
     _roundRect(ctx, x, y, w, h, r) {
@@ -1513,6 +1969,12 @@ class MapRenderer {
         if (meta.worldTimeSeconds !== undefined) {
             this._worldTimeSeconds = Number(meta.worldTimeSeconds) || 0;
         }
+        if (meta.paused !== undefined) {
+            this._paused = !!meta.paused;
+        }
+        if (meta.time_skip_mode !== undefined) {
+            this._timeSkipMode = !!meta.time_skip_mode;
+        }
         this._lastSnapshotAtMs = performance.now();
         // Clean up interpolation state for NPCs that are no longer moving
         const activeIds = new Set();
@@ -1522,13 +1984,25 @@ class MapRenderer {
         for (const id of Object.keys(this._npcInterp)) {
             if (!activeIds.has(Number(id))) delete this._npcInterp[id];
         }
-        this._draw();
+        if (!this._timeSkipMode) {
+            this._draw();
+            this._lastAnimatedDrawAtMs = performance.now();
+        }
     }
 
     setWorld(world) {
         if (world === this.world) return;
+        const hadWorld = !!this.world;
+        const prevTx = this._tx;
+        const prevTy = this._ty;
+        const prevScale = this._scale;
         this.world = world;
         this._fitToCanvas();
+        if (hadWorld) {
+            this._tx = prevTx;
+            this._ty = prevTy;
+            this._scale = prevScale;
+        }
         this._generateTerrain();
         this._generateDecorations();
         this._draw();
@@ -1572,7 +2046,12 @@ class MapRenderer {
 
     _startAnimationLoop() {
         const frame = () => {
-            this._draw();
+            const now = performance.now();
+            const minFrameMs = (this._timeSkipMode || this._simulationSpeed >= 1000) ? 140 : 0;
+            if (minFrameMs === 0 || now - this._lastAnimatedDrawAtMs >= minFrameMs) {
+                this._draw();
+                this._lastAnimatedDrawAtMs = now;
+            }
             this._animationHandle = requestAnimationFrame(frame);
         };
         this._animationHandle = requestAnimationFrame(frame);

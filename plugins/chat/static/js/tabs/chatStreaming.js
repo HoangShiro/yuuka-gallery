@@ -615,19 +615,31 @@ Object.assign(window.ChatComponent.prototype, {
                 if (updates.put_on && Array.isArray(updates.put_on)) {
                     if (!cs.outfits) cs.outfits = [];
                     if (!cs.inventory) cs.inventory = [];
+                    // Normalize LLM output to lowercase
+                    updates.put_on = updates.put_on.map(i => i.toLowerCase());
                     updates.put_on.forEach(item => {
-                        if (!cs.outfits.includes(item)) cs.outfits.push(item);
-                        const i = cs.inventory.indexOf(item);
-                        if (i > -1) cs.inventory.splice(i, 1);
+                        // Skip if already in outfits (fuzzy check)
+                        if (!this._hasItemInList(cs.outfits, item)) {
+                            cs.outfits.push(item);
+                        }
+                        // Remove from inventory if present (fuzzy check)
+                        const normalizedItem = this._normalizeItemName(item);
+                        cs.inventory = cs.inventory.filter(invItem => this._normalizeItemName(invItem) !== normalizedItem);
                     });
                 }
                 if (updates.take_off && Array.isArray(updates.take_off)) {
                     if (!cs.outfits) cs.outfits = [];
                     if (!cs.inventory) cs.inventory = [];
+                    // Normalize LLM output to lowercase
+                    updates.take_off = updates.take_off.map(i => i.toLowerCase());
                     updates.take_off.forEach(item => {
-                        const i = cs.outfits.indexOf(item);
-                        if (i > -1) cs.outfits.splice(i, 1);
-                        if (!cs.inventory.includes(item)) cs.inventory.push(item);
+                        // Skip if already in inventory (fuzzy check)
+                        if (!this._hasItemInList(cs.inventory, item)) {
+                            cs.inventory.push(item);
+                        }
+                        // Remove from outfits if present (fuzzy check)
+                        const normalizedItem = this._normalizeItemName(item);
+                        cs.outfits = cs.outfits.filter(outItem => this._normalizeItemName(outItem) !== normalizedItem);
                     });
                 }
 

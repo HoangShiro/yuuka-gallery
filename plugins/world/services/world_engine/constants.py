@@ -7,6 +7,9 @@ DEFAULT_CONFIG = {
     "roadSkew": 0.0,
     "roadCurve": 0,
     "buildingDensity": "Uniform",
+    "socializeMode": "None",
+    "assignHome": True,
+    "birthRate": 100,
     "seed": None,
     "tick_interval_ms": 250,
     "save_every_n_ticks": 10,
@@ -31,6 +34,7 @@ ROAD_INTERACTION_RELATIONSHIP_BOOST = 0.05
 # 1 world-hour = 3600 world-seconds.
 ACTIVITY_DURATION_WORLD_HOURS = {
     "sleep":     8.0,
+    "birth_prep": 1.0,
     "eat":       1.0,
     "socialize": 2.0,
     "relax":     1.5,
@@ -46,25 +50,59 @@ DEFAULT_ACTIVITY_DURATION_WORLD_HOURS = 1.0
 FOOD_PRICES = {
     "cafe": 15.0,
     "shop": 5.0,
+    "cinema": 12.0,
     "house": 0.0,
 }
 
 WORK_WAGES = {
+    "cafe": 7.0,
     "office": 12.0,
     "factory": 8.0,
     "studio": 10.0,
+    "builder_hq": 11.0,
+    "construction_site": 11.0,
     "shop": 6.0,
     "school": 7.0,
     "hospital": 15.0,
+    "library": 8.0,
+    "gym": 8.0,
+    "arcade": 9.0,
+    "museum": 9.0,
+    "cinema": 8.0,
 }
 
 WORK_DURATIONS = {
+    "cafe": 5.0,
     "office": 6.0,
     "factory": 8.0,
     "studio": 4.0,
+    "builder_hq": 8.0,
+    "construction_site": 8.0,
     "shop": 4.0,
     "school": 6.0,
     "hospital": 8.0,
+    "library": 5.0,
+    "gym": 4.0,
+    "arcade": 5.0,
+    "museum": 5.0,
+    "cinema": 4.0,
+}
+
+JOB_CAPACITY_BY_TYPE = {
+    "cafe": 4,
+    "office": 12,
+    "factory": 16,
+    "studio": 5,
+    "builder_hq": 10,
+    "construction_site": 8,
+    "shop": 5,
+    "school": 10,
+    "hospital": 12,
+    "library": 6,
+    "gym": 5,
+    "arcade": 6,
+    "museum": 7,
+    "cinema": 6,
 }
 
 # ─── Need increase / decrease rates ─────────────────────────────────────────
@@ -73,8 +111,12 @@ WORK_DURATIONS = {
 NEED_INCREASE_RATE = {
     "hunger": 1.0 / 12.0,   # full in ~12 h → eats ~2 meals per day
     "social": 1.0 / 16.0,   # full in ~16 h
-    "rest":   1.0 / 16.0,   # full in ~16 h → needs ~8 h sleep
+    "rest":   1.0 / 32.0,   # full in ~32 base hours (approx 1.0 unit per day with multipliers)
     "work":   0.0,          # managed dynamically by financial plan
+    # New needs for social dynamics
+    "entertainment": 1.0 / 24.0,  # full in ~24 h
+    "intimacy": 1.0 / 48.0,       # full in ~48 h
+    "autonomy": 1.0 / 72.0,       # full in ~72 h
 }
 
 # ─── Time-based need multipliers ────────────────────────────────────────────
@@ -109,13 +151,14 @@ TIME_BASED_NEED_MULTIPLIER = {
 # Need reduction rate per world-hour while performing the activity.
 # Tuned so the activity duration is just enough to satisfy the need from 1→0.
 ACTIVITY_NEED_REDUCTION = {
-    "eat":       ("hunger", -1.0 / 1.0),    # 1 h to fully satisfy
-    "sleep":     ("rest",   -1.0 / 8.0),     # 8 h to fully satisfy
-    "socialize": ("social", -1.0 / 2.0),     # 2 h to fully satisfy
-    "relax":     ("rest",   -1.0 / 4.0),     # 4 h for partial rest
-    "study":     ("social", -1.0 / 6.0),     # minor social benefit
-    "work":      ("work",   -1.0 / 4.0),     # 4 h to fully satisfy
-    "walk":      ("rest",   -1.0 / 4.0),     # light rest
+    "eat":       [("hunger", -1.0 / 1.0)],    # 1 h to fully satisfy
+    "sleep":     [("rest",   -1.0 / 8.0)],     # 8 h to fully satisfy
+    "socialize": [("social", -1.0 / 2.0), ("intimacy", -1.0 / 4.0)], # 2 h to fully satisfy social, partial intimacy
+    "relax":     [("rest",   -1.0 / 4.0), ("entertainment", -1.0 / 2.0)], # 4 h to 50% rest, 2h for full entertainment
+    "study":     [("social", -1.0 / 6.0)],     # minor social benefit
+    "work":      [("work",   -1.0 / 4.0)],     # 4 h to fully satisfy
+    "walk":      [("rest",   -1.0 / 4.0)],     # light rest
+    "wander":    [("autonomy", -1.0 / 1.0)],   # 1 h to fully satisfy autonomy
 }
 
 NEED_TO_ACTIVITY = {
@@ -123,15 +166,19 @@ NEED_TO_ACTIVITY = {
     "social": "socialize",
     "rest": "sleep",
     "work": "work",
+    # New needs
+    "entertainment": "relax",
+    "intimacy": "socialize",
+    "autonomy": "wander",
 }
 
 ACTIVITY_LOCATION_TYPES = {
-    "eat": {"cafe", "shop", "house"},
+    "eat": {"cafe", "shop", "cinema", "house"},
     "sleep": {"house"},
-    "socialize": {"cafe", "park", "shop"},
-    "relax": {"park", "shrine"},
-    "study": {"school"},
-    "work": {"shop", "school", "office", "factory", "studio"},
+    "socialize": {"cafe", "park", "shop", "gym", "arcade", "cinema"},
+    "relax": {"park", "shrine", "library", "gym", "arcade", "cinema", "museum"},
+    "study": {"school", "library", "museum"},
+    "work": {"cafe", "shop", "school", "office", "factory", "studio", "hospital", "library", "gym", "arcade", "museum", "cinema", "builder_hq", "construction_site"},
     "walk": {"park"},
 }
 

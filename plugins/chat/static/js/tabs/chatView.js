@@ -27,12 +27,13 @@ Object.assign(window.ChatComponent.prototype, {
         const memoryTabEl = this.container.querySelector('#status-tab-memory');
         const scenesTabEl = this.container.querySelector('#status-tab-scenes');
         const albumTabEl = this.container.querySelector('#status-tab-album');
+        const inventoryPanel = this.container.querySelector('#modal-inventory');
         if (statusTabEl) statusTabEl.style.display = '';
         if (memoryTabEl) memoryTabEl.style.display = 'none';
         if (scenesTabEl) scenesTabEl.style.display = 'none';
         if (albumTabEl) albumTabEl.style.display = 'none';
-        this.container.querySelectorAll('.status-tab-btn').forEach(b => b.classList.remove('active'));
-        const defaultStatusBtn = this.container.querySelector('.status-tab-btn[data-tab="status"]');
+        inventoryPanel?.querySelectorAll('.status-tab-btn').forEach(b => b.classList.remove('active'));
+        const defaultStatusBtn = inventoryPanel?.querySelector('.status-tab-btn[data-tab="status"]');
         if (defaultStatusBtn) defaultStatusBtn.classList.add('active');
 
         // Clear stale content from Scenes and Album tabs (will re-render on tab click)
@@ -88,14 +89,14 @@ Object.assign(window.ChatComponent.prototype, {
         this._initInventoryResize();
 
         // Tab switching for Status/Memory/Scenes/Album
-        this.container.querySelectorAll('.status-tab-btn').forEach(btn => {
+        inventoryPanel?.querySelectorAll('.status-tab-btn').forEach(btn => {
             // Clone to remove any previous listeners (e.g. from group mode)
             const newBtn = btn.cloneNode(true);
             btn.parentNode.replaceChild(newBtn, btn);
         });
-        this.container.querySelectorAll('.status-tab-btn').forEach(btn => {
+        inventoryPanel?.querySelectorAll('.status-tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                this.container.querySelectorAll('.status-tab-btn').forEach(b => b.classList.remove('active'));
+                inventoryPanel.querySelectorAll('.status-tab-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 const tab = btn.dataset.tab;
                 const statusTab = this.container.querySelector('#status-tab-status');

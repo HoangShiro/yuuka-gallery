@@ -75,7 +75,7 @@ class ChatComponent {
                     <!-- Chat List View -->
                     <div id="view-chat_list" class="chat-view hidden">
                         <header class="chat-header">
-                            <h2>Chat List</h2>
+                            <h2>Companion</h2>
                             <div class="header-actions">
                                 <button class="icon-btn action-btn btn-search-toggle" title="Search">
                                     <span class="material-symbols-outlined">search</span>
@@ -100,6 +100,10 @@ class ChatComponent {
                                 </div>
                             </div>
                         </header>
+                        <div class="status-modal-tabs">
+                            <button class="status-tab-btn chat-list-tab-btn active" data-tab="single">Character</button>
+                            <button class="status-tab-btn chat-list-tab-btn" data-tab="group">Group</button>
+                        </div>
                         <main class="chat-main" id="grid-chat_list">
                         </main>
                     </div>
@@ -167,9 +171,14 @@ class ChatComponent {
                                 </div>
                             </div>
                         </header>
+                        <div class="status-modal-tabs settings-tabs">
+                            <button class="status-tab-btn settings-tab-btn active" data-tab="chat">Chat</button>
+                            <button class="status-tab-btn settings-tab-btn" data-tab="llm">LLM</button>
+                            <button class="status-tab-btn settings-tab-btn" data-tab="image">Image</button>
+                            <button class="status-tab-btn settings-tab-btn" data-tab="theme">Theme</button>
+                        </div>
                         <main class="chat-main">
-                            <div class="settings-group">
-                                <h3>Chat</h3>
+                            <div id="settings-group-chat" class="settings-group">
                                 <div class="settings-toggle">
                                     <label for="chat-auto-line-break">Automatic line break (dialogue separation)</label>
                                     <label class="switch">
@@ -177,10 +186,32 @@ class ChatComponent {
                                         <span class="slider"></span>
                                     </label>
                                 </div>
+
+                                <div style="margin-top: 1.5rem;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                        <h4 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--chat-text-secondary);">Chat Rule Format</h4>
+                                        <button class="icon-btn" id="btn-chat-add-rule" title="Add new rule" style="width: 32px; height: 32px;">
+                                            <span class="material-symbols-outlined" style="font-size: 20px;">add</span>
+                                        </button>
+                                    </div>
+                                    <table class="rules-table">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 35%;">RULE</th>
+                                                <th style="width: 25%;">TYPE</th>
+                                                <th style="width: 15%; text-align: center;">KEEP</th>
+                                                <th style="width: 15%; text-align: center;">BREAK</th>
+                                                <th style="width: 10%;"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="chat-rules-tbody">
+                                            <!-- Rows injected by chatSettings.js -->
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
 
-                            <div class="settings-group">
-                                <h3>LLM</h3>
+                            <div id="settings-group-llm" class="settings-group" style="display: none;">
                                 <div class="form-group" style="margin-bottom: 1rem;">
                                     <label>Model</label>
                                     <div style="position: relative; margin-top: 0.5rem;">
@@ -203,11 +234,13 @@ class ChatComponent {
                                     </div>
                                 </div>
 
+                                <div class="form-group" style="margin-top: 2rem;">
+                                    <label>Custom System Prompt</label>
+                                    <textarea id="chat-system-prompt" placeholder="Custom instructions for the AI..." style="width: 100%; min-height: 100px; padding: 10px; border-radius: 8px; border: 1px solid var(--chat-border); background: var(--chat-panel-bg); color: var(--chat-text); font-family: inherit; font-size: 0.9rem; line-height: 1.5; resize: none; overflow: hidden; box-sizing: border-box;"></textarea>
+                                </div>
                             </div>
 
-                            <div class="settings-group">
-                                <h3>Image Generation</h3>
-                                
+                            <div id="settings-group-image" class="settings-group" style="display: none;">
                                 <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
                                     <button id="btn-open-emotion-editor" class="text-btn save-btn" style="padding: 6px 16px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">Emotion Editor</button>
                                     
@@ -271,8 +304,7 @@ class ChatComponent {
                                 </div>
                             </div>
 
-                            <div class="settings-group">
-                                <h3>Theme</h3>
+                            <div id="settings-group-theme" class="settings-group" style="display: none;">
                                 <div class="theme-cards" id="theme-cards">
                                     <!-- Theme cards injected here -->
                                 </div>
@@ -412,21 +444,40 @@ class ChatComponent {
                     </div>
 
                     <!-- Scenario View -->
-                    <div id="view-scenario" class="chat-view hidden overlay-view">
-                        <header class="chat-header has-back">
-                            <button class="icon-btn back-btn" data-back="true">
-                                <span class="material-symbols-outlined">arrow_back</span>
-                            </button>
-                            <div class="scenario-tabs-header">
-                                <button class="scenario-tab-btn active" data-tab="scene">Scene</button>
-                                <button class="scenario-tab-btn" data-tab="rule">Rule</button>
-                            </div>
-                            <div style="margin-left: auto; display: flex; gap: 0.5rem;">
-                                <button class="icon-btn" id="btn-scenario-add" title="Add">
+                    <div id="view-scenario" class="chat-view hidden">
+                        <header class="chat-header">
+                            <h2>Scenario</h2>
+                            <div class="header-actions">
+                                <button class="icon-btn action-btn" id="btn-scenario-add" title="Add">
                                     <span class="material-symbols-outlined">add</span>
                                 </button>
+                                <button class="icon-btn action-btn btn-search-toggle" title="Search">
+                                    <span class="material-symbols-outlined">search</span>
+                                </button>
+                                <input type="text" class="header-search-input" placeholder="Search..." style="display: none; flex: 1; border: none; outline: none; background: transparent; font-size: 1rem; color: var(--chat-text); min-width: 0;">
+                                <div class="header-nav-btns">
+                                    <button class="chat-nav-btn" data-tab="home">
+                                        <span class="material-symbols-outlined">home</span>
+                                    </button>
+                                    <button class="chat-nav-btn" data-tab="chat_list">
+                                        <span class="material-symbols-outlined">chat</span>
+                                    </button>
+                                    <button class="chat-nav-btn" data-tab="user_persona">
+                                        <span class="material-symbols-outlined">person</span>
+                                    </button>
+                                    <button class="chat-nav-btn active" data-tab="scenario">
+                                        <span class="material-symbols-outlined">globe_book</span>
+                                    </button>
+                                    <button class="chat-nav-btn" data-tab="settings">
+                                        <span class="material-symbols-outlined">settings</span>
+                                    </button>
+                                </div>
                             </div>
                         </header>
+                        <div class="status-modal-tabs">
+                            <button class="status-tab-btn scenario-tab-btn active" data-tab="scene">Scene</button>
+                            <button class="status-tab-btn scenario-tab-btn" data-tab="rule">Rule</button>
+                        </div>
                         <main class="chat-main" id="scenario-cards-container">
                         </main>
                     </div>
@@ -701,7 +752,7 @@ class ChatComponent {
                     if (this.state.activeChatGroupSession) {
                         this._renderCharacterBar && this._renderCharacterBar(this.state.activeChatGroupSession);
                     }
-                // If editing a character that belongs to an active chat, return to chat view
+                    // If editing a character that belongs to an active chat, return to chat view
                 } else if (this.state.currentTab === 'creation'
                     && this.state.editingPersona?.type === 'characters'
                     && this.state.editingPersona?.id
@@ -809,6 +860,16 @@ class ChatComponent {
             });
         }
 
+        const chatListTabs = this.container.querySelectorAll('.chat-list-tab-btn');
+        chatListTabs.forEach(btn => {
+            btn.addEventListener('click', () => {
+                chatListTabs.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.state.chatListTab = btn.dataset.tab;
+                this.renderChatList();
+            });
+        });
+
         // Search logic
         this.container.querySelectorAll('.btn-search-toggle').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -854,11 +915,33 @@ class ChatComponent {
 
         if (this.state.currentTab === 'settings') {
             const groups = this.container.querySelectorAll('#view-settings .settings-group');
+            const activeTab = this.container.querySelector('.settings-tab-btn.active')?.dataset.tab;
+
             groups.forEach(group => {
-                if (group.textContent.toLowerCase().includes(query)) {
-                    group.style.display = '';
+                if (query === '') {
+                    // Restore tab visibility
+                    group.style.display = group.id === `settings-group-${activeTab}` ? '' : 'none';
                 } else {
-                    group.style.display = 'none';
+                    // Search across all groups
+                    if (group.textContent.toLowerCase().includes(query)) {
+                        group.style.display = '';
+                    } else {
+                        group.style.display = 'none';
+                    }
+                }
+            });
+            return;
+        }
+
+        if (this.state.currentTab === 'scenario') {
+            const cards = this.container.querySelectorAll('#scenario-cards-container .scenario-card');
+            cards.forEach(card => {
+                const nameEl = card.querySelector('.card-name');
+                const name = nameEl ? nameEl.textContent.toLowerCase() : '';
+                if (name.includes(query)) {
+                    card.style.display = '';
+                } else {
+                    card.style.display = 'none';
                 }
             });
             return;
@@ -995,7 +1078,7 @@ class ChatComponent {
     }
 
     switchTab(tab) {
-        const overlayTabs = ['creation', 'chat', 'scenario', 'scene_edit', 'rule_edit'];
+        const overlayTabs = ['creation', 'chat', 'scene_edit', 'rule_edit'];
         if (overlayTabs.includes(tab)) {
             if (!overlayTabs.includes(this.state.currentTab)) {
                 this.state.previousTab = this.state.currentTab;

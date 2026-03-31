@@ -29,3 +29,6 @@ pytest_cache/
 pytest_out.txt
 pytest.txt
 tests/
+node_modules/
+test_*
+*.md

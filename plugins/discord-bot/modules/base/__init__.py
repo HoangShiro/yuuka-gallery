@@ -12,6 +12,14 @@ class BotModule(ABC):
     module_id: str = "core.base"
     name: str = "Base"
     description: str = "Base module."
+    module_type: str = "normal"
+    admin: bool = False
+
+    def get_dashboard_ui(self) -> dict:
+        return {}
+
+    def get_policy_definitions(self) -> list[dict]:
+        return []
 
     @abstractmethod
     def setup(self, bot: "commands.Bot", log: BotLogBuffer) -> None:  # pragma: no cover - interface

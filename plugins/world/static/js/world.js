@@ -12,8 +12,9 @@ class WorldComponent {
         this._pollingInterval = null;
         this._lastState = null;
         this._resizeObserver = null;
-        this._speedOptions = [1, 2, 3, 4, 5, 10, 20, 50, 100];
+        this._speedOptions = [1, 2, 3, 4, 5, 10, 20, 50, 100, 1000];
         this._lastNpcListRenderMs = 0;
+        this._lastStatusPopupRenderMs = 0;
     }
 
     async init() {
@@ -41,10 +42,9 @@ class WorldComponent {
 <div id="world-root">
   <div id="world-map-area">
     <canvas id="world-canvas"></canvas>
-    <div id="world-time-display">Day 1, 00:00 | Tick: 0</div>
+    <div id="world-time-display">Day 1, 00:00 | Tick: 0 | NPCs: 0</div>
     <div id="world-controls">
-      <button id="world-btn-pause">Pause</button>
-      <button id="world-btn-resume">Resume</button>
+      <button id="world-btn-play-pause">Pause</button>
       <button id="world-btn-reset">Reset</button>
       <select id="world-speed-select">${this._speedOptions
           .map((speed) => `<option value="${speed}">x${speed}</option>`)
@@ -98,8 +98,22 @@ class WorldComponent {
       <input type="number" id="wcfg-seed" step="1" placeholder="Leave blank for random">
     </div>
     <div class="world-config-field">
-      <label>Tick Interval ms (100-60000)</label>
-      <input type="number" id="wcfg-tickInterval" min="100" max="60000" value="250">
+      <label>Socialize</label>
+      <select id="wcfg-socializeMode">
+        <option value="None">None</option>
+        <option value="Half">Half</option>
+        <option value="Full">Full</option>
+      </select>
+    </div>
+    <div class="world-config-field">
+      <label class="world-config-checkbox">
+        <input type="checkbox" id="wcfg-assignHome" checked>
+        <span>Assign home</span>
+      </label>
+    </div>
+    <div class="world-config-field">
+      <label>Birth rate per successful sleep pair: <span id="wcfg-birthRate-val">100%</span></label>
+      <input type="range" id="wcfg-birthRate" min="0" max="100" step="1" value="100">
     </div>
     <div class="world-config-actions">
       <button id="world-btn-config-save">Save</button>
@@ -174,14 +188,18 @@ class WorldComponent {
             simulationSpeed: state.simulation_speed,
             serverTimeMs: state.server_time_ms,
             worldTimeSeconds: state.world_time_seconds,
+            paused: state.paused,
         });
         this._updateNpcList(npcList, state.map.locations);
         this._updateTimeDisplay(state);
         this._applySpeedToControl(state.simulation_speed);
+        this._updatePlayPauseButton(state.paused);
     }
 
     _startPolling() {
         if (this._pollingInterval) clearInterval(this._pollingInterval);
+        
+        const interval = this._currentPollInterval || 500;
         this._pollingInterval = setInterval(async () => {
             try {
                 if (!this._renderer) {
@@ -194,6 +212,17 @@ class WorldComponent {
                 }
 
                 const live = await fetch("/api/plugin/world/live_state").then((res) => res.json());
+                const isTimeSkip = live.simulation_speed >= 1000 || live.time_skip_mode;
+
+                if (live.map) {
+                    const shouldResetWorld = !this._hasSameWorldTopology(this._currentWorld, live.map);
+                    this._currentWorld = live.map;
+                    if (shouldResetWorld) {
+                        this._renderer.setWorld(this._currentWorld);
+                    } else {
+                        this._renderer.world = this._currentWorld;
+                    }
+                }
                 this._lastState = {
                     ...(this._lastState || {}),
                     ...live,
@@ -201,34 +230,99 @@ class WorldComponent {
                 };
 
                 const npcList = Object.values(live.npcs || {});
+                
+                // Update renderer so NPCs move on map
                 this._renderer.render(npcList, {
                     simulationSpeed: live.simulation_speed,
                     serverTimeMs: live.server_time_ms,
                     worldTimeSeconds: live.world_time_seconds,
+                    paused: live.paused,
+                    time_skip_mode: live.time_skip_mode
                 });
+
                 const now = performance.now();
-                if (now - this._lastNpcListRenderMs >= 1000) {
+                const npcListInterval = isTimeSkip ? 2000 : 1000;
+                if (now - this._lastNpcListRenderMs >= npcListInterval) {
                     this._updateNpcList(npcList, this._currentWorld?.locations);
                     this._lastNpcListRenderMs = now;
                 }
+                
                 this._updateTimeDisplay(live);
                 this._applySpeedToControl(live.simulation_speed);
+                this._updatePlayPauseButton(live.paused);
 
                 // Live-update the open status popup
-                if (this._openPopupNpcIds && this._openPopupNpcIds.length > 0) {
+                const popupInterval = isTimeSkip ? 1000 : 0;
+                if (
+                    this._openPopupNpcIds &&
+                    this._openPopupNpcIds.length > 0 &&
+                    (popupInterval === 0 || now - this._lastStatusPopupRenderMs >= popupInterval)
+                ) {
                     this._renderStatusPopup();
+                    this._lastStatusPopupRenderMs = now;
+                }
+
+                // Check if polling speed needs to change
+                const targetInterval = isTimeSkip ? 400 : 500;
+                if (this._currentPollInterval !== targetInterval) {
+                    this._currentPollInterval = targetInterval;
+                    this._startPolling();
                 }
             } catch (error) {
                 // Ignore transient polling errors.
             }
-        }, 500);
+        }, interval);
+    }
+
+    _hasSameWorldTopology(left, right) {
+        if (!left || !right) return false;
+        if (left.mapSize !== right.mapSize) return false;
+
+        const leftLocs = left.locations || [];
+        const rightLocs = right.locations || [];
+        if (leftLocs.length !== rightLocs.length) return false;
+
+        for (let i = 0; i < leftLocs.length; i++) {
+            const a = leftLocs[i];
+            const b = rightLocs[i];
+            if (!a || !b) return false;
+            if (a.id !== b.id) return false;
+            if (a.bx !== b.bx || a.by !== b.by || a.bw !== b.bw || a.bh !== b.bh) return false;
+        }
+        return true;
     }
 
     _updateTimeDisplay(state) {
         const el = document.getElementById("world-time-display");
         if (el) {
             const speed = Number(state.simulation_speed || 1);
-            el.textContent = `${state.world_time} | Tick: ${state.tick_count} | x${speed}`;
+            const npcCount = state && state.npcs && typeof state.npcs === "object"
+                ? Object.keys(state.npcs).length
+                : Number(state?.npc_count || 0);
+            el.textContent = `${state.world_time} | Tick: ${state.tick_count} | NPCs: ${npcCount} | x${speed}`;
+            
+            // Enhanced visual feedback for time skip mode
+            if (state.time_skip_mode) {
+                el.style.background = "#ff6b6b";
+                el.style.color = "white";
+                el.style.padding = "2px 8px";
+                el.style.borderRadius = "4px";
+                el.style.fontWeight = "bold";
+                el.title = "Time Skip Mode: NPCs teleported to final positions";
+            } else if (speed >= 1000) {
+                el.style.background = "#ff6b6b";
+                el.style.color = "white";
+                el.style.padding = "2px 8px";
+                el.style.borderRadius = "4px";
+                el.title = "Time Skip Mode: Calculating final states directly";
+            } else {
+                el.style.background = "";
+                el.style.color = "";
+                el.style.padding = "";
+                el.style.borderRadius = "";
+                el.style.fontWeight = "";
+                el.title = "";
+            }
         }
     }
 
@@ -254,7 +348,7 @@ class WorldComponent {
                 ${thumb}
                 <span class="npc-name">${npc.name}</span>
                 <span class="npc-activity">${status}</span>
-                <span class="npc-location">${loc.type || "?"}</span>
+                <span class="npc-location">${this._getLocName(loc)}</span>
             </div>`;
             })
             .join("");
@@ -306,6 +400,16 @@ class WorldComponent {
 
         const isPair = npcs.length === 2;
         const activeTab = this._statusActiveTab || 0;
+        const currentIds = this._openPopupNpcIds.join(",");
+
+        const container = popup.querySelector(".status-container");
+        // Reuse existing container if it renders the same NPCs
+        if (container && container.dataset.npcIds === currentIds) {
+            this._updateStatusDynamic(npcs);
+            return;
+        }
+
+        const isFirstOpen = popup.style.display === "none" || !popup.style.display;
 
         // Build tab bar for pairs
         let tabsHtml = "";
@@ -331,10 +435,8 @@ class WorldComponent {
             </div>`
         ).join("");
 
-        const isFirstOpen = popup.style.display !== "block";
-
         popup.innerHTML = `
-            <div class="status-container ${isPair ? "status-pair" : ""} ${isFirstOpen ? "status-animate" : ""}">
+            <div class="status-container ${isPair ? "status-pair" : ""} ${isFirstOpen ? "status-animate" : ""}" data-npc-ids="${currentIds}">
                 <button class="world-popup-close" id="world-popup-close">✕</button>
                 ${tabsHtml}
                 <div class="status-panels">
@@ -342,13 +444,16 @@ class WorldComponent {
                 </div>
             </div>`;
 
-        popup.style.display = "block";
+        popup.style.display = "flex";
+        popup.querySelectorAll(".status-header-info").forEach((header) => {
+            const legacyMeta = header.querySelector('.status-zodiac:not(.val-meta)');
+            if (legacyMeta) legacyMeta.remove();
+        });
 
-        // Bind close
+        // Bind events
         document.getElementById("world-popup-close")
             ?.addEventListener("click", () => this._closePopup());
 
-        // Bind tabs
         popup.querySelectorAll(".status-tab").forEach((tab) => {
             tab.addEventListener("click", () => {
                 this._statusActiveTab = parseInt(tab.dataset.idx, 10);
@@ -356,7 +461,6 @@ class WorldComponent {
             });
         });
 
-        // Bind chat buttons
         popup.querySelectorAll(".world-btn-chat").forEach((btn) => {
             btn.addEventListener("click", () => {
                 const id = parseInt(btn.dataset.npcId, 10);
@@ -366,15 +470,19 @@ class WorldComponent {
         });
     }
 
-    _buildNpcStatusHtml(npc) {
+    _getNpcStatusData(npc) {
+        if (!npc || !this._lastState) return null;
+
         const locMap = {};
         ((this._lastState.map && this._lastState.map.locations) || []).forEach((loc) => {
             locMap[loc.id] = loc;
         });
+
         const movement = npc.movement || {};
         const moving = !!movement.active;
         const loc = locMap[moving ? movement.target_location : npc.current_location] || {};
-        const homeLoc = locMap[npc.home_location] || {};
+        const homeLoc = npc.home_location != null ? locMap[npc.home_location] : null;
+        const jobLoc = npc.job_location != null ? locMap[npc.job_location] : null;
 
         const needs = npc.needs || {};
         const hunger = ((needs.hunger || 0) * 100).toFixed(0);
@@ -399,24 +507,27 @@ class WorldComponent {
         const zodiacObj = zodiacSigns[npc.zodiac_index || 0];
         const zodiacStr = `${zodiacObj.emoji} ${zodiacObj.name}`;
         const bdayStr = npc.birthday || "1/1";
+        const jobStr = jobLoc
+            ? `💼 ${this._getLocName(jobLoc)}`
+            : (npc.job_type ? `💼 ${String(npc.job_type).replace(/_/g, " ")}` : "💼 Chưa có việc");
+        const metaLine = `${zodiacStr} · ${bdayStr} · ${jobStr}`;
 
-        // ─── Relationships: only show Kẻ thù, Bạn thân nhất, Người yêu ───
         const allNpcs = this._lastState.npcs || {};
         const relationships = Object.entries(npc.relationships || {});
+        
+        const getTrust = (r) => typeof r === 'object' ? (r.trust ?? 0.0) : (r ?? 0.3);
+        const getAttraction = (r) => typeof r === 'object' ? (r.attraction ?? 0.0) : 0.0;
+        const getType = (r) => typeof r === 'object' ? (r.type ?? "stranger") : "stranger";
 
-        const enemies = relationships
-            .filter(([, score]) => score <= 0.1)
-            .sort((a, b) => a[1] - b[1]);
+        // Sort to find the "best" representatives
+        const sortedRels = [...relationships].sort((a, b) => getTrust(b[1]) - getTrust(a[1]));
+        const sortedByAttraction = [...relationships].sort((a, b) => getAttraction(b[1]) - getAttraction(a[1]));
 
-        const bestFriendCandidates = relationships
-            .filter(([, score]) => score > 0.65 && score <= 0.85)
-            .sort((a, b) => b[1] - a[1]);
-        const bestFriend = bestFriendCandidates.length > 0 ? bestFriendCandidates[0] : null;
-
-        const loverCandidates = relationships
-            .filter(([, score]) => score > 0.85)
-            .sort((a, b) => b[1] - a[1]);
-        const lover = loverCandidates.length > 0 ? loverCandidates[0] : null;
+        const loverEntry = sortedByAttraction.find(([, r]) => ["dating", "partner", "crush"].includes(getType(r)));
+        const bestFriendEntry = sortedRels.find(([, r]) => getType(r) === "close_friend");
+        const friendEntry = sortedRels.find(([, r]) => getType(r) === "friend");
+        const acquaintanceEntry = sortedRels.find(([, r]) => getType(r) === "acquaintance");
+        const enemyEntry = [...sortedRels].reverse().find(([, r]) => ["enemy", "rival"].includes(getType(r)) || getTrust(r) < -0.3);
 
         const _relName = (id) => allNpcs[id]?.name || `NPC ${id}`;
         const _relThumb = (id) => {
@@ -425,55 +536,80 @@ class WorldComponent {
                 ? `<img class="status-rel-thumb" src="/image/${hash}" alt="">`
                 : `<span class="status-rel-thumb status-rel-thumb-placeholder"></span>`;
         };
+        const familyLinks = npc.family_links || {};
+        const familyEntries = [
+            ...(familyLinks.parents || []).map((id) => ({ id, label: "👪 Cha mẹ", color: "#c96b5c" })),
+            ...(familyLinks.children || []).map((id) => ({ id, label: "🍼 Con", color: "#d28f2d" })),
+            ...(familyLinks.siblings || []).map((id) => ({ id, label: "🧑‍🤝‍🧑 Anh chị em", color: "#6c8ed9" })),
+        ].filter((entry) => allNpcs[String(entry.id)] || allNpcs[entry.id]);
 
         let relHtml = "";
-        if (enemies.length > 0) {
-            relHtml += `<div class="status-rel-group">
-                <div class="status-rel-label" style="color:#ff4444">⚔️ Kẻ thù</div>`;
-            for (const [eid, escore] of enemies) {
-                relHtml += `<div class="status-rel-entry">
-                    ${_relThumb(eid)}
-                    <span class="status-rel-name">${_relName(eid)}</span>
-                    <span class="status-rel-score" style="color:#ff4444">${Math.round(escore * 100)}%</span>
+        let familyHtml = "";
+        
+        const addRel = (entry, label, color) => {
+            if (!entry) return;
+            const [rid, rdata] = entry;
+            const trust = Math.round(getTrust(rdata) * 100);
+            relHtml += `
+                <div class="status-rel-group">
+                    <div class="status-rel-label" style="color:${color}">${label}</div>
+                    <div class="status-rel-entry">
+                        ${_relThumb(rid)}
+                        <span class="status-rel-name">${_relName(rid)}</span>
+                        <span class="status-rel-score" style="color:${color}">${trust}%</span>
+                    </div>
                 </div>`;
-            }
-            relHtml += `</div>`;
+        };
+
+        for (const entry of familyEntries) {
+            familyHtml += `
+                <div class="status-rel-group">
+                    <div class="status-rel-label" style="color:${entry.color}">${entry.label}</div>
+                    <div class="status-rel-entry">
+                        ${_relThumb(entry.id)}
+                        <span class="status-rel-name">${_relName(entry.id)}</span>
+                    </div>
+                </div>`;
         }
-        if (bestFriend) {
-            relHtml += `<div class="status-rel-group">
-                <div class="status-rel-label" style="color:#44cc88">⭐ Bạn thân nhất</div>
-                <div class="status-rel-entry">
-                    ${_relThumb(bestFriend[0])}
-                    <span class="status-rel-name">${_relName(bestFriend[0])}</span>
-                    <span class="status-rel-score" style="color:#44cc88">${Math.round(bestFriend[1] * 100)}%</span>
-                </div>
-            </div>`;
-        }
-        if (lover) {
-            relHtml += `<div class="status-rel-group">
-                <div class="status-rel-label" style="color:#ff88ff">💕 Người yêu</div>
-                <div class="status-rel-entry">
-                    ${_relThumb(lover[0])}
-                    <span class="status-rel-name">${_relName(lover[0])}</span>
-                    <span class="status-rel-score" style="color:#ff88ff">${Math.round(lover[1] * 100)}%</span>
-                </div>
-            </div>`;
-        }
+
+        addRel(loverEntry, "💕 Người yêu", "#ff88ff");
+        addRel(bestFriendEntry, "⭐ Bạn thân nhất", "#44cc88");
+        addRel(friendEntry, "🤝 Bạn bè", "#66bbff");
+        addRel(acquaintanceEntry, "👥 Quen biết", "#aaaaaa");
+        addRel(enemyEntry, "⚔️ Kẻ thù", "#ff4444");
+
         if (!relHtml) {
             relHtml = `<p class="status-rel-empty">Chưa có mối quan hệ đặc biệt</p>`;
         }
 
         const locationStr = moving
-            ? `🚶 Đang di chuyển → ${loc.type || "?"}`
-            : `📍 ${loc.type || "?"} (id: ${npc.current_location})`;
+            ? `🚶 Đang di chuyển → ${this._getLocName(loc)}`
+            : `📍 ${this._getLocName(loc)}`;
+
+        if (!familyHtml) {
+            familyHtml = `<p class="status-rel-empty">No recorded family</p>`;
+        }
 
         const activityIcons = {
             eat: "🍽️", sleep: "💤", socialize: "💬", relax: "☕",
-            study: "📖", work: "💼", walk: "🚶", run: "🏃",
+            study: "📖", work: "💼", birth_prep: "🏥", walk: "🚶", run: "🏃",
             idle: "⏸️", wander: "🔄"
         };
-        const activityName = moving ? movement.mode : npc.activity;
-        const activityIcon = activityIcons[activityName] || "❓";
+        const rawActivityName = moving ? movement.mode : npc.activity;
+        const activityName = rawActivityName === "birth_prep" ? "Chuẩn bị sinh" : rawActivityName;
+        const activityIcon = activityIcons[rawActivityName] || "❓";
+        const specialStatus = rawActivityName === "birth_prep" ? "🏥 Đang tới bệnh viện chuẩn bị sinh" : "";
+
+        return {
+            zodiacStr, bdayStr, metaLine, jobStr, activityIcon, activityName, locationStr, specialStatus,
+            homeName: homeLoc ? this._getLocName(homeLoc) : "Vô gia cư", money, energy,
+            hunger, social, rest, work, quietPct, crowdPct, relHtml, familyHtml
+        };
+    }
+
+    _buildNpcStatusHtml(npc) {
+        const d = this._getNpcStatusData(npc);
+        if (!d) return "";
 
         const thumbHtml = npc.character_hash
             ? `<img class="status-avatar" src="/image/${npc.character_hash}" alt="${npc.name}">`
@@ -485,8 +621,10 @@ class WorldComponent {
                 ${thumbHtml}
                 <div class="status-header-info">
                     <h4 class="status-name">${npc.name}</h4>
-                    <div class="status-zodiac">${zodiacStr} · ${bdayStr}</div>
-                    <div class="status-activity">${activityIcon} ${activityName}</div>
+                    <div class="status-zodiac">${d.zodiacStr} · ${d.bdayStr}</div>
+                    <div class="status-zodiac val-meta">${d.metaLine}</div>
+                    <div class="status-activity val-activity">${d.activityIcon} ${d.activityName}</div>
+                    ${d.specialStatus ? `<div class="status-zodiac">${d.specialStatus}</div>` : ""}
                 </div>
             </div>
 
@@ -494,21 +632,21 @@ class WorldComponent {
             <div class="status-info-row">
                 <div class="status-info-chip">
                     <span class="status-chip-label">Vị trí</span>
-                    <span class="status-chip-value">${locationStr}</span>
+                    <span class="status-chip-value val-location">${d.locationStr}</span>
                 </div>
                 <div class="status-info-chip">
                     <span class="status-chip-label">Nhà</span>
-                    <span class="status-chip-value">🏠 ${homeLoc.type || "?"}</span>
+                    <span class="status-chip-value">🏠 ${d.homeName}</span>
                 </div>
             </div>
             <div class="status-info-row">
                 <div class="status-info-chip">
                     <span class="status-chip-label">Tiền</span>
-                    <span class="status-chip-value">💰 ${money}</span>
+                    <span class="status-chip-value val-money">💰 ${d.money}</span>
                 </div>
                 <div class="status-info-chip">
                     <span class="status-chip-label">Năng lượng</span>
-                    <span class="status-chip-value">⚡ ${energy}%</span>
+                    <span class="status-chip-value val-energy">⚡ ${d.energy}%</span>
                 </div>
             </div>
 
@@ -519,26 +657,26 @@ class WorldComponent {
                     <div class="status-need-bar">
                         <span class="status-need-icon">🍖</span>
                         <span class="status-need-label">Đói</span>
-                        <div class="need-bar-track"><div class="need-bar-fill need-fill-hunger" style="width:${hunger}%"></div></div>
-                        <span class="status-need-pct">${hunger}%</span>
+                        <div class="need-bar-track"><div class="need-bar-fill need-fill-hunger val-hunger-bar" style="width:${d.hunger}%"></div></div>
+                        <span class="status-need-pct val-hunger-pct">${d.hunger}%</span>
                     </div>
                     <div class="status-need-bar">
                         <span class="status-need-icon">💬</span>
                         <span class="status-need-label">Xã hội</span>
-                        <div class="need-bar-track"><div class="need-bar-fill need-fill-social" style="width:${social}%"></div></div>
-                        <span class="status-need-pct">${social}%</span>
+                        <div class="need-bar-track"><div class="need-bar-fill need-fill-social val-social-bar" style="width:${d.social}%"></div></div>
+                        <span class="status-need-pct val-social-pct">${d.social}%</span>
                     </div>
                     <div class="status-need-bar">
                         <span class="status-need-icon">😴</span>
                         <span class="status-need-label">Nghỉ</span>
-                        <div class="need-bar-track"><div class="need-bar-fill need-fill-rest" style="width:${rest}%"></div></div>
-                        <span class="status-need-pct">${rest}%</span>
+                        <div class="need-bar-track"><div class="need-bar-fill need-fill-rest val-rest-bar" style="width:${d.rest}%"></div></div>
+                        <span class="status-need-pct val-rest-pct">${d.rest}%</span>
                     </div>
                     <div class="status-need-bar">
                         <span class="status-need-icon">💼</span>
                         <span class="status-need-label">Việc</span>
-                        <div class="need-bar-track"><div class="need-bar-fill need-fill-work" style="width:${work}%"></div></div>
-                        <span class="status-need-pct">${work}%</span>
+                        <div class="need-bar-track"><div class="need-bar-fill need-fill-work val-work-bar" style="width:${d.work}%"></div></div>
+                        <span class="status-need-pct val-work-pct">${d.work}%</span>
                     </div>
                 </div>
             </div>
@@ -549,35 +687,142 @@ class WorldComponent {
                 <div class="status-prefs">
                     <div class="status-pref">
                         <span>🤫 Yên tĩnh</span>
-                        <div class="status-pref-bar"><div class="status-pref-fill" style="width:${quietPct}%"></div></div>
-                        <span>${quietPct}%</span>
+                        <div class="status-pref-bar"><div class="status-pref-fill val-quiet-bar" style="width:${d.quietPct}%"></div></div>
+                        <span class="val-quiet-pct">${d.quietPct}%</span>
                     </div>
                     <div class="status-pref">
                         <span>🎉 Đông đúc</span>
-                        <div class="status-pref-bar"><div class="status-pref-fill" style="width:${crowdPct}%"></div></div>
-                        <span>${crowdPct}%</span>
+                        <div class="status-pref-bar"><div class="status-pref-fill val-crowd-bar" style="width:${d.crowdPct}%"></div></div>
+                        <span class="val-crowd-pct">${d.crowdPct}%</span>
                     </div>
+                </div>
+            </div>
+
+            <!-- Family section -->
+            <div class="status-section">
+                <div class="status-section-title">👨‍👩‍👧 Gia đình</div>
+                <div class="status-relationships val-family">
+                    ${d.familyHtml}
                 </div>
             </div>
 
             <!-- Relationships section -->
             <div class="status-section">
                 <div class="status-section-title">❤️ Mối quan hệ</div>
-                <div class="status-relationships">
-                    ${relHtml}
+                <div class="status-relationships val-relationships">
+                    ${d.relHtml}
                 </div>
             </div>
 
             <button class="world-btn-chat" data-npc-id="${npc.id}">💬 Trò chuyện</button>`;
     }
 
-    _openChatWithNpc() {
+    _updateStatusDynamic(npcs) {
+        const popup = document.getElementById("world-popup");
+        if (!popup) return;
+
+        const activeTab = this._statusActiveTab || 0;
+        const isPair = npcs.length === 2;
+
+        // Sync tabs and panels active state
+        popup.querySelectorAll(".status-tab").forEach((tab, idx) => {
+            tab.classList.toggle("active", idx === activeTab);
+        });
+        popup.querySelectorAll(".status-panel").forEach((panel, idx) => {
+            panel.classList.toggle("active", isPair && idx === activeTab);
+        });
+
+        npcs.forEach((npc, idx) => {
+            const panel = popup.querySelector(`.status-panel[data-tab-idx="${idx}"]`);
+            if (!panel) return;
+
+            const d = this._getNpcStatusData(npc);
+            if (!d) return;
+
+            const updateText = (sel, txt) => {
+                const el = panel.querySelector(sel);
+                if (el && el.textContent !== txt) el.textContent = txt;
+            };
+            const updateWidth = (sel, pct) => {
+                const el = panel.querySelector(sel);
+                if (el) {
+                    const w = pct + "%";
+                    if (el.style.width !== w) el.style.width = w;
+                }
+            };
+            const updateHtml = (sel, html) => {
+                const el = panel.querySelector(sel);
+                if (el && el.innerHTML !== html) el.innerHTML = html;
+            };
+
+            updateText(".val-meta", d.metaLine);
+            updateText(".val-activity", `${d.activityIcon} ${d.activityName}`);
+            updateText(".val-location", d.locationStr);
+            updateText(".val-money", `💰 ${d.money}`);
+            updateText(".val-energy", `⚡ ${d.energy}%`);
+
+            updateWidth(".val-hunger-bar", d.hunger);
+            updateText(".val-hunger-pct", `${d.hunger}%`);
+            updateWidth(".val-social-bar", d.social);
+            updateText(".val-social-pct", `${d.social}%`);
+            updateWidth(".val-rest-bar", d.rest);
+            updateText(".val-rest-pct", `${d.rest}%`);
+            updateWidth(".val-work-bar", d.work);
+            updateText(".val-work-pct", `${d.work}%`);
+
+            updateWidth(".val-quiet-bar", d.quietPct);
+            updateText(".val-quiet-pct", `${d.quietPct}%`);
+            updateWidth(".val-crowd-bar", d.crowdPct);
+            updateText(".val-crowd-pct", `${d.crowdPct}%`);
+
+            updateHtml(".val-family", d.familyHtml);
+            updateHtml(".val-relationships", d.relHtml);
+        });
+    }
+
+    _openChatWithNpc(npc) {
+        if (!npc) return;
         const chatPlugin = this._plugins.find((plugin) => plugin.id === "chat");
         if (!chatPlugin) {
             showError("Chat plugin is not available.");
             return;
         }
+        
+        // Prepare initial state for chat plugin
+        window.Yuuka.initialPluginState = window.Yuuka.initialPluginState || {};
+        window.Yuuka.initialPluginState.chat = {
+            character: { hash: npc.character_hash, name: npc.name }
+        };
+        
         Yuuka.ui.switchTab("chat");
+    }
+
+    _getLocName(l) {
+        if (!l) return "Không xác định";
+        if (l.name) return l.name;
+        if (!l.type) return "Vô gia cư"; // If it's a house but name is missing, but here it's more likely "Vô gia cư" context
+        
+        const typeNames = {
+            house: "Nhà",
+            cafe: "Cafe",
+            shop: "Cửa hàng",
+            school: "Trường học",
+            park: "Công viên",
+            shrine: "Đền thờ",
+            library: "Thư viện",
+            gym: "Phòng gym",
+            arcade: "Khu trò chơi",
+            hospital: "Bệnh viện",
+            office: "Văn phòng",
+            factory: "Nhà máy",
+            studio: "Studio",
+            builder_hq: "Trạm xây dựng",
+            construction_site: "Công trường",
+            museum: "Bảo tàng",
+            cinema: "Rạp phim",
+        };
+        const typeBase = typeNames[l.type] || l.type.charAt(0).toUpperCase() + l.type.slice(1);
+        return `${typeBase} #${l.id ?? "?"}`;
     }
 
     _showLocationPopup(locationId) {
@@ -590,16 +835,28 @@ class WorldComponent {
         const popup = document.getElementById("world-popup");
         if (!popup) return;
 
+        const constructionPct = loc.type === "construction_site" && Number(loc.construction_required_hours) > 0
+            ? Math.max(0, Math.min(100, Math.round((Number(loc.construction_progress_hours) || 0) / Number(loc.construction_required_hours) * 100)))
+            : null;
+        const constructionHtml = constructionPct === null
+            ? ""
+            : `
+                <p><strong>Planned:</strong> ${loc.planned_type || "unknown"}</p>
+                <p><strong>Progress:</strong> 🏗️ ${constructionPct}%</p>
+                <p><strong>Work Required:</strong> ${loc.construction_required_hours || 0}h</p>
+            `;
+
         popup.innerHTML = `
             <div class="world-popup-inner">
                 <button class="world-popup-close" id="world-popup-close">x</button>
-                <h4>${loc.type}</h4>
+                <h4>${this._getLocName(loc)}</h4>
                 <p><strong>Type:</strong> ${loc.type}</p>
                 <p><strong>Capacity:</strong> ${loc.capacity}</p>
                 <p><strong>Occupants:</strong> ${loc.occupants}</p>
+                ${constructionHtml}
             </div>`;
 
-        popup.style.display = "block";
+        popup.style.display = "flex";
         document.getElementById("world-popup-close").addEventListener("click", () => this._closePopup());
     }
 
@@ -626,6 +883,14 @@ class WorldComponent {
             });
         }
 
+        const birthRateInput = document.getElementById("wcfg-birthRate");
+        const birthRateLabel = document.getElementById("wcfg-birthRate-val");
+        if (birthRateInput && birthRateLabel) {
+            birthRateInput.addEventListener("input", () => {
+                birthRateLabel.textContent = `${parseInt(birthRateInput.value, 10)}%`;
+            });
+        }
+
         const btnSave = document.getElementById("world-btn-config-save");
         if (btnSave) btnSave.addEventListener("click", () => this._saveConfig());
 
@@ -641,8 +906,10 @@ class WorldComponent {
         const buildingDensity = document.getElementById("wcfg-buildingDensity").value;
         const roadSkew = parseFloat(document.getElementById("wcfg-roadSkew").value);
         const roadCurve = parseInt(document.getElementById("wcfg-roadCurve").value, 10);
+        const socializeMode = document.getElementById("wcfg-socializeMode").value;
+        const assignHome = !!document.getElementById("wcfg-assignHome").checked;
+        const birthRate = parseInt(document.getElementById("wcfg-birthRate").value, 10);
         const seedRaw = document.getElementById("wcfg-seed").value.trim();
-        const tickInterval = parseInt(document.getElementById("wcfg-tickInterval").value, 10);
 
         if (!Number.isInteger(npcCount) || npcCount < 1 || npcCount > 500) {
             throw new Error("NPC Count must be an integer between 1 and 500.");
@@ -653,8 +920,11 @@ class WorldComponent {
         if (!Number.isInteger(subRoadCount) || subRoadCount < 0 || subRoadCount > 50) {
             throw new Error("Sub Roads must be an integer between 0 and 50.");
         }
-        if (!Number.isInteger(tickInterval) || tickInterval < 100 || tickInterval > 60000) {
-            throw new Error("Tick Interval must be an integer between 100 and 60000.");
+        if (!["None", "Half", "Full"].includes(socializeMode)) {
+            throw new Error("Socialize must be None, Half, or Full.");
+        }
+        if (!Number.isInteger(birthRate) || birthRate < 0 || birthRate > 100) {
+            throw new Error("Birth rate must be between 0% and 100%.");
         }
 
         const config = {
@@ -665,7 +935,9 @@ class WorldComponent {
             buildingDensity,
             roadSkew,
             roadCurve,
-            tick_interval_ms: tickInterval,
+            socializeMode,
+            assignHome,
+            birthRate,
         };
 
         if (seedRaw !== "") {
@@ -735,21 +1007,22 @@ class WorldComponent {
         setLabel("wcfg-roadSkew-val", config.roadSkew, (val) => parseFloat(val).toFixed(2));
         set("wcfg-roadCurve", config.roadCurve);
         setLabel("wcfg-roadCurve-val", config.roadCurve, (val) => parseInt(val, 10));
+        set("wcfg-socializeMode", config.socializeMode || "None");
+        const assignHomeEl = document.getElementById("wcfg-assignHome");
+        if (assignHomeEl) assignHomeEl.checked = config.assignHome !== false;
+        set("wcfg-birthRate", config.birthRate ?? 100);
+        setLabel("wcfg-birthRate-val", config.birthRate ?? 100, (val) => `${parseInt(val, 10)}%`);
         if (config.seed !== undefined && config.seed !== null) {
             set("wcfg-seed", config.seed);
         } else {
             set("wcfg-seed", "");
         }
-        set("wcfg-tickInterval", config.tick_interval_ms);
     }
 
     _bindControls() {
-        document.getElementById("world-btn-pause")?.addEventListener("click", () => {
-            fetch("/api/plugin/world/pause", { method: "POST" });
-        });
-
-        document.getElementById("world-btn-resume")?.addEventListener("click", () => {
-            fetch("/api/plugin/world/resume", { method: "POST" });
+        document.getElementById("world-btn-play-pause")?.addEventListener("click", () => {
+            const paused = this._lastState?.paused;
+            fetch(`/api/plugin/world/${paused ? "resume" : "pause"}`, { method: "POST" });
         });
 
         document.getElementById("world-btn-reset")?.addEventListener("click", async () => {
@@ -771,15 +1044,24 @@ class WorldComponent {
 
         document.getElementById("world-speed-select")?.addEventListener("change", async (event) => {
             const value = Number(event.target.value);
-            if (!Number.isFinite(value) || value < 1 || value > 100) return;
+            console.log("Speed change requested:", value);
+            if (!Number.isFinite(value) || value < 1 || value > 1000) return;
             try {
-                await fetch("/api/plugin/world/speed", {
+                const response = await fetch("/api/plugin/world/speed", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ speed_multiplier: value }),
                 });
+                const result = await response.json();
+                console.log("Speed change response:", result);
+                if (!result.ok) {
+                    throw new Error(result.error || "Failed to change speed");
+                }
             } catch (error) {
+                console.error("Speed change error:", error);
                 showError("Could not change world speed.");
+                // Revert the select to current known speed
+                this._applySpeedToControl(this._lastState?.simulation_speed || 1);
             }
         });
 
@@ -802,6 +1084,34 @@ class WorldComponent {
         if ([...select.options].some((opt) => opt.value === rounded)) {
             select.value = rounded;
         }
+        
+        // Special handling for x1000 time skip mode
+        if (speed >= 1000) {
+            const timeDisplay = document.getElementById("world-time-display");
+            if (timeDisplay) {
+                timeDisplay.style.background = "#ff6b6b";
+                timeDisplay.style.color = "white";
+                timeDisplay.style.padding = "2px 8px";
+                timeDisplay.style.borderRadius = "4px";
+                timeDisplay.title = "Time Skip Mode: Calculating final states directly";
+            }
+        } else {
+            const timeDisplay = document.getElementById("world-time-display");
+            if (timeDisplay) {
+                timeDisplay.style.background = "";
+                timeDisplay.style.color = "";
+                timeDisplay.style.padding = "";
+                timeDisplay.style.borderRadius = "";
+                timeDisplay.title = "";
+            }
+        }
+    }
+
+    _updatePlayPauseButton(paused) {
+        const btn = document.getElementById("world-btn-play-pause");
+        if (!btn) return;
+        btn.textContent = paused ? "Resume" : "Pause";
+        btn.classList.toggle("paused", !!paused);
     }
 }
 

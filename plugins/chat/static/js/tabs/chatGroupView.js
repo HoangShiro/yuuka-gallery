@@ -123,14 +123,15 @@ Object.assign(window.ChatComponent.prototype, {
         }
 
         // Bind inventory tab buttons (Memory, Scenes, Album) — same logic as openChat
-        this.container.querySelectorAll('.status-tab-btn').forEach(btn => {
+        const inventoryPanel = this.container.querySelector('#modal-inventory');
+        inventoryPanel?.querySelectorAll('.status-tab-btn').forEach(btn => {
             // Clone to remove any previous listeners
             const newBtn = btn.cloneNode(true);
             btn.parentNode.replaceChild(newBtn, btn);
         });
-        this.container.querySelectorAll('.status-tab-btn').forEach(btn => {
+        inventoryPanel?.querySelectorAll('.status-tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                this.container.querySelectorAll('.status-tab-btn').forEach(b => b.classList.remove('active'));
+                inventoryPanel.querySelectorAll('.status-tab-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 const tab = btn.dataset.tab;
                 const statusTab = this.container.querySelector('#status-tab-status');
@@ -249,6 +250,11 @@ Object.assign(window.ChatComponent.prototype, {
                     this._triggerGroupContinue(selection);
                 }
                 return;
+            }
+
+            // Clear autosave
+            if (this.state.activeChatGroupId) {
+                localStorage.removeItem(`chat-autosave-group-${this.state.activeChatGroupId}`);
             }
 
             textarea.value = '';

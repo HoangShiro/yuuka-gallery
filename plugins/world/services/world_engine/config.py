@@ -5,6 +5,7 @@ from .constants import DEFAULT_CONFIG, PERSONALITY_TO_PROFILE
 
 VALID_PERSONALITIES = {"Balanced", "Introverted", "Extroverted"}
 VALID_DENSITIES = {"Scattered", "Uniform", "Concentrated"}
+VALID_SOCIALIZE_MODES = {"None", "Half", "Full"}
 
 
 def _clamp_int(value, default, lo, hi):
@@ -102,6 +103,15 @@ def normalize_building_density(raw_config, base_density):
     return base_density
 
 
+def normalize_socialize_mode(raw_config, base_mode):
+    value = raw_config.get("socializeMode", base_mode)
+    if isinstance(value, str):
+        normalized = value.strip().capitalize()
+        if normalized in VALID_SOCIALIZE_MODES:
+            return normalized
+    return base_mode
+
+
 def normalize_engine_config(raw_config, base_config=None):
     if base_config is None:
         base = copy.deepcopy(DEFAULT_CONFIG)
@@ -118,7 +128,8 @@ def normalize_engine_config(raw_config, base_config=None):
     merged = copy.deepcopy(base)
     for key, value in raw.items():
         if key not in {"npcCount", "personality", "personalityProfile", "mainRoadCount", "arterialCount",
-                       "subRoadCount", "roadSkew", "roadCurve", "buildingDensity", "blockComplexity"}:
+                       "subRoadCount", "roadSkew", "roadCurve", "buildingDensity", "blockComplexity",
+                       "socializeMode", "assignHome", "birthRate"}:
             merged[key] = value
 
     merged["npcCount"] = _clamp_int(raw.get("npcCount", base["npcCount"]), base["npcCount"], 1, 500)
@@ -132,6 +143,9 @@ def normalize_engine_config(raw_config, base_config=None):
     merged["roadSkew"] = _clamp_float(raw.get("roadSkew", base["roadSkew"]), base["roadSkew"], 0.0, 1.0)
     merged["roadCurve"] = _clamp_int(raw.get("roadCurve", base["roadCurve"]), base["roadCurve"], 0, 5)
     merged["buildingDensity"] = normalize_building_density(raw, base["buildingDensity"])
+    merged["socializeMode"] = normalize_socialize_mode(raw, base.get("socializeMode", "None"))
+    merged["assignHome"] = bool(raw.get("assignHome", base.get("assignHome", True)))
+    merged["birthRate"] = _clamp_int(raw.get("birthRate", base.get("birthRate", 100)), base.get("birthRate", 100), 0, 100)
     merged["personality"], merged["personalityProfile"] = normalize_personality(raw, base)
 
     if "tick_interval_ms" in raw:
@@ -157,6 +171,9 @@ def export_config_view(config):
         "roadSkew": config["roadSkew"],
         "roadCurve": config["roadCurve"],
         "buildingDensity": config["buildingDensity"],
+        "socializeMode": config.get("socializeMode", "None"),
+        "assignHome": bool(config.get("assignHome", True)),
+        "birthRate": config.get("birthRate", 100),
         "seed": config.get("seed"),
         "tick_interval_ms": config["tick_interval_ms"],
         "save_every_n_ticks": config["save_every_n_ticks"],

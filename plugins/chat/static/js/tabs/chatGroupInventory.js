@@ -19,8 +19,9 @@ Object.assign(window.ChatComponent.prototype, {
         if (albumTab) albumTab.style.display = 'none';
 
         // Reset active tab button
-        this.container.querySelectorAll('.status-tab-btn').forEach(b => b.classList.remove('active'));
-        const statusBtn = this.container.querySelector('.status-tab-btn[data-tab="status"]');
+        const inventoryPanel = this.container.querySelector('#modal-inventory');
+        inventoryPanel?.querySelectorAll('.status-tab-btn').forEach(b => b.classList.remove('active'));
+        const statusBtn = inventoryPanel?.querySelector('.status-tab-btn[data-tab="status"]');
         if (statusBtn) statusBtn.classList.add('active');
 
         this._renderGroupInventoryStatus();

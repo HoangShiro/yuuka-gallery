@@ -76,7 +76,12 @@ def register_routes(blueprint, plugin):
                 context
             )
             if task_id:
-                return jsonify({"status": "started", "task_id": task_id, "message": message})
+                return jsonify({
+                    "status": "started",
+                    "task_id": task_id,
+                    "message": message,
+                    "character_hash": character_hash,
+                })
             return jsonify({"error": message}), 429
 
         except ConnectionError as err:
