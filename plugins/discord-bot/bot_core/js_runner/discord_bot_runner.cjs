@@ -47,7 +47,7 @@ async function main() {
   emit({ event: 'intents', intents: activeNames });
 
   const client = new Client({ intents: activeBits, partials: [Partials.Channel] });
-  const { runtimeState } = setupModules(client, config.modules, config, logger);
+  const { runtimeState, onReady } = setupModules(client, config.modules, config, logger);
   let shuttingDown = false;
   let hasFlushedState = false;
 
@@ -143,10 +143,14 @@ async function main() {
 
   client.once(Events.ClientReady, async () => {
     const botName = client.user?.username || null;
+    const botId = client.user?.id || null;
     const botTag = client.user?.tag || botName || 'unknown';
+    const avatarUrl = client.user?.displayAvatarURL({ size: 128 }) || null;
     emit({
       event: 'ready',
       actual_name: botName,
+      actual_id: botId,
+      avatar_url: avatarUrl,
       intents: activeNames,
       started_at: new Date().toISOString(),
     });
@@ -158,6 +162,10 @@ async function main() {
       }
     } catch (error) {
       logger.log('warning', `Failed to register application commands: ${error.message || String(error)}`);
+    }
+
+    if (typeof onReady === 'function') {
+      await onReady();
     }
   });
 

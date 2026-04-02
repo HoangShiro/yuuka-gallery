@@ -120,8 +120,7 @@ class DiscordBotRunner:
             stdout_thread.join(timeout=1.0)
             stderr_thread.join(timeout=1.0)
             self._cleanup_process()
-            self.runtime.started_at = None
-            self.runtime.actual_name = None
+            # We keep started_at/actual_name/actual_id for the UI to show the last known state
             if self.runtime.state != "error":
                 self.runtime.update_state("stopped")
             self.log.add("info", "discord.js runner terminated.")
@@ -166,6 +165,9 @@ class DiscordBotRunner:
             started_at = self._parse_iso_timestamp(payload.get("started_at"))
             self.runtime.started_at = started_at or datetime.now(timezone.utc)
 
+            resolved_id = (payload.get("actual_id") or "").strip()
+            self.runtime.actual_id = resolved_id or None
+
             resolved_name = (payload.get("actual_name") or "").strip()
             self.runtime.actual_name = resolved_name or None
             if resolved_name:
@@ -176,6 +178,11 @@ class DiscordBotRunner:
                         callback(resolved_name)
                     except Exception as exc:  # noqa: BLE001
                         self.log.add("warning", f"Failed to persist bot name: {exc}")
+
+            resolved_avatar = (payload.get("avatar_url") or "").strip()
+            self.runtime.avatar_url = resolved_avatar or None
+            if resolved_avatar:
+                self.runtime.config["avatar_url"] = resolved_avatar
 
             self.runtime.update_state("running")
             return

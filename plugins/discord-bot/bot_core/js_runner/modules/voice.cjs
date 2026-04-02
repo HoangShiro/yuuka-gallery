@@ -23,6 +23,19 @@ module.exports = function createVoiceModule(deps) {
   return {
     module_id: 'core.voice',
     name: 'Voice Tools',
+    async onReady() {
+      const records = runtimeState.voiceState.joinedChannelByGuild.values();
+      for (const record of records) {
+        if (record.connected && record.voice_channel_id) {
+          try {
+            await voiceAdapter.connect(record.guild_id, record.voice_channel_id, record);
+            deps.logger?.log('info', `[Voice] Reconnected to channel ${record.voice_channel_id} in guild ${record.guild_id}`);
+          } catch (err) {
+            deps.logger?.log('warning', `[Voice] Failed to reconnect to channel ${record.voice_channel_id}: ${err.message}`);
+          }
+        }
+      }
+    },
     setup(ctx) {
       registerPolicyDefinition(runtimeState, 'core.voice', {
         policy_id: POLICY_APP_COMMANDS,
@@ -133,7 +146,7 @@ module.exports = function createVoiceModule(deps) {
             voice_channel_name: safeChannelName(memberVoice),
             member_count: Number(memberVoice.members?.size || 0),
           });
-          await replyToInteraction(interaction, { content: `Đã ghi nhận voice context tại ${safeChannelName(memberVoice)}.`, ephemeral: true });
+          await replyToInteraction(interaction, { content: `Bot đang tham gia voice channel: ${safeChannelName(memberVoice)}.`, ephemeral: true });
           ctx.publish('bot.command_executed', {
             command: 'join-voice',
             guild: safeGuildName(interaction.guild),

@@ -91,11 +91,28 @@ class CoreAPI:
 
         is_valid = False
         # Yuuka: Sửa lại logic một chút để localhost có thể dùng bất kỳ token nào trong whitelist
-        # và remote user dùng bất kỳ token nào trong user_data.
-        if token in self._whitelist_users:
-            is_valid = True
-        elif not is_localhost and token in self._user_data.get("users", []):
-             is_valid = True
+        # và cả waitlist (để bước setup ban đầu có thể vượt qua verify_token).
+        # Remote user dùng bất kỳ token nào trong user_data.
+        # Hỗ trợ cả định dạng cũ (list) và mới (dict).
+        if isinstance(self._whitelist_users, list):
+            if token in self._whitelist_users: is_valid = True
+        elif isinstance(self._whitelist_users, dict):
+            if token in self._whitelist_users: is_valid = True
+
+        if not is_valid and is_localhost:
+            # Chỉ cho phép waitlist nếu chưa có bất kỳ admin nào (bước setup đầu tiên)
+            if not self._whitelist_users:
+                if isinstance(self._waitlist_users, list):
+                    if token in self._waitlist_users: is_valid = True
+                elif isinstance(self._waitlist_users, dict):
+                    if token in self._waitlist_users: is_valid = True
+
+        if not is_valid and not is_localhost:
+            users_list = self._user_data.get("users", [])
+            if isinstance(users_list, list):
+                if token in users_list: is_valid = True
+            elif isinstance(users_list, dict):
+                if token in users_list: is_valid = True
 
         if is_valid:
             return hashlib.sha256(token.encode('utf-8')).hexdigest()
@@ -105,29 +122,52 @@ class CoreAPI:
     # Yuuka: auth rework v1.0 - Logic tạo token mới
     def generate_token(self):
         """
-        Tạo token mới. Lưu vào waitlist nếu từ localhost, nếu không lưu vào user_data.
+        Tạo token mới. Luôn đưa vào waitlist để chờ Admin phê duyệt.
+        Lưu kèm thời gian đăng ký.
         """
         new_token = str(uuid.uuid4())
-        client_ip = request.remote_addr
-        is_localhost = client_ip == '127.0.0.1'
+        reg_time = int(time.time())
 
-        if is_localhost:
-            # Lưu vào waitlist
-            if len(self._waitlist_users) >= 100:
+        # Khởi tạo dict nếu đang là list cũ
+        if isinstance(self._waitlist_users, list):
+            self._waitlist_users = {t: {"reg_time": reg_time} for t in self._waitlist_users}
+
+        if new_token not in self._waitlist_users:
+            if len(self._waitlist_users) >= 500: # Tăng giới hạn một chút cho remote users
                 raise Exception("Waitlist is full. Please contact administrator.")
             
-            if new_token not in self._waitlist_users:
-                self._waitlist_users.append(new_token)
-                self.save_data(self._waitlist_users, "waitlist.json", obfuscated=True)
-                print(f"[CoreAPI] New token for localhost added to waitlist.")
-
-        else:
-            # Lưu vào user_data như bình thường
-            self._user_data.setdefault("users", []).append(new_token)
-            self.save_data(self._user_data, "user_data.json", obfuscated=True)
-            print(f"[CoreAPI] Generated new token for remote user.")
+            self._waitlist_users[new_token] = {"reg_time": reg_time}
+            self.save_data(self._waitlist_users, "waitlist.json", obfuscated=True)
+            print(f"[CoreAPI] New token added to waitlist (Waiting for approval).")
             
         return jsonify({"status": "created", "token": new_token})
+
+    # Yuuka: auth rework v1.0 - Logic phê duyệt token thành người dùng phổ thông
+    def approve_token(self, token_to_approve: str):
+        """Chuyển một token từ waitlist sang danh sách người dùng phổ thông (Regular User)."""
+        reg_time = int(time.time())
+        
+        # Đảm bảo format dữ liệu mới
+        users_data = self._user_data.get("users", [])
+        if isinstance(users_list := users_data, list):
+            users_data = {t: {"reg_time": reg_time} for t in users_list}
+            self._user_data["users"] = users_data
+
+        if token_to_approve in self._waitlist_users:
+            reg_time = self._waitlist_users[token_to_approve].get("reg_time", reg_time)
+            
+            # Thêm vào danh sách người dùng chính thức
+            self._user_data["users"][token_to_approve] = {"reg_time": reg_time}
+            self.save_data(self._user_data, "user_data.json", obfuscated=True)
+            
+            # Xóa khỏi waitlist
+            del self._waitlist_users[token_to_approve]
+            self.save_data(self._waitlist_users, "waitlist.json", obfuscated=True)
+            
+            print(f"[CoreAPI] Token {token_to_approve[:8]}... approved as regular user.")
+            return True, "Người dùng đã được phê duyệt."
+        
+        return False, "Token không tồn tại trong danh sách chờ."
 
     # Yuuka: auth rework v1.0 - Logic đăng nhập chỉ để xác thực token
     def login_with_token(self, token: str):
@@ -147,13 +187,28 @@ class CoreAPI:
     # Yuuka: auth rework v1.1 - Hàm để quản lý whitelist
     def add_token_to_whitelist(self, token_to_add: str):
         """Thêm một token vào whitelist và xóa khỏi waitlist nếu có."""
+        reg_time = int(time.time())
+        
+        # Chuyển whitelist sang dict nếu cần
+        if isinstance(self._whitelist_users, list):
+            self._whitelist_users = {t: {"reg_time": reg_time} for t in self._whitelist_users}
+        
         if token_to_add not in self._whitelist_users:
-            self._whitelist_users.append(token_to_add)
+            # Lấy reg_time từ waitlist nếu có
+            if isinstance(self._waitlist_users, dict) and token_to_add in self._waitlist_users:
+                reg_time = self._waitlist_users[token_to_add].get("reg_time", reg_time)
+            elif isinstance(self._user_data.get("users"), dict) and token_to_add in self._user_data["users"]:
+                reg_time = self._user_data["users"][token_to_add].get("reg_time", reg_time)
+
+            self._whitelist_users[token_to_add] = {"reg_time": reg_time}
             self.save_data(self._whitelist_users, "whitelist.json", obfuscated=True)
             print(f"[CoreAPI] Token added to whitelist.")
 
             if token_to_add in self._waitlist_users:
-                self._waitlist_users.remove(token_to_add)
+                if isinstance(self._waitlist_users, list):
+                    self._waitlist_users.remove(token_to_add)
+                else:
+                    del self._waitlist_users[token_to_add]
                 self.save_data(self._waitlist_users, "waitlist.json", obfuscated=True)
                 print(f"[CoreAPI] Token removed from waitlist.")
             
@@ -366,8 +421,13 @@ class CoreAPI:
     def _cleanup_dead_data(self):
         print("[CoreAPI Cleanup] Checking for dead user data...")
         # Yuuka: auth rework v1.0 - User hợp lệ là user trong user_data HOẶC whitelist
-        valid_public_tokens = set(self._user_data.get("users", []))
-        valid_whitelist_tokens = set(self._whitelist_users)
+        def get_tokens(data):
+            if isinstance(data, list): return set(data)
+            if isinstance(data, dict): return set(data.keys())
+            return set()
+
+        valid_public_tokens = get_tokens(self._user_data.get("users", []))
+        valid_whitelist_tokens = get_tokens(self._whitelist_users)
         valid_tokens = valid_public_tokens.union(valid_whitelist_tokens)
 
         if not valid_tokens:

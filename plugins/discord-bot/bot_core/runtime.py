@@ -23,6 +23,8 @@ class BotRuntime:
     intents: List[str] = field(default_factory=list)
     started_at: Optional[datetime] = None
     actual_name: Optional[str] = None
+    actual_id: Optional[str] = None
+    avatar_url: Optional[str] = None
     persist_name_callback: Optional[Callable[[str], None]] = None
 
     def update_state(self, state: str, error: Optional[str] = None) -> None:
@@ -37,10 +39,14 @@ class BotRuntime:
             started_at_str = _format_datetime(self.started_at)
             fallback_updated = normalize_timestamp(self.config.get("updated_at"))
             updated_at_str = started_at_str or fallback_updated
+            # Hiển thị avatar từ runtime nếu đang chạy, nếu không thì từ config
+            avatar = self.avatar_url or self.config.get("avatar_url")
             return {
                 "bot_id": self.bot_id,
+                "actual_id": self.actual_id,
                 "name": display_name,
                 "actual_name": self.actual_name,
+                "avatar_url": avatar,
                 "modules": self.config.get("modules", []),
                 "auto_start": bool(self.config.get("auto_start", False)),
                 "intents": list(self.intents) or self.config.get("intents", []),

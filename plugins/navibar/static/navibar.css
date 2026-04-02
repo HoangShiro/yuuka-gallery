@@ -21,6 +21,7 @@ html {
     gap: var(--spacing-2);
     -webkit-user-select: none;
     user-select: none;
+    pointer-events: none;
 }
 
 #navibar-search-bar {

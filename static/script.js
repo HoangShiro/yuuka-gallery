@@ -527,6 +527,9 @@ async function startApplication() {
     console.log('[Core] Yuuka is waking up...');
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
+    // Yuuka: Khởi tạo account API client sớm để dùng cho check status
+    api.createPluginApiClient('account');
+
     // Ensure auth service (provided by auth plugin JS) exists; if not, create a lightweight fallback until plugin loads.
     if (!window.Yuuka.services.auth) {
         if (window.Yuuka.components['AuthPluginComponent']) {
@@ -547,11 +550,22 @@ async function startApplication() {
 
     if (token) {
         try {
-            await initializeAppUI();
+            // Yuuka: auth status check v1.0 - Kiểm tra trạng thái phê duyệt của token
+            const authStatus = await api.account.get("/status");
+            if (authStatus.is_logged_in) {
+                if (authStatus.status === 'waiting') {
+                    window.Yuuka.services.auth.showLogin?.('', 'waiting');
+                } else {
+                    await initializeAppUI();
+                }
+            } else {
+                localStorage.removeItem('yuuka-auth-token');
+                window.Yuuka.services.auth.showLogin?.('Token không hợp lệ hoặc đã hết hạn.');
+            }
         } catch (error) {
             if (error.status === 401) {
                 localStorage.removeItem('yuuka-auth-token');
-                window.Yuuka.services.auth.showLogin?.('Token không hợp lệ. Vui lòng đăng nhập lại.');
+                window.Yuuka.services.auth.showLogin?.('Phiên đăng nhập hết hạn. Vui lòng thử lại.');
             } else {
                 showError(`Lỗi khởi tạo: ${error.message}`);
                 console.error(error);
@@ -564,6 +578,19 @@ async function startApplication() {
 
 window.addEventListener('load', startApplication);
 // Listen for auth:login to bootstrap rest of UI if not yet initialized
-window.Yuuka.events.on('auth:login', async () => {
-    try { await initializeAppUI(); } catch (e) { console.error('[Auth] Failed post-login init:', e); showError(`Lỗi khởi tạo: ${e.message}`); }
+window.Yuuka.events.on('auth:login', async (data) => {
+    try { 
+        // Sau khi đăng nhập/tạo token, kiểm tra lại status xem có cần chờ duyệt không
+        const authStatus = await api.account.get("/status");
+        if (authStatus.is_logged_in) {
+            if (authStatus.status === 'waiting') {
+                window.Yuuka.services.auth.showLogin?.('', 'waiting');
+            } else {
+                await initializeAppUI(); 
+            }
+        }
+    } catch (e) { 
+        console.error('[Auth] Failed post-login init:', e); 
+        showError(`Lỗi khởi tạo: ${e.message}`); 
+    }
 });

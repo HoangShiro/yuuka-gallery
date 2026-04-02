@@ -1,0 +1,24 @@
+{
+    "id": "settings",
+    "name": "Cài đặt",
+    "version": "1.0.0",
+    "description": "Quản lý cài đặt hệ thống và plugin",
+    "author": "Yuuka",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:SettingsPlugin",
+        "frontend_component": "SettingsComponent"
+    },
+    "assets": {
+        "js": ["settings.js"],
+        "css": ["settings.css"]
+    },
+    "ui": {
+        "tab": {
+            "id": "settings-tab",
+            "label": "Cài đặt",
+            "icon": "settings",
+            "order": 90
+        }
+    }
+}

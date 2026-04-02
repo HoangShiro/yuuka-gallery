@@ -41,6 +41,30 @@ class DiscordBotPlugin:
     def get_blueprint(self) -> Tuple[Blueprint, str]:
         return self.blueprint, "/api/plugin/discord-bot"
 
+    def register_background_tasks(self, task_service) -> None:
+        """
+        PluginManager calls this on load. We use it to start bots with auto_start=True.
+        """
+        print("[Plugin:DiscordBot] Checking for auto-start bots...")
+        all_configs = self.core_api.data_manager.read_json(
+            self.CONFIG_FILENAME,
+            default_value={},
+            obfuscated=True,
+        )
+
+        for user_hash, config in all_configs.items():
+            if not isinstance(config, dict):
+                continue
+            for bot_id, bot_cfg in config.get("bots", {}).items():
+                if bot_cfg.get("auto_start"):
+                    print(f"[Plugin:DiscordBot] Auto-starting bot '{bot_id}' for user '{user_hash}'...")
+                    try:
+                        # We don't know if this is an admin request, assume normal modules sanitization
+                        runtime = self._get_or_create_runtime(user_hash, bot_id, bot_cfg)
+                        self._start_runtime(user_hash, runtime)
+                    except Exception as e:
+                        print(f"[Plugin:DiscordBot] Failed to auto-start bot '{bot_id}': {e}")
+
     def _register_routes(self) -> None:
         @self.blueprint.route("/bots", methods=["GET"])
         def list_bots():
@@ -96,7 +120,18 @@ class DiscordBotPlugin:
             user_hash = self.core_api.verify_token_and_get_user_hash()
             is_admin = self._is_request_admin()
             payload = request.json or {}
-            bot_id = payload.get("bot_id") or "default"
+            
+            config = self._load_user_configs(user_hash)
+            bots = config.setdefault("bots", {})
+
+            bot_id = payload.get("bot_id")
+            if not bot_id:
+                if "default" not in bots:
+                    bot_id = "default"
+                else:
+                    import uuid
+                    bot_id = f"bot_{uuid.uuid4().hex[:8]}"
+
             token = (payload.get("token") or "").strip()
             name = (payload.get("name") or "My Discord Bot").strip()
             modules = payload.get("modules") or []
@@ -109,12 +144,11 @@ class DiscordBotPlugin:
                  chat_bridge_url = "http://127.0.0.1:5000/api/plugin/chat/generate/discord_bridge"
             chat_bridge_key = (payload.get("chat_bridge_key") or "").strip()
             incoming_policy_state = payload.get("policies") or {}
-            config = self._load_user_configs(user_hash)
-            bots = config.setdefault("bots", {})
+            
             existing_entry = bots.get(bot_id, {})
             token = token or str(existing_entry.get("token") or "").strip()
-            if not token:
-                abort(400, description="Discord bot token is required.")
+            # Note: We allow empty tokens at config level; 
+            # the bot_core will fail to start it, but that's handled at runtime.
             modules = self._sanitize_module_ids(modules, include_admin=is_admin) or self._default_module_ids(include_admin=is_admin)
             intents_list = list(existing_entry.get("intents") or self._default_intents_list())
             policy_state = self._merge_policy_state(
@@ -231,6 +265,27 @@ class DiscordBotPlugin:
                 "bot_id": bot_id,
                 "groups": self._collect_policy_groups(modules, bot_cfg.get("policies") or {}, include_admin=include_admin),
             })
+
+        @self.blueprint.route("/bots/<bot_id>", methods=["DELETE"])
+        def delete_bot(bot_id):
+            user_hash = self.core_api.verify_token_and_get_user_hash()
+            config = self._load_user_configs(user_hash)
+            bots = config.get("bots", {})
+            if bot_id not in bots:
+                abort(404, description=f"Bot '{bot_id}' not found for current user.")
+
+            # Stop runtime if exists
+            with self._lock:
+                user_runtimes = self._runtimes.get(user_hash, {})
+                runtime = user_runtimes.get(bot_id)
+                if runtime:
+                    self._stop_runtime(runtime, timeout=5.0)
+                    user_runtimes.pop(bot_id, None)
+
+            # Remove from config
+            bots.pop(bot_id)
+            self._save_user_configs(user_hash, config)
+            return jsonify({"status": "deleted", "bot_id": bot_id})
 
         @self.blueprint.route("/modules", methods=["GET"])
         def list_modules():

@@ -256,6 +256,58 @@ a:focus:not(:focus-visible) {
     background-color: var(--color-border);
 }
 
+/* Yuuka: Waiting Screen Styles */
+.auth-waiting-wrapper .waiting-icon {
+    font-size: 5rem;
+    color: #ffcc00;
+    margin-bottom: var(--spacing-4);
+    animation: pulse 2s infinite;
+}
+
+.waiting-token-display {
+    background: var(--color-primary-bg);
+    padding: var(--spacing-3);
+    border-radius: var(--rounded-md);
+    margin: var(--spacing-4) 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.waiting-token-display code {
+    font-family: monospace;
+    font-size: 1.1rem;
+    color: var(--color-accent);
+}
+
+.waiting-hint {
+    font-size: 0.9rem;
+    color: var(--color-secondary-text);
+    margin-bottom: var(--spacing-6);
+}
+
+.secondary-btn {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-secondary-text);
+    padding: 10px 20px;
+    border-radius: var(--rounded-md);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.secondary-btn:hover {
+    background: var(--color-border);
+    color: var(--color-primary-text);
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.7; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
 body.is-logged-out .container,
 body.is-logged-out #main-nav,
 body.is-logged-out #result-footer {

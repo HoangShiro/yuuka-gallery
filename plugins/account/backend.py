@@ -33,7 +33,7 @@ class AccountPlugin:
 
             all_users = []
             
-            def add_user(token_val, role, status):
+            def add_user(token_val, role, status, reg_time=None):
                 try:
                     uhash = hashlib.sha256(token_val.encode('utf-8')).hexdigest()
                     all_users.append({
@@ -41,23 +41,52 @@ class AccountPlugin:
                         "hash": uhash,
                         "role": role,
                         "status": status,
+                        "reg_time": reg_time,
                         "is_self": uhash == current_user_hash
                     })
                 except Exception: pass
 
+            def get_reg_time(data, token):
+                if isinstance(data, dict):
+                    return data.get(token, {}).get("reg_time")
+                return None
+
             unique_tokens = set()
-            for t in whitelist: 
-                if t not in unique_tokens:
-                    add_user(t, "admin", "active")
-                    unique_tokens.add(t)
-            for t in waitlist: 
-                if t not in unique_tokens:
-                    add_user(t, "user", "waiting")
-                    unique_tokens.add(t)
-            for t in regular_users: 
-                if t not in unique_tokens:
-                    add_user(t, "user", "active")
-                    unique_tokens.add(t)
+            # 1. Whitelist (Admins)
+            if isinstance(whitelist, dict):
+                for t, info in whitelist.items():
+                    if t not in unique_tokens:
+                        add_user(t, "admin", "active", info.get("reg_time"))
+                        unique_tokens.add(t)
+            else:
+                for t in whitelist:
+                    if t not in unique_tokens:
+                        add_user(t, "admin", "active")
+                        unique_tokens.add(t)
+
+            # 2. Waitlist (Waiting)
+            if isinstance(waitlist, dict):
+                for t, info in waitlist.items():
+                    if t not in unique_tokens:
+                        add_user(t, "user", "waiting", info.get("reg_time"))
+                        unique_tokens.add(t)
+            else:
+                for t in waitlist:
+                    if t not in unique_tokens:
+                        add_user(t, "user", "waiting")
+                        unique_tokens.add(t)
+
+            # 3. Regular users
+            if isinstance(regular_users, dict):
+                for t, info in regular_users.items():
+                    if t not in unique_tokens:
+                        add_user(t, "user", "active", info.get("reg_time"))
+                        unique_tokens.add(t)
+            else:
+                for t in regular_users:
+                    if t not in unique_tokens:
+                        add_user(t, "user", "active")
+                        unique_tokens.add(t)
 
             return jsonify({
                 "users": all_users,
@@ -75,6 +104,19 @@ class AccountPlugin:
             if not target_token: abort(400)
 
             success, msg = self.core_api.add_token_to_whitelist(target_token)
+            return jsonify({"status": "ok" if success else "error", "message": msg})
+
+        @self.blueprint.route("/approve", methods=["POST"])
+        def approve_user():
+            self._ensure_first_admin()
+            self.core_api.verify_token_and_get_user_hash()
+            if not self._is_admin(self._get_request_token()):
+                abort(403)
+
+            target_token = request.json.get("token")
+            if not target_token: abort(400)
+
+            success, msg = self.core_api.approve_token(target_token)
             return jsonify({"status": "ok" if success else "error", "message": msg})
 
         @self.blueprint.route("/revoke", methods=["POST"])
@@ -147,14 +189,31 @@ class AccountPlugin:
                         "can_setup": not self.core_api._whitelist_users
                     })
 
-                self.core_api.verify_token_and_get_user_hash()
-                is_admin = self._is_admin(token)
+                # Kiểm tra xem token có trong waitlist không (trước khi verify_token quăng lỗi)
+                is_waiting = False
+                if isinstance(self.core_api._waitlist_users, (list, dict)):
+                    if token in self.core_api._waitlist_users:
+                        is_waiting = True
 
-                return jsonify({
-                    "is_logged_in": True,
-                    "is_admin": is_admin,
-                    "can_setup": not self.core_api._whitelist_users
-                })
+                try:
+                    self.core_api.verify_token_and_get_user_hash()
+                    is_admin = self._is_admin(token)
+                    return jsonify({
+                        "is_logged_in": True,
+                        "is_admin": is_admin,
+                        "status": "active",
+                        "can_setup": not self.core_api._whitelist_users
+                    })
+                except Exception:
+                    if is_waiting:
+                        return jsonify({
+                            "is_logged_in": True,
+                            "is_admin": False,
+                            "status": "waiting",
+                            "can_setup": False
+                        })
+                    raise # Chuyển ra catch bên ngoài
+
             except Exception:
                 return jsonify({
                     "is_logged_in": False,

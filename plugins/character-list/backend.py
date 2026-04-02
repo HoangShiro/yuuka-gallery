@@ -47,7 +47,23 @@ class CharacterListPlugin:
         @self.blueprint.route('/whitelist/add', methods=['POST'])
         def add_to_whitelist():
             try:
-                # Chỉ user đã được xác thực (tức là đã trong whitelist) mới có quyền này
+                # Yuuka: Chỉ admin (có trong whitelist) mới có quyền thêm user khác vào whitelist
+                auth_header = request.headers.get('Authorization')
+                if not auth_header or not auth_header.startswith('Bearer '):
+                    return jsonify({"error": "Admin permission required."}), 403
+                
+                token = auth_header.split(' ')[1]
+                
+                is_admin = False
+                if isinstance(self.core_api._whitelist_users, list):
+                    if token in self.core_api._whitelist_users: is_admin = True
+                elif isinstance(self.core_api._whitelist_users, dict):
+                    if token in self.core_api._whitelist_users: is_admin = True
+                
+                if not is_admin:
+                    return jsonify({"error": "Admin permission required."}), 403
+
+                # Xác thực user_hash (vẫn cần để đảm bảo token hợp lệ)
                 self.core_api.verify_token_and_get_user_hash()
                 
                 data = request.json

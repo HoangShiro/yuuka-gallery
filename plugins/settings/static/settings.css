@@ -1,0 +1,189 @@
+:root {
+    --settings-sidebar-width: 220px; /* Giảm từ 280px */
+    --settings-transition: 0.2s ease;
+}
+
+.settings-layout {
+    display: flex;
+    background-color: transparent;
+    margin: 0;
+    gap: 0;
+    /* 140px = 20px (top padding) + 20px (bottom container padding) + 100px (body padding bottom) */
+    min-height: calc(100vh - 140px); 
+}
+
+/* Sidebar: Thu nhỏ và tinh chỉnh font */
+.settings-sidebar {
+    width: var(--settings-sidebar-width);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    padding: var(--spacing-2) var(--spacing-4) var(--spacing-2) 0;
+    border-right: 1px solid var(--color-border);
+}
+
+.settings-sidebar-item {
+    padding: var(--spacing-2) var(--spacing-3); /* Tối ưu lại padding */
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    cursor: pointer;
+    border-radius: var(--rounded-md);
+    transition: var(--settings-transition);
+    color: var(--color-secondary-text);
+    user-select: none;
+}
+
+.settings-sidebar-item .material-symbols-outlined {
+    font-size: 20px; /* Giảm nhẹ kích thước icon */
+}
+
+.settings-sidebar-item:hover {
+    background-color: var(--color-border);
+    color: var(--color-primary-text);
+}
+
+.settings-sidebar-item.active {
+    background-color: transparent;
+    color: var(--color-accent);
+    font-weight: 700;
+}
+
+.settings-sidebar-item.active .material-symbols-outlined {
+    font-variation-settings: 'FILL' 1;
+}
+
+.settings-sidebar-label {
+    font-size: 0.85rem; /* Giảm từ 1rem */
+}
+
+/* Nội dung bên phải: Tăng khoảng cách với vách ngăn */
+.settings-content {
+    flex: 1;
+    background-color: transparent;
+    padding: var(--spacing-2) 0 var(--spacing-6) 48px; /* 48px thay vì dính sát */
+}
+
+.settings-content-header {
+    margin-bottom: var(--spacing-6);
+}
+
+.settings-content-header h2 {
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: var(--color-primary-text);
+    margin: 0;
+    letter-spacing: -0.5px;
+}
+
+/* Module cài đặt */
+.settings-section-module {
+    animation: fadeInFlat 0.3s ease-out;
+}
+
+.settings-section-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: var(--spacing-5);
+    color: var(--color-secondary-text);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+}
+
+.settings-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-4) 0;
+    border-bottom: 1px solid var(--color-border);
+    gap: var(--spacing-6);
+}
+
+.settings-item:last-child {
+    border-bottom: none;
+}
+
+.settings-item-label {
+    display: block;
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 2px;
+    color: var(--color-primary-text);
+}
+
+.settings-item-description {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--color-secondary-text);
+    line-height: 1.5;
+}
+
+/* Controls tối giản */
+.settings-select, 
+.settings-input {
+    min-width: 180px;
+    padding: 8px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background-color: var(--color-card-bg);
+    color: var(--color-primary-text);
+    font-family: inherit;
+    font-size: 0.9rem;
+    transition: border-color 0.2s;
+}
+
+.settings-select:focus {
+    border-color: var(--color-accent);
+    outline: none;
+}
+
+@keyframes fadeInFlat {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Mobile Responsive */
+@media (max-width: 992px) {
+    --settings-sidebar-width: 64px;
+    
+    .settings-sidebar {
+        padding-right: var(--spacing-1);
+    }
+    
+    .settings-sidebar-label {
+        display: none;
+    }
+    
+    .settings-sidebar-item {
+        justify-content: center;
+    }
+
+    .settings-content {
+        padding-left: var(--spacing-5);
+    }
+}
+
+@media (max-width: 640px) {
+    .settings-layout {
+        flex-direction: column;
+    }
+    
+    .settings-sidebar {
+        width: 100%;
+        flex-direction: row;
+        border-right: none;
+        border-bottom: 1px solid var(--color-border);
+        padding: 0 0 var(--spacing-2) 0;
+        margin-bottom: var(--spacing-4);
+        overflow-x: auto;
+    }
+    
+    .settings-sidebar-item {
+        flex: 0 0 auto;
+    }
+
+    .settings-content {
+        padding: 0;
+    }
+}

@@ -149,7 +149,7 @@ class PluginManager:
             if full_module_path in sys.modules:
                 del sys.modules[full_module_path]
             display_name = metadata.get("name", plugin_id) or plugin_id
-            print(f"[PluginManager] Error loading plugin '{plugin_id}': {e}")
+            print(self._color_text(f"[PluginManager] Error loading plugin '{plugin_id}': {e}", COLOR_RED))
             return False, display_name
 
     # -------------------- Hot-reload helpers --------------------
@@ -213,7 +213,7 @@ class PluginManager:
                 # Finally remove the blueprint registry entry
                 app.blueprints.pop(blueprint_name, None)
         except Exception as e:
-            print(f"[PluginManager] Warning: failed to unregister blueprint '{blueprint_name}': {e}")
+            print(self._color_text(f"[PluginManager] Warning: failed to unregister blueprint '{blueprint_name}': {e}", COLOR_RED))
 
     def _unload_plugin(self, plugin_id):
         with self._lock:
@@ -226,7 +226,7 @@ class PluginManager:
                 try:
                     self.core_api.stop_background_tasks_for_plugin(plugin_id)
                 except Exception as task_err:
-                    print(f"[PluginManager] Warning: failed to stop tasks for '{plugin_id}': {task_err}")
+                    print(self._color_text(f"[PluginManager] Warning: failed to stop tasks for '{plugin_id}': {task_err}", COLOR_RED))
 
                 # Call plugin shutdown hook
                 backend = plugin.backend
@@ -234,7 +234,7 @@ class PluginManager:
                     try:
                         backend.shutdown()
                     except Exception as e:
-                        print(f"[PluginManager] Warning: plugin '{plugin_id}' failed during shutdown: {e}")
+                        print(self._color_text(f"[PluginManager] Warning: plugin '{plugin_id}' failed during shutdown: {e}", COLOR_RED))
 
                 # Unregister blueprint routes
                 if plugin.blueprint_name:
@@ -253,7 +253,7 @@ class PluginManager:
                 self._plugins.pop(plugin_id, None)
                 return True
             except Exception as e:
-                print(f"[PluginManager] Error while unloading plugin '{plugin_id}': {e}")
+                print(self._color_text(f"[PluginManager] Error while unloading plugin '{plugin_id}': {e}", COLOR_RED))
                 return False
 
     def reload_plugin(self, plugin_id):
@@ -385,7 +385,7 @@ class PluginManager:
                             if self._files_changed(plugin):
                                 self.reload_plugin(pid)
                     except Exception as e:
-                        print(f"[PluginManager] Hot-reload watcher error: {e}")
+                        print(self._color_text(f"[PluginManager] Hot-reload watcher error: {e}", COLOR_RED))
                     finally:
                         time.sleep(max(0.2, interval))
 
@@ -462,17 +462,17 @@ class PluginManager:
             try:
                 self.core_api.stop_background_tasks_for_plugin(plugin.id)
             except Exception as task_err:
-                print(f"[PluginManager] Warning: failed to stop tasks for '{plugin.id}': {task_err}")
+                print(self._color_text(f"[PluginManager] Warning: failed to stop tasks for '{plugin.id}': {task_err}", COLOR_RED))
 
             backend = plugin.backend
             if hasattr(backend, "shutdown") and callable(getattr(backend, "shutdown")):
                 try:
                     backend.shutdown()
                 except Exception as e:
-                    print(f"[PluginManager] Warning: plugin '{plugin.id}' failed during shutdown: {e}")
+                    print(self._color_text(f"[PluginManager] Warning: plugin '{plugin.id}' failed during shutdown: {e}", COLOR_RED))
 
         # Final sweep in case any background task remains registered without plugin metadata
         try:
             self.core_api.stop_all_background_tasks()
         except Exception as e:
-            print(f"[PluginManager] Warning: residual background tasks detected during shutdown: {e}")
+            print(self._color_text(f"[PluginManager] Warning: residual background tasks detected during shutdown: {e}", COLOR_RED))

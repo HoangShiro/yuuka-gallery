@@ -11,6 +11,11 @@
     },
     "assets": {
         "js": [
+            "utils/formatting.js",
+            "utils/dom.js",
+            "utils/module.js",
+            "pages/policy_manager.js",
+            "pages/character_picker.js",
             "pages/dashboard.js",
             "discord_bot.js"
         ],

@@ -343,6 +343,21 @@ class CharacterListComponent {
             const tokenToAdd = wl[1].trim();
             if (tokenToAdd) {
                 try {
+                    // Yuuka: auth rework v1.1 - Kiểm tra quyền admin trước khi thực hiện
+                    let isAdmin = false;
+                    try {
+                        const status = await this.api.account.get('/status');
+                        isAdmin = status.is_admin;
+                    } catch (e) {
+                        isAdmin = false;
+                    }
+
+                    if (!isAdmin) {
+                        showError("Bạn không có quyền quản trị viên (Admin) để thực hiện lệnh này.");
+                        this.searchBox.value = '';
+                        return;
+                    }
+
                     const result = await this.api['character-list'].post('/whitelist/add', { token: tokenToAdd });
                     showError(result.message);
                 } catch (err) {
@@ -570,3 +585,56 @@ class CharacterListComponent {
 }
 
 window.Yuuka.components['CharacterListComponent'] = CharacterListComponent;
+
+// Register settings
+(function registerCharacterListSettings() {
+    window.Yuuka = window.Yuuka || {};
+    window.Yuuka.services = window.Yuuka.services || {};
+    
+    // Bootstrap buffer if settings service not yet loaded
+    if (!window.Yuuka.services.settings) {
+        window.Yuuka.services.settings = {
+            registerSection: (s) => {
+                window.Yuuka.services.settings._buffer = window.Yuuka.services.settings._buffer || [];
+                window.Yuuka.services.settings._buffer.push(s);
+            },
+            _buffer: []
+        };
+    }
+
+    const settings = window.Yuuka.services.settings;
+    settings.registerSection({
+        id: 'core',
+        label: 'Core',
+        icon: 'settings_applications',
+        order: 10,
+        render: (container) => {
+            container.innerHTML = `
+                <div class="settings-section-group">
+                    <h3 class="settings-section-title">Nhân vật & Album</h3>
+                    <div class="settings-item">
+                        <div class="settings-item-info">
+                            <span class="settings-item-label">Hành động khi nhấn vào nhân vật</span>
+                            <span class="settings-item-description">Chọn xem khi nhấn vào nhân vật sẽ mở Album (mặc định) hay mở trang chi tiết nhân vật.</span>
+                        </div>
+                        <div class="settings-item-control">
+                            <select class="settings-select" id="setting-album-view-mode">
+                                <option value="album">Mở Album</option>
+                                <option value="character">Mở trang chi tiết</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            const select = container.querySelector('#setting-album-view-mode');
+            const current = localStorage.getItem('yuuka.album.grid_open_view_mode') || 'album';
+            select.value = current;
+            
+            select.onchange = () => {
+                localStorage.setItem('yuuka.album.grid_open_view_mode', select.value);
+                if (window.showSuccess) window.showSuccess('Đã cập nhật cài đặt.');
+            };
+        }
+    });
+})();

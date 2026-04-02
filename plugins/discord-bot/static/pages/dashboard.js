@@ -4,6 +4,9 @@ class DiscordBotDashboardPage {
         this.api = api;
         this.activePlugins = activePlugins;
         this.pluginApi = this.api['discord-bot'];
+        
+        // Alias để dễ sử dụng utils trong các method
+        this.Utils = window.Yuuka?.utils?.discordBot || {};
 
         this.state = {
             bots: [],
@@ -30,12 +33,15 @@ class DiscordBotDashboardPage {
         this._handleKill = this._handleKill.bind(this);
         this._handleFormSubmit = this._handleFormSubmit.bind(this);
         this._handleAutoScrollToggle = this._handleAutoScrollToggle.bind(this);
+        this._handleAutoStartToggle = this._handleAutoStartToggle.bind(this);
         this._handleModuleGridClick = this._handleModuleGridClick.bind(this);
         this._handleModuleGridChange = this._handleModuleGridChange.bind(this);
         this._handleModulePageBack = this._handleModulePageBack.bind(this);
         this._handleModulePageClick = this._handleModulePageClick.bind(this);
         this._handleModulePageChange = this._handleModulePageChange.bind(this);
         this._handleConsoleTabClick = this._handleConsoleTabClick.bind(this);
+        this._handleNewBot = this._handleNewBot.bind(this);
+        this._handleDeleteBot = this._handleDeleteBot.bind(this);
     }
 
     async init() {
@@ -75,88 +81,98 @@ class DiscordBotDashboardPage {
     // --------------------------------------------------------------------- //
     _buildBaseLayout() {
         this.container.innerHTML = `
-            <div class="discord-bot-dashboard">
-                <div class="discord-bot-row discord-bot-row--console">
-                    <div class="discord-bot-console-card">
-                        <div class="discord-bot-console-header">
-                            <div class="discord-bot-console-title">
-                                <span class="material-symbols-outlined" data-role="console-icon">terminal</span>
-                                <span data-role="console-title">Bot console</span>
-                            </div>
-                            <div class="discord-bot-console-tabs" data-role="console-tabs" style="display: flex; gap: 8px; margin-left: 20px; align-items: center; justify-content: flex-start; flex: 1;">
-                                <button class="discord-bot-btn discord-bot-btn--accent discord-bot-btn--sm" data-tab="log">Log</button>
-                                <button class="discord-bot-btn discord-bot-btn--sm" data-tab="message">Message</button>
-                            </div>
-                            <label class="discord-bot-autoscroll">
-                                <input type="checkbox" data-role="auto-scroll" checked />
-                                <span>Auto scroll</span>
-                            </label>
-                        </div>
-                        <div class="discord-bot-console-body active" data-role="console" data-view="log"></div>
-                        <div class="discord-bot-console-body" data-role="console-message" data-view="message" hidden style="font-family: monospace; white-space: pre-wrap; font-size: 13px; overflow-y: auto;"></div>
-                        <div class="discord-bot-console-controls">
-                            <div class="discord-bot-status" data-role="status-indicator">
-                                <span class="material-symbols-outlined">pause_circle</span>
-                                <div>
-                                    <span class="discord-bot-status__label">No bot</span>
-                                    <span class="discord-bot-status__hint"></span>
+            <div class="discord-bot-layout">
+                <aside class="discord-bot-sidebar">
+                    <div class="discord-bot-selector" data-role="bot-selector"></div>
+                    <button class="discord-bot-sidebar__new" data-action="new-bot" title="New Bot">
+                        <span class="material-symbols-outlined">add</span>
+                    </button>
+                </aside>
+                <main class="discord-bot-main-content">
+                    <div class="discord-bot-dashboard">
+                        <div class="discord-bot-row discord-bot-row--console">
+                            <div class="discord-bot-console-card">
+                                <div class="discord-bot-console-header">
+                                    <div class="discord-bot-console-title">
+                                        <span class="material-symbols-outlined" data-role="console-icon">terminal</span>
+                                        <span data-role="console-title">Bot console</span>
+                                    </div>
+                                    <div class="discord-bot-console-tabs" data-role="console-tabs" style="display: flex; gap: 8px; margin-left: 20px; align-items: center; justify-content: flex-start; flex: 1;">
+                                        <button class="discord-bot-btn discord-bot-btn--accent discord-bot-btn--sm" data-tab="log">Log</button>
+                                        <button class="discord-bot-btn discord-bot-btn--sm" data-tab="message">Message</button>
+                                    </div>
+                                    <label class="discord-bot-autoscroll">
+                                        <input type="checkbox" data-role="auto-scroll" checked />
+                                        <span>Auto scroll</span>
+                                    </label>
+                                </div>
+                                <div class="discord-bot-console-body active" data-role="console" data-view="log"></div>
+                                <div class="discord-bot-console-body" data-role="console-message" data-view="message" hidden style="font-family: monospace; white-space: pre-wrap; font-size: 13px; overflow-y: auto;"></div>
+                                <div class="discord-bot-console-controls">
+                                    <div class="discord-bot-status" data-role="status-indicator">
+                                        <span class="material-symbols-outlined">pause_circle</span>
+                                        <div>
+                                            <span class="discord-bot-status__label">No bot</span>
+                                            <span class="discord-bot-status__hint"></span>
+                                        </div>
+                                    </div>
+                                    <div class="discord-bot-actions">
+                                        <button class="discord-bot-btn discord-bot-btn--start" data-action="start" disabled>
+                                            <span class="material-symbols-outlined">play_arrow</span>Start
+                                        </button>
+                                        <button class="discord-bot-btn discord-bot-btn--restart" data-action="restart" disabled>
+                                            <span class="material-symbols-outlined">refresh</span>Restart
+                                        </button>
+                                        <button class="discord-bot-btn discord-bot-btn--danger" data-action="kill" disabled title="Force stop the process">
+                                            <span class="material-symbols-outlined">close</span>Kill
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="discord-bot-actions">
-                                <button class="discord-bot-btn discord-bot-btn--start" data-action="start" disabled>
-                                    <span class="material-symbols-outlined">play_arrow</span>Start
-                                </button>
-                                <button class="discord-bot-btn discord-bot-btn--restart" data-action="restart" disabled>
-                                    <span class="material-symbols-outlined">refresh</span>Restart
-                                </button>
-                                <button class="discord-bot-btn discord-bot-btn--danger" data-action="kill" disabled>
-                                    <span class="material-symbols-outlined">close</span>Kill
-                                </button>
+                        </div>
+                        <div class="discord-bot-row discord-bot-row--info">
+                            <div class="discord-bot-info" data-role="info"></div>
+                            <div class="discord-bot-info-token">
+                                <label for="discord-bot-token">Discord Bot Token</label>
+                                <div class="discord-bot-token-field">
+                                    <input id="discord-bot-token" type="password" data-role="token-input" form="discord-bot-config-form" placeholder="Paste bot token..." required />
+                                    <button type="submit" form="discord-bot-config-form" class="discord-bot-btn discord-bot-btn--accent">
+                                        <span class="material-symbols-outlined">link</span>Connect
+                                    </button>
+                                </div>
+                                <div class="discord-bot-auto-start">
+                                    <span class="discord-bot-auto-start__label">Auto start immediately after connect</span>
+                                    <label class="yuuka-switch" title="Auto start immediately after connect">
+                                        <input type="checkbox" data-role="auto-start" />
+                                        <span class="yuuka-switch__slider"></span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </div>
-                <div class="discord-bot-row discord-bot-row--info">
-                    <div class="discord-bot-info" data-role="info"></div>
-                    <div class="discord-bot-info-token">
-                        <label for="discord-bot-token">Discord Bot Token</label>
-                        <div class="discord-bot-token-field">
-                            <input id="discord-bot-token" type="password" data-role="token-input" form="discord-bot-config-form" placeholder="Paste bot token..." required />
-                            <button type="submit" form="discord-bot-config-form" class="discord-bot-btn discord-bot-btn--accent">
-                                <span class="material-symbols-outlined">link</span>Connect
-                            </button>
-                        </div>
-                        <div class="discord-bot-auto-start">
-                            <span class="discord-bot-auto-start__label">Auto start immediately after connect</span>
-                            <label class="yuuka-switch" title="Auto start immediately after connect">
-                                <input type="checkbox" data-role="auto-start" />
-                                <span class="yuuka-switch__slider"></span>
-                            </label>
+                        <div class="discord-bot-row discord-bot-row--form">
+                            <form id="discord-bot-config-form" data-role="config-form" autocomplete="off">
+                                <div class="discord-bot-field">
+                                    <label>Modules</label>
+                                    <div class="discord-bot-module-grid" data-role="module-grid"></div>
+                                </div>
+                            </form>
                         </div>
                     </div>
-                </div>
-                <div class="discord-bot-row discord-bot-row--form">
-                    <form id="discord-bot-config-form" data-role="config-form" autocomplete="off">
-                        <div class="discord-bot-field">
-                            <label>Modules</label>
-                            <div class="discord-bot-module-grid" data-role="module-grid"></div>
-                        </div>
-                    </form>
-                </div>
-            </div>
-            <div class="discord-bot-row discord-bot-row--module-page" data-role="module-page-row" hidden>
-                <div class="discord-bot-module-page">
-                    <div class="discord-bot-module-page__header">
-                        <button type="button" class="discord-bot-btn" data-action="module-page-back">
-                            <span class="material-symbols-outlined">arrow_back</span>Back
-                        </button>
-                        <div class="discord-bot-module-page__title-wrap">
-                            <h3 class="discord-bot-module-page__title" data-role="module-page-title">Module</h3>
-                            <span class="discord-bot-module-page__subtitle" data-role="module-page-subtitle"></span>
+                    <div class="discord-bot-row discord-bot-row--module-page" data-role="module-page-row" hidden>
+                        <div class="discord-bot-module-page">
+                            <div class="discord-bot-module-page__header">
+                                <button type="button" class="discord-bot-btn" data-action="module-page-back">
+                                    <span class="material-symbols-outlined">arrow_back</span>Back
+                                </button>
+                                <div class="discord-bot-module-page__title-wrap">
+                                    <h3 class="discord-bot-module-page__title" data-role="module-page-title">Module</h3>
+                                    <span class="discord-bot-module-page__subtitle" data-role="module-page-subtitle"></span>
+                                </div>
+                            </div>
+                            <div class="discord-bot-module-page__body" data-role="module-page-body"></div>
                         </div>
                     </div>
-                    <div class="discord-bot-module-page__body" data-role="module-page-body"></div>
-                </div>
+                </main>
             </div>
         `;
 
@@ -177,6 +193,8 @@ class DiscordBotDashboardPage {
         this.tokenInput = this.container.querySelector('[data-role="token-input"]');
         this.autoStartCheckbox = this.container.querySelector('[data-role="auto-start"]');
         this.autoScrollCheckbox = this.container.querySelector('[data-role="auto-scroll"]');
+        this.botSelectorEl = this.container.querySelector('[data-role="bot-selector"]');
+        this.newBotBtn = this.container.querySelector('button[data-action="new-bot"]');
         this.buttons = {
             start: this.container.querySelector('button[data-action="start"]'),
             restart: this.container.querySelector('button[data-action="restart"]'),
@@ -190,6 +208,7 @@ class DiscordBotDashboardPage {
         this.buttons.kill.addEventListener('click', this._handleKill);
         this.formEl.addEventListener('submit', this._handleFormSubmit);
         this.autoScrollCheckbox.addEventListener('change', this._handleAutoScrollToggle);
+        this.autoStartCheckbox.addEventListener('change', this._handleAutoStartToggle);
         if (this.consoleTabsEl) {
             this.consoleTabsEl.addEventListener('click', this._handleConsoleTabClick);
         }
@@ -202,6 +221,40 @@ class DiscordBotDashboardPage {
         if (this.modulePageBackBtn) {
             this.modulePageBackBtn.addEventListener('click', this._handleModulePageBack);
         }
+        if (this.newBotBtn) {
+            this.newBotBtn.addEventListener('click', this._handleNewBot);
+        }
+        if (this.botSelectorEl) {
+            this.botSelectorEl.addEventListener('click', async (e) => {
+                const deleteBtn = e.target.closest('[data-action="delete-bot"]');
+                if (deleteBtn) {
+                    const botId = deleteBtn.getAttribute('data-bot-id');
+                    await this._handleDeleteBot(botId);
+                    return;
+                }
+                const item = e.target.closest('.discord-bot-sidebar-icon');
+                if (item) {
+                    const botId = item.getAttribute('data-bot-id');
+                    const bot = this.state.bots.find(b => b.bot_id === botId);
+                    if (bot && (!this.state.activeBot || bot.bot_id !== this.state.activeBot.bot_id)) {
+                        this.state.activeBot = bot;
+                        this.state.logs = [];
+                        this.state.lastSeq = 0;
+                        await this._loadInitialLogs();
+                        await this.refreshBots();
+                    }
+                }
+            });
+        }
+    }
+
+    async _handleAutoStartToggle() {
+        if (!this.state.activeBot) return;
+        await this._saveBotConfiguration({
+            modules: this._collectSelectedModules(),
+            autoStart: this.autoStartCheckbox.checked,
+            showSuccessMessage: false,
+        });
     }
 
     _handleAutoScrollToggle() {
@@ -257,10 +310,16 @@ class DiscordBotDashboardPage {
                 this._closeModulePage(false);
             }
 
+            // Sync auto-start checkbox với bot config
+            if (this.state.activeBot && this.autoStartCheckbox) {
+                this.autoStartCheckbox.checked = Boolean(this.state.activeBot.auto_start);
+            }
+
             this._renderModuleOptions();
             this._renderModulePage();
             this._renderStatusRow();
             this._renderInfoRow();
+            this._renderBotSelector();
             this._updateConsoleTitle();
             this._setupUptimeTicker();
             const needsNameRefresh = this.state.activeBot && this.state.activeBot.state === 'running' && !this.state.activeBot.actual_name;
@@ -337,7 +396,7 @@ class DiscordBotDashboardPage {
             return;
         }
         if (this.state.logs.length === 0) {
-            const displayName = this._getBotDisplayName(bot) || 'this bot';
+            const displayName = this.Utils.getBotDisplayName(bot) || 'this bot';
             const safeName = displayName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             this.consoleEl.innerHTML = `<div class="discord-bot-console-placeholder">
                 No log entries for ${safeName} yet.
@@ -371,7 +430,7 @@ class DiscordBotDashboardPage {
             const lines = normalLogs.map(entry => {
                 const levelKey = entry.level || 'info';
                 const levelClass = `discord-log--${levelKey}`;
-                const formattedTs = this._formatDisplayTimestamp(entry.timestamp);
+                const formattedTs = this.Utils.formatDisplayTimestamp(entry.timestamp);
                 const levelLabel = (levelKey || 'info').toUpperCase();
                 const msg = (entry.message || '')
                     .replace(/&/g, '&amp;')
@@ -380,8 +439,8 @@ class DiscordBotDashboardPage {
                     .replace(/\n/g, '<br>');
                 return `<div class="discord-log ${levelClass}">
                     <div class="discord-log__meta">
-                        <span class="discord-log__ts">${this._escapeHtml(formattedTs)}</span>
-                        <span class="discord-log__level">${this._escapeHtml(levelLabel)}</span>
+                        <span class="discord-log__ts">${this.Utils.escapeHtml(formattedTs)}</span>
+                        <span class="discord-log__level">${this.Utils.escapeHtml(levelLabel)}</span>
                     </div>
                     <div class="discord-log__msg">${msg}</div>
                 </div>`;
@@ -400,16 +459,16 @@ class DiscordBotDashboardPage {
                     payload = typeof entry.message === 'string' ? JSON.parse(entry.message) : entry.message;
                 } catch(e) {}
                 
-                const formattedTs = this._formatDisplayTimestamp(entry.timestamp);
-                const guildCh = `[${this._escapeHtml(payload.guild || '')} - ${this._escapeHtml(payload.channel || '')}]`;
-                const author = this._escapeHtml(payload.author || '');
-                const response = this._escapeHtml(payload.response || '');
+                const formattedTs = this.Utils.formatDisplayTimestamp(entry.timestamp);
+                const guildCh = `[${this.Utils.escapeHtml(payload.guild || '')} - ${this.Utils.escapeHtml(payload.channel || '')}]`;
+                const author = this.Utils.escapeHtml(payload.author || '');
+                const response = this.Utils.escapeHtml(payload.response || '');
                 
                 let promptHtml = '';
                 if (Array.isArray(payload.prompt)) {
                     promptHtml = payload.prompt.map(msg => {
-                        const r = this._escapeHtml(msg.role);
-                        const c = this._escapeHtml(msg.content);
+                        const r = this.Utils.escapeHtml(msg.role);
+                        const c = this.Utils.escapeHtml(msg.content);
                         return `<div style="margin-bottom:8px; border-bottom:1px solid #333; padding-bottom:4px;">
                             <span style="color:#d886ff; font-weight:bold;">[${r}]</span> <span>${c}</span>
                         </div>`;
@@ -430,14 +489,8 @@ class DiscordBotDashboardPage {
     }
 
     _scrollConsoleToBottom() {
-        if (!this.autoScrollCheckbox.checked) return;
-        requestAnimationFrame(() => {
-            if (this.state.activeConsoleTab === 'log' && this.consoleEl) {
-                this.consoleEl.scrollTop = this.consoleEl.scrollHeight;
-            } else if (this.state.activeConsoleTab === 'message' && this.consoleMessageEl) {
-                this.consoleMessageEl.scrollTop = this.consoleMessageEl.scrollHeight;
-            }
-        });
+        const activeContainer = this.state.activeConsoleTab === 'log' ? this.consoleEl : this.consoleMessageEl;
+        this.Utils.scrollToBottom(activeContainer, this.autoScrollCheckbox);
     }
 
     _renderStatusRow() {
@@ -455,13 +508,13 @@ class DiscordBotDashboardPage {
             return;
         }
 
-        const statusMeta = this._resolveStatusMeta(bot.state);
+        const statusMeta = this.Utils.resolveStatusMeta(bot.state);
         this.statusEl.className = `discord-bot-status discord-bot-status--${statusMeta.tone}`;
         const hint = !this.state.jsRuntimeAvailable
             ? 'Install Node.js and discord.js dependencies to run Discord bots.'
             : (bot.last_error ? `Last error: ${bot.last_error}` : '');
-        const safeLabel = this._escapeHtml(statusMeta.label);
-        const safeHint = this._escapeHtml(hint);
+        const safeLabel = this.Utils.escapeHtml(statusMeta.label);
+        const safeHint = this.Utils.escapeHtml(hint);
 
         this.statusEl.innerHTML = `
             <span class="material-symbols-outlined">${statusMeta.icon}</span>
@@ -476,7 +529,7 @@ class DiscordBotDashboardPage {
         if (!this.infoEl) return;
         const bot = this.state.activeBot;
         if (!bot) {
-            const moduleNames = this.state.modules.map(m => this._escapeHtml(m.name)).join(', ') || '---';
+            const moduleNames = this.state.modules.map(m => this.Utils.escapeHtml(m.name)).join(', ') || '---';
             this.infoEl.innerHTML = `
                 <div class="discord-bot-info__item">
                     <span class="label">Available Modules</span>
@@ -487,15 +540,15 @@ class DiscordBotDashboardPage {
         }
 
         const taskInfo = bot.task || {};
-        const displayName = this._getBotDisplayName(bot) || '---';
+        const displayName = this.Utils.getBotDisplayName(bot) || '---';
         const modulesText = bot.modules && bot.modules.length ? bot.modules.join(', ') : '---';
         const intentsText = bot.intents && bot.intents.length ? bot.intents.join(', ') : 'Default';
         const threadText = taskInfo.is_running ? 'Running' : (taskInfo.status || '---');
-        const uptimeInitial = this._computeUptimeText(bot);
-        const lastUpdateText = this._formatDisplayTimestamp(bot.updated_at);
+        const uptimeInitial = this.Utils.computeUptimeText(bot);
+        const lastUpdateText = this.Utils.formatDisplayTimestamp(bot.updated_at);
 
         const items = [
-            { label: 'Bot ID', value: bot.bot_id },
+            { label: 'Bot ID', value: bot.actual_id || bot.bot_id },
             { label: 'Name', value: displayName },
             { label: 'Modules', value: modulesText },
             { label: 'Intents', value: intentsText },
@@ -510,45 +563,102 @@ class DiscordBotDashboardPage {
 
         const infoHtml = items.map(item => `
             <div class="discord-bot-info__item">
-                <span class="label">${this._escapeHtml(item.label)}</span>
-                <span class="value">${this._escapeHtml(item.value)}</span>
+                <span class="label">${this.Utils.escapeHtml(item.label)}</span>
+                <span class="value">${this.Utils.escapeHtml(item.value)}</span>
             </div>
         `);
 
         infoHtml.push(`
             <div class="discord-bot-info__item">
                 <span class="label">Uptime</span>
-                <span class="value" data-role="uptime-value">${this._escapeHtml(uptimeInitial)}</span>
+                <span class="value" data-role="uptime-value">${this.Utils.escapeHtml(uptimeInitial)}</span>
+            </div>
+        `);
+
+        // Thêm Invite link nếu có actual_id (client_id)
+        if (bot.actual_id) {
+            const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${bot.actual_id}&permissions=8&scope=bot`;
+            const shortUrl = inviteUrl.length > 50 ? inviteUrl.substring(0, 47) + '...' : inviteUrl;
+
+            infoHtml.push(`
+                <div class="discord-bot-info__item">
+                    <span class="label">Invite</span>
+                    <span class="value" style="display: flex; align-items: center; gap: 8px;">
+                        <a href="${this.Utils.escapeHtml(inviteUrl)}" target="_blank" rel="noopener noreferrer" 
+                           style="color: var(--color-accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;"
+                           title="${this.Utils.escapeHtml(inviteUrl)}">
+                            ${this.Utils.escapeHtml(shortUrl)}
+                        </a>
+                        <button type="button" class="discord-bot-btn discord-bot-btn--sm" 
+                                data-action="copy-invite" data-url="${this.Utils.escapeHtml(inviteUrl)}"
+                                title="Copy invite link"
+                                style="padding: 4px 8px; min-width: auto;">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">content_copy</span>
+                        </button>
+                    </span>
+                </div>
+            `);
+        }
+
+        // Dev Portal link (hiển thị kể cả khi chưa có actual_id)
+        const devPortalUrl = bot.actual_id 
+            ? `https://discord.com/developers/applications/${bot.actual_id}/bot`
+            : `https://discord.com/developers/applications`;
+        const shortDevPortalUrl = devPortalUrl.length > 50 ? devPortalUrl.substring(0, 47) + '...' : devPortalUrl;
+
+        infoHtml.push(`
+            <div class="discord-bot-info__item">
+                <span class="label">Dev Portal</span>
+                <span class="value" style="display: flex; align-items: center; gap: 8px;">
+                    <a href="${this.Utils.escapeHtml(devPortalUrl)}" target="_blank" rel="noopener noreferrer" 
+                       style="color: var(--color-accent); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;"
+                       title="${this.Utils.escapeHtml(devPortalUrl)}">
+                        ${this.Utils.escapeHtml(shortDevPortalUrl)}
+                    </a>
+                    <a href="${this.Utils.escapeHtml(devPortalUrl)}" target="_blank" rel="noopener noreferrer" 
+                       class="discord-bot-btn discord-bot-btn--sm" 
+                       title="Open Developer Portal"
+                       style="padding: 4px 8px; min-width: auto; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--color-primary-text);">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">open_in_new</span>
+                    </a>
+                </span>
             </div>
         `);
 
         this.infoEl.innerHTML = infoHtml.join('');
+
+        // Attach copy handler
+        const copyBtn = this.infoEl.querySelector('[data-action="copy-invite"]');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', async (e) => {
+                const url = e.currentTarget.getAttribute('data-url');
+                if (url) {
+                    try {
+                        await navigator.clipboard.writeText(url);
+                        const icon = copyBtn.querySelector('.material-symbols-outlined');
+                        const originalText = icon.textContent;
+                        icon.textContent = 'check';
+                        setTimeout(() => {
+                            icon.textContent = originalText;
+                        }, 2000);
+                    } catch (error) {
+                        console.error('[DiscordBot] Failed to copy invite link:', error);
+                        showError('Failed to copy invite link.');
+                    }
+                }
+            });
+        }
     }
 
     _updateConsoleTitle() {
         if (!this.consoleTitleEl) return;
         const bot = this.state.activeBot;
-        const displayName = this._getBotDisplayName(bot);
+        const displayName = this.Utils.getBotDisplayName(bot);
         if (displayName) {
             this.consoleTitleEl.textContent = `${displayName} console`;
         } else {
             this.consoleTitleEl.textContent = 'Bot console';
         }
-    }
-
-    _computeUptimeText(bot) {
-        if (!bot || bot.state !== 'running' || !bot.started_at) {
-            return '--';
-        }
-        const started = new Date(bot.started_at);
-        if (Number.isNaN(started.getTime())) {
-            return '--';
-        }
-        const diffMs = Date.now() - started.getTime();
-        if (!Number.isFinite(diffMs) || diffMs <= 0) {
-            return '--';
-        }
-        return this._formatDuration(diffMs);
     }
 
     _setupUptimeTicker() {
@@ -570,66 +680,15 @@ class DiscordBotDashboardPage {
                 return;
             }
             const diffMs = Math.max(Date.now() - started.getTime(), 0);
-            uptimeEl.textContent = bot.state === 'running' ? this._formatDuration(diffMs) : '--';
+            uptimeEl.textContent = bot.state === 'running' ? this.Utils.formatDuration(diffMs) : '--';
         };
 
         if (bot.state === 'running' && started && !Number.isNaN(started.getTime())) {
             updateValue();
             this._uptimeTimer = setInterval(updateValue, 1000);
         } else {
-            uptimeEl.textContent = this._computeUptimeText(bot);
+            uptimeEl.textContent = this.Utils.computeUptimeText(bot);
         }
-    }
-
-    _formatDuration(ms) {
-        if (!Number.isFinite(ms) || ms < 0) {
-            return '--';
-        }
-        const totalSeconds = Math.floor(ms / 1000);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        const parts = [
-            hours.toString().padStart(2, '0'),
-            minutes.toString().padStart(2, '0'),
-            seconds.toString().padStart(2, '0'),
-        ];
-        return parts.join(':');
-    }
-
-    _escapeHtml(value) {
-        if (value === null || value === undefined) {
-            return '';
-        }
-        return String(value)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-
-    _formatDisplayTimestamp(value) {
-        if (!value) {
-            return '---';
-        }
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) {
-            return String(value);
-        }
-        const pad = (num) => String(num).padStart(2, '0');
-        const year = date.getFullYear();
-        const month = pad(date.getMonth() + 1);
-        const day = pad(date.getDate());
-        const hours = pad(date.getHours());
-        const minutes = pad(date.getMinutes());
-        const seconds = pad(date.getSeconds());
-        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-    }
-
-    _getBotDisplayName(bot) {
-        if (!bot) return '';
-        return bot.actual_name || bot.name || '';
     }
 
     _scheduleMetadataRefresh(delay = 2000) {
@@ -652,34 +711,21 @@ class DiscordBotDashboardPage {
         }
 
         const activeModules = new Set(this.state.activeBot?.modules || []);
-        const groups = {
-            core: [],
-            normal: [],
-            admin: [],
-        };
-
-        for (const module of this.state.modules) {
-            const moduleType = module?.type === 'core'
-                ? 'core'
-                : (module?.type === 'admin' || module?.admin ? 'admin' : 'normal');
-            groups[moduleType].push(module);
-        }
+        const groups = this.Utils.groupModulesByType(this.state.modules);
 
         const buildModuleCard = (module) => {
             if (!module || !module.id) {
                 return '';
             }
-            const moduleType = module?.type === 'core'
-                ? 'core'
-                : (module?.type === 'admin' || module?.admin ? 'admin' : 'normal');
+            const moduleType = this.Utils.getModuleType(module);
             const isCore = moduleType === 'core';
             const isChecked = isCore || activeModules.has(module.id);
             const checked = isChecked ? 'checked' : '';
             const disabled = isCore ? 'disabled' : '';
-            const safeId = this._escapeHtml(module.id);
-            const safeName = this._escapeHtml(module.name || module.id);
-            const safeDesc = this._escapeHtml(module.description || 'No description available.');
-            const safeType = this._escapeHtml(moduleType);
+            const safeId = this.Utils.escapeHtml(module.id);
+            const safeName = this.Utils.escapeHtml(module.name || module.id);
+            const safeDesc = this.Utils.escapeHtml(module.description || 'No description available.');
+            const safeType = this.Utils.escapeHtml(moduleType);
             return `
                 <div class="discord-bot-module discord-bot-module--${safeType}">
                     <label class="discord-bot-module__toggle yuuka-switch ${isCore ? 'discord-bot-module__toggle--locked' : ''}" title="${isCore ? 'Core modules are always enabled' : 'Enable/Disable module'}">
@@ -747,6 +793,174 @@ class DiscordBotDashboardPage {
         this._closeModulePage();
     }
 
+    async _handleModulePageClick(event) {
+        const addButton = event.target.closest('[data-action="add-channel-id"]');
+        if (addButton && this.modulePageBodyEl.contains(addButton)) {
+            const policyId = addButton.getAttribute('data-policy-id');
+            const settingKey = addButton.getAttribute('data-setting-key');
+            if (policyId && settingKey) {
+                await this._addChannelIdFromModulePage(policyId, settingKey);
+            }
+            return;
+        }
+
+        const removeButton = event.target.closest('[data-action="remove-channel-id"]');
+        if (removeButton && this.modulePageBodyEl.contains(removeButton)) {
+            const policyId = removeButton.getAttribute('data-policy-id');
+            const settingKey = removeButton.getAttribute('data-setting-key');
+            const value = removeButton.getAttribute('data-value');
+            if (policyId && settingKey && value) {
+                await this._removeChannelIdFromModulePage(policyId, settingKey, value);
+            }
+            return;
+        }
+
+        const cbCard = event.target.closest('[data-role="cb-card"]');
+        if (cbCard && this.modulePageBodyEl.contains(cbCard)) {
+            const cId = cbCard.getAttribute('data-id');
+            const hidden = this.modulePageBodyEl.querySelector('[data-role="cb-selected"]');
+            if (hidden) hidden.value = cId;
+
+            const cards = this.modulePageBodyEl.querySelectorAll('[data-role="cb-card"]');
+            cards.forEach(c => c.style.borderColor = 'var(--color-border)');
+            cbCard.style.borderColor = 'var(--color-accent)';
+
+            const bUrl = this.modulePageBodyEl.querySelector('[data-role="cb-url"]')?.value || '';
+            const bKey = this.modulePageBodyEl.querySelector('[data-role="cb-key"]')?.value || '';
+
+            await this._saveBotConfiguration({
+                extraProps: {
+                    chat_character_id: cId,
+                    chat_bridge_url: bUrl,
+                    chat_bridge_key: bKey
+                }
+            });
+            return;
+        }
+    }
+
+    async _handleModulePageChange(event) {
+        const toggle = event.target.closest('[data-role="policy-toggle"]');
+        if (toggle && this.modulePageBodyEl.contains(toggle)) {
+            const policyId = toggle.getAttribute('data-policy-id');
+            if (policyId) {
+                await this._savePolicyFromModulePage(policyId);
+            }
+            return;
+        }
+
+        const cbInput = event.target.closest('[data-role="cb-url"], [data-role="cb-key"]');
+        if (cbInput && this.modulePageBodyEl.contains(cbInput)) {
+            const bUrl = this.modulePageBodyEl.querySelector('[data-role="cb-url"]')?.value || '';
+            const bKey = this.modulePageBodyEl.querySelector('[data-role="cb-key"]')?.value || '';
+            const cId = this.modulePageBodyEl.querySelector('[data-role="cb-selected"]')?.value || '';
+
+            await this._saveBotConfiguration({
+                extraProps: {
+                    chat_character_id: cId,
+                    chat_bridge_url: bUrl,
+                    chat_bridge_key: bKey
+                }
+            });
+            return;
+        }
+    }
+
+    async _addChannelIdFromModulePage(policyId, settingKey) {
+        const policyCard = this.modulePageBodyEl?.querySelector(`.discord-policy-card[data-policy-id="${policyId}"]`);
+        if (!policyCard) {
+            return;
+        }
+        const container = policyCard.querySelector(`[data-role="channel-id-setting"][data-setting-key="${settingKey}"]`);
+        const input = container?.querySelector('[data-role="channel-id-input"]');
+        const hiddenInput = policyCard.querySelector(`[data-role="policy-setting"][data-setting-key="${settingKey}"]`);
+
+        if (!container || !input || !hiddenInput) {
+            return;
+        }
+
+        const candidate = input.value.trim();
+        if (!candidate) {
+            return;
+        }
+
+        const currentValues = this._parseChannelIdList(hiddenInput.value);
+        if (!currentValues.includes(candidate)) {
+            currentValues.push(candidate);
+        }
+
+        hiddenInput.value = currentValues.join(',');
+        input.value = '';
+        await this._savePolicyFromModulePage(policyId);
+    }
+
+    async _removeChannelIdFromModulePage(policyId, settingKey, valueToRemove) {
+        const policyCard = this.modulePageBodyEl?.querySelector(`.discord-policy-card[data-policy-id="${policyId}"]`);
+        const hiddenInput = policyCard?.querySelector(`[data-role="policy-setting"][data-setting-key="${settingKey}"]`);
+
+        if (!policyCard || !hiddenInput) {
+            return;
+        }
+
+        const currentValues = this._parseChannelIdList(hiddenInput.value);
+        hiddenInput.value = currentValues.filter((value) => value !== valueToRemove).join(',');
+        await this._savePolicyFromModulePage(policyId);
+    }
+
+    async _savePolicyFromModulePage(policyId) {
+        const bot = this.state.activeBot;
+        if (!bot) {
+            showError('No active bot selected.');
+            return;
+        }
+
+        const policyCard = this.modulePageBodyEl?.querySelector(`.discord-policy-card[data-policy-id="${policyId}"]`);
+        if (!policyCard) {
+            return;
+        }
+
+        const toggleEl = policyCard.querySelector('[data-role="policy-toggle"]');
+        const settingEls = Array.from(policyCard.querySelectorAll('[data-role="policy-setting"]'));
+
+        const settings = {};
+        settingEls.forEach((input) => {
+            const key = input.getAttribute('data-setting-key');
+            if (key) {
+                settings[key] = key === 'allowed_channel_ids'
+                    ? this._parseChannelIdList(input.value).join(',')
+                    : input.value;
+            }
+        });
+
+        const payload = {
+            toggles: {
+                [policyId]: Boolean(toggleEl?.checked),
+            },
+            settings: Object.keys(settings).length ? { [policyId]: settings } : {},
+        };
+
+        try {
+            this._setPolicyCardSaving(policyCard, true);
+            const response = await this.pluginApi.post(`/bots/${encodeURIComponent(bot.bot_id)}/policies`, payload);
+
+            const cacheKey = this.Utils.createModuleUiCacheKey(this.state.activeModulePage, bot.bot_id);
+            const existingUi = this.state.moduleUiCache[cacheKey] || {};
+            this.state.moduleUiCache[cacheKey] = {
+                ...existingUi,
+                groups: Array.isArray(response?.groups) ? response.groups : [],
+                bot_id: bot.bot_id,
+            };
+
+            this._renderModulePage();
+            showError(`Saved policy: ${policyId}`);
+        } catch (error) {
+            console.error('[DiscordBot] Failed to save policy:', error);
+            showError(`Unable to save policy: ${error.message}`);
+        } finally {
+            this._setPolicyCardSaving(policyCard, false);
+        }
+    }
+
     _openModulePage(moduleId) {
         if (!moduleId) return;
         this.state.activeModulePage = moduleId;
@@ -756,7 +970,7 @@ class DiscordBotDashboardPage {
 
     async _loadModuleUi(moduleId) {
         if (!moduleId) return;
-        const cacheKey = this._moduleUiCacheKey(moduleId);
+        const cacheKey = this.Utils.createModuleUiCacheKey(moduleId, this.state.activeBot?.bot_id);
         if (this.state.moduleUiCache[cacheKey]) return;
         if (this.state.moduleUiLoading[moduleId]) return;
 
@@ -776,6 +990,42 @@ class DiscordBotDashboardPage {
                 this._renderModulePage();
             }
         }
+    }
+
+    _invalidateModuleUiCache(moduleId, botId = this.state.activeBot?.bot_id) {
+        if (!moduleId) {
+            return;
+        }
+        const cacheKey = this.Utils.createModuleUiCacheKey(moduleId, botId);
+        delete this.state.moduleUiCache[cacheKey];
+        delete this.state.moduleUiLoading[moduleId];
+    }
+
+    _parseChannelIdList(value) {
+        if (!value || typeof value !== 'string') {
+            return [];
+        }
+        return value.split(',').map(v => v.trim()).filter(Boolean);
+    }
+
+    _setPolicyCardSaving(policyCard, isSaving) {
+        if (!policyCard) return;
+        if (isSaving) {
+            policyCard.style.opacity = '0.6';
+            policyCard.style.pointerEvents = 'none';
+        } else {
+            policyCard.style.opacity = '';
+            policyCard.style.pointerEvents = '';
+        }
+    }
+
+    async _refreshActiveModulePageUi() {
+        const moduleId = this.state.activeModulePage;
+        if (!moduleId) {
+            return;
+        }
+        this._invalidateModuleUiCache(moduleId);
+        await this._loadModuleUi(moduleId);
     }
 
     _closeModulePage(restoreFocus = true) {
@@ -816,13 +1066,12 @@ class DiscordBotDashboardPage {
 
         const activeModules = new Set(this.state.activeBot?.modules || []);
         const moduleName = module.name || module.id;
-        const moduleType = module?.type === 'core'
-            ? 'core'
-            : (module?.type === 'admin' || module?.admin ? 'admin' : 'normal');
+        const moduleType = this.Utils.getModuleType(module);
         const isEnabled = activeModules.has(module.id);
         const isLoading = Boolean(this.state.moduleUiLoading[module.id]);
-        const moduleUi = this.state.moduleUiCache[this._moduleUiCacheKey(module.id)] || module.ui || {};
-        const summaryText = this._escapeHtml(moduleUi?.summary || module.description || 'No description provided for this module yet.');
+        const cacheKey = this.Utils.createModuleUiCacheKey(moduleId, this.state.activeBot?.bot_id);
+        const moduleUi = this.state.moduleUiCache[cacheKey] || module.ui || {};
+        const summaryText = this.Utils.escapeHtml(moduleUi?.summary || module.description || 'No description provided for this module yet.');
 
         const specialRendererBlock = this._renderSpecialModuleUi(module, moduleUi);
         const sectionBlocks = specialRendererBlock || (Array.isArray(moduleUi?.sections)
@@ -834,11 +1083,11 @@ class DiscordBotDashboardPage {
             : '';
 
         const errorBlock = moduleUi && moduleUi._error
-            ? `<div class="discord-bot-module-page-error">${this._escapeHtml(moduleUi._error)}</div>`
+            ? `<div class="discord-bot-module-page-error">${this.Utils.escapeHtml(moduleUi._error)}</div>`
             : '';
 
         const fallbackBlock = (!isLoading && !sectionBlocks && !errorBlock)
-            ? `<div class="discord-bot-module-page-placeholder">${this._escapeHtml(module.id)}</div>`
+            ? `<div class="discord-bot-module-page-placeholder">${this.Utils.escapeHtml(module.id)}</div>`
             : '';
 
         this.modulePageTitleEl.textContent = moduleName;
@@ -866,9 +1115,9 @@ class DiscordBotDashboardPage {
             return '';
         }
 
-        const title = this._escapeHtml(section.title || 'Section');
-        const text = typeof section.text === 'string' ? this._escapeHtml(section.text) : '';
-        const code = typeof section.code === 'string' ? this._escapeHtml(section.code) : '';
+        const title = this.Utils.escapeHtml(section.title || 'Section');
+        const text = typeof section.text === 'string' ? this.Utils.escapeHtml(section.text) : '';
+        const code = typeof section.code === 'string' ? this.Utils.escapeHtml(section.code) : '';
 
         let itemsHtml = '';
         if (Array.isArray(section.items) && section.items.length) {
@@ -876,11 +1125,11 @@ class DiscordBotDashboardPage {
                 <ul class="discord-bot-module-ui-list">
                     ${section.items.map((item) => {
                         if (item && typeof item === 'object') {
-                            const label = this._escapeHtml(item.label || '');
-                            const value = this._escapeHtml(item.value || '');
+                            const label = this.Utils.escapeHtml(item.label || '');
+                            const value = this.Utils.escapeHtml(item.value || '');
                             return `<li class="discord-bot-module-ui-item"><span class="discord-bot-module-ui-item__label">${label}</span><span class="discord-bot-module-ui-item__value">${value}</span></li>`;
                         }
-                        const value = this._escapeHtml(String(item ?? ''));
+                        const value = this.Utils.escapeHtml(String(item ?? ''));
                         return `<li class="discord-bot-module-ui-item"><span class="discord-bot-module-ui-item__value">${value}</span></li>`;
                     }).join('')}
                 </ul>
@@ -900,37 +1149,8 @@ class DiscordBotDashboardPage {
         `;
     }
 
-    _moduleUiCacheKey(moduleId) {
-        const botId = this.state.activeBot?.bot_id || '_no_bot';
-        return `${botId}::${moduleId}`;
-    }
-
-    _invalidateModuleUiCache(moduleId, botId = this.state.activeBot?.bot_id) {
-        if (!moduleId) {
-            return;
-        }
-        const cacheKey = `${botId || '_no_bot'}::${moduleId}`;
-        delete this.state.moduleUiCache[cacheKey];
-        delete this.state.moduleUiLoading[moduleId];
-    }
-
-    async _refreshActiveModulePageUi() {
-        const moduleId = this.state.activeModulePage;
-        if (!moduleId) {
-            return;
-        }
-        this._invalidateModuleUiCache(moduleId);
-        await this._loadModuleUi(moduleId);
-    }
-
     _collectSelectedModules() {
-        const selectedModules = Array
-            .from(this.moduleGridEl.querySelectorAll('input.discord-bot-module-checkbox:checked'))
-            .map((input) => input.value);
-        const coreModules = this.state.modules
-            .filter((module) => module?.type === 'core')
-            .map((module) => module.id);
-        return [...new Set([...selectedModules, ...coreModules])];
+        return this.Utils.collectSelectedModules(this.moduleGridEl, this.state.modules);
     }
 
     async _saveBotConfiguration({ modules = this._collectSelectedModules(), autoStart = this.autoStartCheckbox.checked, showSuccessMessage = true, extraProps = {} } = {}) {
@@ -971,429 +1191,14 @@ class DiscordBotDashboardPage {
     }
 
     _renderSpecialModuleUi(module, moduleUi) {
-        if (!moduleUi) return '';
-        if (moduleUi.renderer === 'policy-manager') {
-            return this._renderPolicyManagerUi(module, moduleUi);
-        }
-        if (moduleUi.renderer === 'character-picker') {
-            return this._renderCharacterPickerUi(module, moduleUi);
+        if (!moduleUi || !moduleUi.renderer) return '';
+        if (window.Yuuka?.plugins?.discordBotRenderers) {
+            const renderer = window.Yuuka.plugins.discordBotRenderers[moduleUi.renderer];
+            if (renderer && typeof renderer.render === 'function') {
+                return renderer.render(this, module, moduleUi);
+            }
         }
         return '';
-    }
-
-    _renderPolicyManagerUi(module, moduleUi) {
-        const bot = this.state.activeBot;
-        if (!bot) {
-            return `
-                <section class="discord-bot-module-page-section">
-                    <h4>Policy groups</h4>
-                    <p>Create or connect a bot first to manage policy groups.</p>
-                </section>
-            `;
-        }
-        const activeModules = new Set(bot.modules || []);
-        const groups = Array.isArray(moduleUi.groups) ? moduleUi.groups : [];
-        const filteredGroups = groups
-            .map((group) => ({
-                ...group,
-                policies: Array.isArray(group.policies)
-                    ? group.policies.filter((policy) => activeModules.has(policy.module_id) && policy.module_id !== module.id)
-                    : [],
-            }))
-            .filter((group) => group.policies.length > 0);
-        if (!filteredGroups.length) {
-            return `
-                <section class="discord-bot-module-page-section">
-                    <h4>Policy groups</h4>
-                    <p>No registered policies are available for the currently enabled modules.</p>
-                </section>
-            `;
-        }
-        const groupsHtml = filteredGroups.map((group) => `
-            <section class="discord-bot-module-page-section discord-policy-group">
-                <div class="discord-policy-group__header">
-                    <h4>${this._escapeHtml(group.group_name || group.group_id || 'Group')}</h4>
-                    <span class="discord-policy-group__count">${group.policies.length} policies</span>
-                </div>
-                <div class="discord-policy-list">
-                    ${group.policies.map((policy) => this._renderPolicyCard(policy)).join('')}
-                </div>
-            </section>
-        `).join('');
-        return `
-            <section class="discord-bot-module-page-section">
-                <h4>Policy groups</h4>
-                <p>Each policy is registered by a module, shown in its group, and starts from the default toggle defined by that module.</p>
-            </section>
-            ${groupsHtml}
-        `;
-    }
-
-    _renderPolicyCard(policy) {
-        const policyId = this._escapeHtml(policy.policy_id || '');
-        const title = this._escapeHtml(policy.title || policy.policy_id || 'Policy');
-        const description = this._escapeHtml(policy.description || '');
-        const moduleName = this._escapeHtml(policy.module_name || policy.module_id || 'Unknown module');
-        const moduleId = this._escapeHtml(policy.module_id || '');
-        const enabled = policy.enabled ? 'checked' : '';
-        const defaultLabel = policy.default_enabled ? 'ON' : 'OFF';
-        const settingSchema = policy.setting_schema && typeof policy.setting_schema === 'object' ? policy.setting_schema : {};
-        const settings = policy.settings && typeof policy.settings === 'object' ? policy.settings : {};
-        const settingFields = Object.entries(settingSchema).map(([key, defaultValue]) => {
-            const currentValue = settings[key] == null ? defaultValue : settings[key];
-            if (key === 'allowed_channel_ids') {
-                return this._renderAllowedChannelIdsSetting({
-                    policyId,
-                    key,
-                    currentValue,
-                });
-            }
-            return `
-                <label class="discord-policy-setting">
-                    <span class="discord-policy-setting__label">${this._escapeHtml(key)}</span>
-                    <input
-                        type="text"
-                        class="discord-policy-setting__input"
-                        data-role="policy-setting"
-                        data-policy-id="${policyId}"
-                        data-setting-key="${this._escapeHtml(key)}"
-                        value="${this._escapeHtml(String(currentValue ?? ''))}"
-                        placeholder="${this._escapeHtml(String(defaultValue ?? ''))}"
-                    />
-                </label>
-            `;
-        }).join('');
-        return `
-            <article class="discord-policy-card" data-policy-id="${policyId}">
-                <div class="discord-policy-card__header">
-                    <div class="discord-policy-card__meta">
-                        <div class="discord-policy-card__title-row">
-                            <h5>${title}</h5>
-                            <span class="discord-policy-card__default">Default ${defaultLabel}</span>
-                        </div>
-                        <div class="discord-policy-card__owner">Registered by ${moduleName} <span class="discord-policy-card__owner-id">${moduleId}</span></div>
-                    </div>
-                    <label class="yuuka-switch discord-policy-card__toggle" title="Toggle policy">
-                        <input type="checkbox" data-role="policy-toggle" data-policy-id="${policyId}" ${enabled} />
-                        <span class="yuuka-switch__slider"></span>
-                    </label>
-                </div>
-                <p class="discord-policy-card__description">${description}</p>
-                ${settingFields ? `<div class="discord-policy-settings">${settingFields}</div>` : ''}
-            </article>
-        `;
-    }
-
-    _renderCharacterPickerUi(module, moduleUi) {
-        const bot = this.state.activeBot;
-        if (!bot) {
-            return `
-                <section class="discord-bot-module-page-section">
-                    <h4>Character</h4>
-                    <p>Create or connect a bot first to configure.</p>
-                </section>
-            `;
-        }
-        const selectedId = moduleUi.chat_character_id || '';
-        const bUrl = moduleUi.chat_bridge_url || '';
-        const bKey = moduleUi.chat_bridge_key || '';
-        
-        setTimeout(() => this._loadAndRenderCharacterGrid(selectedId), 0);
-
-        return `
-            <section class="discord-bot-module-page-section">
-                <h4>Bridge Network</h4>
-                <div class="discord-policy-settings" style="margin-bottom: var(--spacing-4);">
-                    <label class="discord-policy-setting">
-                        <span class="discord-policy-setting__label">Bridge URL (Optional)</span>
-                        <input type="text" class="discord-policy-setting__input" data-role="cb-url" value="${this._escapeHtml(bUrl)}" />
-                    </label>
-                    <label class="discord-policy-setting">
-                        <span class="discord-policy-setting__label">Bridge Key</span>
-                        <input type="password" class="discord-policy-setting__input" data-role="cb-key" value="${this._escapeHtml(bKey)}" />
-                    </label>
-                </div>
-                
-                <h4>Character <span style="font-size: 0.8em; color: var(--color-secondary-text); font-weight: normal;">(Only characters with persona are shown)</span></h4>
-                <div class="discord-bot-character-picker">
-                    <input type="search" class="discord-policy-setting__input" style="width: 100%; margin-bottom: var(--spacing-3);" data-role="cb-search" placeholder="Search characters...">
-                    <div class="discord-bot-character-grid" data-role="cb-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: var(--spacing-3); max-height: 400px; overflow-y: auto;">
-                        <div class="discord-bot-module-page-loading">Loading characters...</div>
-                    </div>
-                </div>
-                <input type="hidden" data-role="cb-selected" value="${this._escapeHtml(selectedId)}">
-            </section>
-        `;
-    }
-
-    async _loadAndRenderCharacterGrid(selectedId) {
-        if (!this.modulePageBodyEl) return;
-        const gridEl = this.modulePageBodyEl.querySelector('[data-role="cb-grid"]');
-        const searchEl = this.modulePageBodyEl.querySelector('[data-role="cb-search"]');
-        if (!gridEl) return;
-        
-        try {
-            if (!this.api['chat']) throw new Error('Chat plugin is not active/available.');
-            const res = await this.api['chat'].get('/personas');
-            let chars = Object.values(res.characters || {}).filter(c => c && c.persona && c.persona.trim().length > 0);
-            
-            const renderGrid = (query = '') => {
-                const q = query.toLowerCase().trim();
-                const filtered = chars.filter(c => c.name.toLowerCase().includes(q) || (c.persona && c.persona.toLowerCase().includes(q)));
-                
-                if (filtered.length === 0) {
-                    gridEl.innerHTML = '<div class="discord-bot-module-page-placeholder">No characters found.</div>';
-                    return;
-                }
-                
-                const cardsHtml = filtered.map(c => {
-                    const isSelected = c.id === selectedId;
-                    const avatar = c.avatar ? `<img src="${c.avatar}" style="width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: var(--rounded-md) var(--rounded-md) 0 0; display: block;" />` : `<div style="width:100%; aspect-ratio: 3/4; background: rgba(0,0,0,0.1); border-radius: var(--rounded-md) var(--rounded-md) 0 0; display:flex; align-items:center; justify-content:center;"><span class="material-symbols-outlined" style="opacity:0.5;">person</span></div>`;
-                    return `
-                        <div class="discord-cb-card" data-role="cb-card" data-id="${this._escapeHtml(c.id)}" style="cursor: pointer; border: 2px solid ${isSelected ? 'var(--color-accent)' : 'var(--color-border)'}; border-radius: var(--rounded-md); background: var(--color-card-bg); transition: border-color 0.2s;">
-                            ${avatar}
-                            <div style="padding: var(--spacing-2);">
-                                <div style="font-weight: 500; font-size: 0.85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;">${this._escapeHtml(c.name || 'Unnamed')}</div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-                
-                const isNoneSelected = !selectedId;
-                const noneCardHtml = `
-                    <div class="discord-cb-card" data-role="cb-card" data-id="" style="cursor: pointer; border: 2px solid ${isNoneSelected ? 'var(--color-accent)' : 'var(--color-border)'}; border-radius: var(--rounded-md); background: var(--color-card-bg); transition: border-color 0.2s;">
-                        <div style="width:100%; aspect-ratio: 3/4; background: rgba(0,0,0,0.05); border-radius: var(--rounded-md) var(--rounded-md) 0 0; display:flex; align-items:center; justify-content:center;">
-                            <span class="material-symbols-outlined" style="opacity: 0.5; font-size: 32px;">person_off</span>
-                        </div>
-                        <div style="padding: var(--spacing-2);">
-                            <div style="font-weight: 500; font-size: 0.85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; color: var(--color-secondary-text);">None</div>
-                        </div>
-                    </div>
-                `;
-                
-                gridEl.innerHTML = noneCardHtml + cardsHtml;
-            };
-            
-            renderGrid();
-            
-            if (searchEl) {
-                searchEl.addEventListener('input', (e) => renderGrid(e.target.value));
-            }
-        } catch (e) {
-            gridEl.innerHTML = `<div class="discord-bot-module-page-error">Failed to load characters: ${e.message}</div>`;
-        }
-    }
-
-    _renderAllowedChannelIdsSetting({ policyId, key, currentValue }) {
-        const values = this._parseChannelIdList(currentValue);
-        const itemsHtml = values.map((value) => `
-            <span class="discord-policy-list-item" data-role="channel-id-item" data-value="${this._escapeHtml(value)}">
-                <span class="discord-policy-list-item__text">${this._escapeHtml(value)}</span>
-                <button
-                    type="button"
-                    class="discord-policy-list-item__remove"
-                    data-action="remove-channel-id"
-                    data-policy-id="${policyId}"
-                    data-setting-key="${this._escapeHtml(key)}"
-                    data-value="${this._escapeHtml(value)}"
-                >-</button>
-            </span>
-        `).join('');
-        return `
-            <div class="discord-policy-setting discord-policy-setting--channel-list" data-role="channel-id-setting" data-policy-id="${policyId}" data-setting-key="${this._escapeHtml(key)}">
-                <span class="discord-policy-setting__label">${this._escapeHtml(key)}</span>
-                <div class="discord-policy-list-editor">
-                    <div class="discord-policy-list-editor__controls">
-                        <input
-                            type="text"
-                            class="discord-policy-setting__input discord-policy-list-editor__input"
-                            data-role="channel-id-input"
-                            data-policy-id="${policyId}"
-                            data-setting-key="${this._escapeHtml(key)}"
-                            placeholder="Add channel ID"
-                        />
-                        <button
-                            type="button"
-                            class="discord-bot-btn discord-bot-btn--accent discord-policy-list-editor__add"
-                            data-action="add-channel-id"
-                            data-policy-id="${policyId}"
-                            data-setting-key="${this._escapeHtml(key)}"
-                        >Add</button>
-                    </div>
-                    <div class="discord-policy-list-items" data-role="channel-id-items">${itemsHtml}</div>
-                    <input type="hidden" data-role="policy-setting" data-policy-id="${policyId}" data-setting-key="${this._escapeHtml(key)}" value="${this._escapeHtml(values.join(','))}" />
-                </div>
-            </div>
-        `;
-    }
-
-    _parseChannelIdList(value) {
-        return String(value ?? '')
-            .split(',')
-            .map((item) => item.trim())
-            .filter(Boolean);
-    }
-
-    async _handleModulePageClick(event) {
-        const addButton = event.target.closest('[data-action="add-channel-id"]');
-        if (addButton && this.modulePageBodyEl.contains(addButton)) {
-            const policyId = addButton.getAttribute('data-policy-id');
-            const settingKey = addButton.getAttribute('data-setting-key');
-            if (policyId && settingKey) {
-                await this._addChannelIdFromModulePage(policyId, settingKey);
-            }
-            return;
-        }
-        const removeButton = event.target.closest('[data-action="remove-channel-id"]');
-        if (removeButton && this.modulePageBodyEl.contains(removeButton)) {
-            const policyId = removeButton.getAttribute('data-policy-id');
-            const settingKey = removeButton.getAttribute('data-setting-key');
-            const value = removeButton.getAttribute('data-value');
-            if (policyId && settingKey && value) {
-                await this._removeChannelIdFromModulePage(policyId, settingKey, value);
-            }
-            return;
-        }
-        const cbCard = event.target.closest('[data-role="cb-card"]');
-        if (cbCard && this.modulePageBodyEl.contains(cbCard)) {
-            const cId = cbCard.getAttribute('data-id');
-            const hidden = this.modulePageBodyEl.querySelector('[data-role="cb-selected"]');
-            if (hidden) hidden.value = cId;
-            
-            const cards = this.modulePageBodyEl.querySelectorAll('[data-role="cb-card"]');
-            cards.forEach(c => c.style.borderColor = 'var(--color-border)');
-            cbCard.style.borderColor = 'var(--color-accent)';
-            
-            const bUrl = this.modulePageBodyEl.querySelector('[data-role="cb-url"]')?.value || '';
-            const bKey = this.modulePageBodyEl.querySelector('[data-role="cb-key"]')?.value || '';
-            await this._saveBotConfiguration({
-                extraProps: {
-                    chat_character_id: cId,
-                    chat_bridge_url: bUrl,
-                    chat_bridge_key: bKey
-                }
-            });
-            return;
-        }
-    }
-
-    async _handleModulePageChange(event) {
-        const toggle = event.target.closest('[data-role="policy-toggle"]');
-        if (toggle && this.modulePageBodyEl.contains(toggle)) {
-            const policyId = toggle.getAttribute('data-policy-id');
-            if (policyId) {
-                await this._savePolicyFromModulePage(policyId);
-            }
-            return;
-        }
-
-        const cbInput = event.target.closest('[data-role="cb-url"], [data-role="cb-key"]');
-        if (cbInput && this.modulePageBodyEl.contains(cbInput)) {
-            const bUrl = this.modulePageBodyEl.querySelector('[data-role="cb-url"]')?.value || '';
-            const bKey = this.modulePageBodyEl.querySelector('[data-role="cb-key"]')?.value || '';
-            const cId = this.modulePageBodyEl.querySelector('[data-role="cb-selected"]')?.value || '';
-            await this._saveBotConfiguration({
-                extraProps: {
-                    chat_character_id: cId,
-                    chat_bridge_url: bUrl,
-                    chat_bridge_key: bKey
-                }
-            });
-            return;
-        }
-    }
-
-    async _addChannelIdFromModulePage(policyId, settingKey) {
-        const policyCard = this.modulePageBodyEl?.querySelector(`.discord-policy-card[data-policy-id="${policyId}"]`);
-        if (!policyCard) {
-            return;
-        }
-        const container = policyCard.querySelector(`[data-role="channel-id-setting"][data-setting-key="${settingKey}"]`);
-        const input = container?.querySelector('[data-role="channel-id-input"]');
-        const hiddenInput = policyCard.querySelector(`[data-role="policy-setting"][data-setting-key="${settingKey}"]`);
-        if (!container || !input || !hiddenInput) {
-            return;
-        }
-        const candidate = input.value.trim();
-        if (!candidate) {
-            return;
-        }
-        const currentValues = this._parseChannelIdList(hiddenInput.value);
-        if (!currentValues.includes(candidate)) {
-            currentValues.push(candidate);
-        }
-        hiddenInput.value = currentValues.join(',');
-        input.value = '';
-        await this._savePolicyFromModulePage(policyId);
-    }
-
-    async _removeChannelIdFromModulePage(policyId, settingKey, valueToRemove) {
-        const policyCard = this.modulePageBodyEl?.querySelector(`.discord-policy-card[data-policy-id="${policyId}"]`);
-        const hiddenInput = policyCard?.querySelector(`[data-role="policy-setting"][data-setting-key="${settingKey}"]`);
-        if (!policyCard || !hiddenInput) {
-            return;
-        }
-        const currentValues = this._parseChannelIdList(hiddenInput.value);
-        hiddenInput.value = currentValues.filter((value) => value !== valueToRemove).join(',');
-        await this._savePolicyFromModulePage(policyId);
-    }
-
-    async _savePolicyFromModulePage(policyId) {
-        const bot = this.state.activeBot;
-        if (!bot) {
-            showError('No active bot selected.');
-            return;
-        }
-        const policyCard = this.modulePageBodyEl?.querySelector(`.discord-policy-card[data-policy-id="${policyId}"]`);
-        if (!policyCard) {
-            return;
-        }
-        const toggleEl = policyCard.querySelector('[data-role="policy-toggle"]');
-        const settingEls = Array.from(policyCard.querySelectorAll('[data-role="policy-setting"]'));
-        const settings = {};
-        settingEls.forEach((input) => {
-            const key = input.getAttribute('data-setting-key');
-            if (key) {
-                settings[key] = key === 'allowed_channel_ids'
-                    ? this._parseChannelIdList(input.value).join(',')
-                    : input.value;
-            }
-        });
-        const payload = {
-            toggles: {
-                [policyId]: Boolean(toggleEl?.checked),
-            },
-            settings: Object.keys(settings).length ? { [policyId]: settings } : {},
-        };
-        try {
-            this._setPolicyCardSaving(policyCard, true);
-            const response = await this.pluginApi.post(`/bots/${encodeURIComponent(bot.bot_id)}/policies`, payload);
-            const cacheKey = this._moduleUiCacheKey(this.state.activeModulePage);
-            const existingUi = this.state.moduleUiCache[cacheKey] || {};
-            this.state.moduleUiCache[cacheKey] = {
-                ...existingUi,
-                groups: Array.isArray(response?.groups) ? response.groups : [],
-                bot_id: bot.bot_id,
-            };
-            this._renderModulePage();
-            showError(`Saved policy: ${policyId}`);
-        } catch (error) {
-            console.error('[DiscordBot] Failed to save policy:', error);
-            showError(`Unable to save policy: ${error.message}`);
-        } finally {
-            this._setPolicyCardSaving(policyCard, false);
-        }
-    }
-
-    _setPolicyCardSaving(policyCard, isSaving) {
-        if (!policyCard) {
-            return;
-        }
-        policyCard.classList.toggle('discord-policy-card--saving', Boolean(isSaving));
-        const inputs = policyCard.querySelectorAll('input');
-        inputs.forEach((input) => {
-            input.disabled = Boolean(isSaving);
-        });
     }
 
     _updateButtons() {
@@ -1426,11 +1231,6 @@ class DiscordBotDashboardPage {
             return;
         }
 
-        const normalizeToken = (value) => String(value || '')
-            .trim()
-            .toLowerCase()
-            .replace(/[._-]+/g, ' ')
-            .replace(/\s+/g, ' ');
         const requestedModuleIds = Array.isArray(pending.requestedModules) ? pending.requestedModules : [];
         const requestedModuleSet = new Set(requestedModuleIds);
         const moduleMap = new Map(this.state.modules.map(module => [module.id, module]));
@@ -1441,7 +1241,7 @@ class DiscordBotDashboardPage {
                 .map((entry) => {
                     const msg = typeof entry?.message === 'string' ? entry.message : '';
                     const match = msg.match(/^Loaded module:\s*(.+)$/i);
-                    return match ? normalizeToken(match[1]) : null;
+                    return match ? this.Utils.normalizeToken(match[1]) : null;
                 })
                 .filter(Boolean)
         );
@@ -1451,7 +1251,7 @@ class DiscordBotDashboardPage {
                 .map((entry) => {
                     const msg = typeof entry?.message === 'string' ? entry.message : '';
                     const match = msg.match(/^(.+?)\s+module failed:/i);
-                    return match ? normalizeToken(match[1]) : null;
+                    return match ? this.Utils.normalizeToken(match[1]) : null;
                 })
                 .filter(Boolean)
         );
@@ -1469,9 +1269,9 @@ class DiscordBotDashboardPage {
         for (const moduleId of requestedModuleIds) {
             const moduleMeta = moduleMap.get(moduleId);
             const candidates = new Set([
-                normalizeToken(moduleId),
-                normalizeToken(moduleMeta?.name),
-                normalizeToken(String(moduleId).split('.').pop()),
+                this.Utils.normalizeToken(moduleId),
+                this.Utils.normalizeToken(moduleMeta?.name),
+                this.Utils.normalizeToken(String(moduleId).split('.').pop()),
             ]);
 
             let isLoaded = false;
@@ -1492,9 +1292,9 @@ class DiscordBotDashboardPage {
         for (const moduleId of requestedModuleSet) {
             const moduleMeta = moduleMap.get(moduleId);
             const candidates = new Set([
-                normalizeToken(moduleId),
-                normalizeToken(moduleMeta?.name),
-                normalizeToken(String(moduleId).split('.').pop()),
+                this.Utils.normalizeToken(moduleId),
+                this.Utils.normalizeToken(moduleMeta?.name),
+                this.Utils.normalizeToken(String(moduleId).split('.').pop()),
             ]);
             let markedAsFailed = false;
             for (const candidate of candidates) {
@@ -1528,18 +1328,6 @@ class DiscordBotDashboardPage {
             },
         ].slice(-500);
         this.state.pendingStartSummary = null;
-    }
-
-    _resolveStatusMeta(state) {
-        const map = {
-            running:  { icon: 'play_circle', label: 'Running', tone: 'success' },
-            starting: { icon: 'pending', label: 'Starting', tone: 'info' },
-            stopping: { icon: 'hourglass_bottom', label: 'Stopping', tone: 'warning' },
-            error:    { icon: 'error', label: 'Error', tone: 'danger' },
-            idle:     { icon: 'pause_circle', label: 'Idle', tone: 'muted' },
-            stopped:  { icon: 'stop_circle', label: 'Stopped', tone: 'muted' },
-        };
-        return map[state] || map.stopped;
     }
 
     // --------------------------------------------------------------------- //
@@ -1644,6 +1432,103 @@ class DiscordBotDashboardPage {
         });
         if (saved && autoStart && this.state.activeBot) {
             await this._handleStart();
+        }
+    }
+
+    _renderBotSelector() {
+        if (!this.botSelectorEl) return;
+        const bots = this.state.bots || [];
+        this.botSelectorEl.innerHTML = bots.map(bot => {
+            const isActive = this.state.activeBot && bot.bot_id === this.state.activeBot.bot_id;
+            const statusMeta = this.Utils.resolveStatusMeta(bot.state);
+            const displayName = bot.name || bot.bot_id;
+            const initial = displayName.charAt(0).toUpperCase();
+            const avatarUrl = bot.avatar_url;
+            const isOffline = bot.state === 'stopped' || bot.state === 'error';
+            
+            return `
+                <div class="discord-bot-sidebar-icon-wrap">
+                    <div class="discord-bot-sidebar-icon ${isActive ? 'active' : ''} ${isOffline ? 'discord-bot-sidebar-icon--offline' : ''} discord-bot-status-border--${statusMeta.tone}" 
+                         data-bot-id="${bot.bot_id}" title="${this.Utils.escapeHtml(displayName)}">
+                        ${avatarUrl ? `<img src="${this.Utils.escapeHtml(avatarUrl)}" alt="${this.Utils.escapeHtml(displayName)}" />` : initial}
+                    </div>
+                    <button class="discord-bot-sidebar-delete" data-action="delete-bot" data-bot-id="${bot.bot_id}" title="Delete bot">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+            `;
+        }).join('');
+
+        // Ẩn/hiện nút "New Bot" dựa trên giới hạn
+        if (this.newBotBtn) {
+            if (bots.length >= 5) {
+                this.newBotBtn.style.display = 'none';
+            } else {
+                this.newBotBtn.style.display = 'flex';
+            }
+        }
+    }
+
+    async _handleNewBot() {
+        if (this.state.isSubmitting) return;
+
+        // Giới hạn tối đa 5 bot
+        if (this.state.bots && this.state.bots.length >= 5) {
+            if (window.showError) {
+                window.showError('Bạn đã đạt giới hạn tối đa 5 bot. Vui lòng xóa bot cũ trước khi tạo bot mới.');
+            }
+            return;
+        }
+
+        this.state.isSubmitting = true;
+        this._updateButtons();
+        try {
+            const payload = {
+                token: '',
+                name: 'New Discord Bot',
+                auto_start: false,
+                modules: [],
+            };
+            const response = await this.pluginApi.post('/bots', payload);
+
+            // Re-fetch the list to get the new bot object
+            const listResponse = await this.pluginApi.get('/bots');
+            this.state.bots = listResponse.bots || [];
+
+            if (response.bot_id) {
+                const newBot = this.state.bots.find(b => b.bot_id === response.bot_id);
+                if (newBot) {
+                    this.state.activeBot = newBot;
+                    this.state.logs = [];
+                    this.state.lastSeq = 0;
+                    // Fully refresh the UI for the new bot
+                    await this.refreshBots();
+                }
+            }
+        } catch (error) {
+            console.error('[DiscordBot] Failed to create new bot:', error);
+            if (window.showError) window.showError(`Unable to create bot: ${error.message}`);
+        } finally {
+            this.state.isSubmitting = false;
+            this._updateButtons();
+        }
+    }
+
+    async _handleDeleteBot(botId) {
+        if (!botId) return;
+        const confirmed = await confirm(`Are you sure you want to delete bot "${botId}"?`);
+        if (!confirmed) return;
+
+        try {
+            await this.pluginApi.delete(`/bots/${botId}`);
+            if (this.state.activeBot && this.state.activeBot.bot_id === botId) {
+                this.state.activeBot = null;
+                this.state.logs = [];
+                this.state.lastSeq = 0;
+            }
+            await this.refreshBots();
+        } catch (error) {
+            console.error('[DiscordBot] Failed to delete bot:', error);
         }
     }
 }

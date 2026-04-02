@@ -90,12 +90,13 @@
                                     <th>Hash Key</th>
                                     <th>Vai trò</th>
                                     <th>Trạng thái</th>
+                                    <th>Ngày đăng ký</th>
                                     <th style="text-align: right;">Thao tác</th>
                                 </tr>
                             </thead>
                             <tbody id="user-list-body">
                                 ${filteredUsers.map(user => this.renderUserRow(user)).join('')}
-                                ${filteredUsers.length === 0 ? `<tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--color-secondary-text);">Không tìm thấy người dùng phù hợp.</td></tr>` : ''}
+                                ${filteredUsers.length === 0 ? `<tr><td colspan="6" style="text-align:center; padding: 40px; color: var(--color-secondary-text);">Không tìm thấy người dùng phù hợp.</td></tr>` : ''}
                             </tbody>
                         </table>
                     </div>
@@ -151,13 +152,19 @@
             const body = this.container.querySelector("#user-list-body");
             if (body) {
                 body.innerHTML = filteredUsers.map(user => this.renderUserRow(user)).join('') + 
-                    (filteredUsers.length === 0 ? `<tr><td colspan="5" style="text-align:center; padding: 40px; color: var(--color-secondary-text);">Không tìm thấy người dùng phù hợp.</td></tr>` : '');
+                    (filteredUsers.length === 0 ? `<tr><td colspan="6" style="text-align:center; padding: 40px; color: var(--color-secondary-text);">Không tìm thấy người dùng phù hợp.</td></tr>` : '');
             }
         }
 
         renderUserRow(user) {
             const roleBadge = user.role === 'admin' ? 'badge-admin' : 'badge-user';
             const statusBadge = user.status === 'waiting' ? 'badge-waiting' : '';
+            
+            let regDateStr = "N/A";
+            if (user.reg_time) {
+                const d = new Date(user.reg_time * 1000);
+                regDateStr = d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+            }
             
             return `
                 <tr class="user-row" data-token="${user.token}">
@@ -171,16 +178,26 @@
                     <td class="hash-cell">${user.hash.substring(0, 12)}...</td>
                     <td><span class="badge ${roleBadge}">${user.role}</span></td>
                     <td><span class="badge ${statusBadge}">${user.status}</span></td>
+                    <td style="font-size: 0.85rem; color: var(--color-secondary-text);">${regDateStr}</td>
                     <td class="user-actions">
-                        ${user.role !== 'admin' ? `
-                            <button class="action-btn btn-promote" title="Cấp quyền Admin" onclick="Yuuka.components.AccountComponent._handleAction('${user.token}', 'promote')">
+                        ${user.status === 'waiting' ? `
+                            <button class="action-btn btn-approve" title="Duyệt làm User" onclick="Yuuka.components.AccountComponent._handleAction('${user.token}', 'approve')">
+                                <span class="material-symbols-outlined">how_to_reg</span>
+                            </button>
+                            <button class="action-btn btn-promote" title="Duyệt làm Admin" onclick="Yuuka.components.AccountComponent._handleAction('${user.token}', 'promote', 'waiting')">
                                 <span class="material-symbols-outlined">shield_person</span>
                             </button>
                         ` : `
-                            <button class="action-btn btn-revoke" title="Hạ quyền Admin" ${user.is_self ? 'disabled' : ''} 
-                                    onclick="Yuuka.components.AccountComponent._handleAction('${user.token}', 'revoke')">
-                                <span class="material-symbols-outlined">person_remove</span>
-                            </button>
+                            ${user.role !== 'admin' ? `
+                                <button class="action-btn btn-promote" title="Cấp quyền Admin" onclick="Yuuka.components.AccountComponent._handleAction('${user.token}', 'promote')">
+                                    <span class="material-symbols-outlined">shield_person</span>
+                                </button>
+                            ` : `
+                                <button class="action-btn btn-revoke" title="Hạ quyền Admin" ${user.is_self ? 'disabled' : ''} 
+                                        onclick="Yuuka.components.AccountComponent._handleAction('${user.token}', 'revoke')">
+                                    <span class="material-symbols-outlined">person_remove</span>
+                                </button>
+                            `}
                         `}
                         <button class="action-btn btn-delete" title="Xóa tài khoản" ${user.is_self ? 'disabled' : ''}
                                 onclick="Yuuka.components.AccountComponent._handleAction('${user.token}', 'delete')">
@@ -192,7 +209,7 @@
         }
 
         // Static handler for inline onclicks
-        static async _handleAction(token, action) {
+        static async _handleAction(token, action, currentStatus = '') {
             const instance = window.Yuuka.coreState.currentPluginInstance;
             if (!instance || !instance.pluginApi) return;
 
@@ -200,8 +217,13 @@
             let apiPath = "";
             let method = "POST";
 
-            if (action === 'promote') {
-                confirmMsg = "Cấp quyền Admin cho người dùng này?";
+            if (action === 'approve') {
+                confirmMsg = "Duyệt người dùng này truy cập ứng dụng (User)?";
+                apiPath = "/approve";
+            } else if (action === 'promote') {
+                confirmMsg = currentStatus === 'waiting' 
+                    ? "Duyệt và cấp quyền Admin cho người dùng này?" 
+                    : "Cấp quyền Admin cho người dùng này?";
                 apiPath = "/promote";
             } else if (action === 'revoke') {
                 confirmMsg = "Gỡ quyền Admin của người dùng này?";

@@ -81,7 +81,7 @@ function setupModules(client, modules, runtimeConfig, logger) {
   runtimeState.flushPersist = () => persistence.flush(runtimeState);
   persistence.loadInto(runtimeState);
   applyConfiguredPolicies(runtimeState, runtimeConfig?.policies || {});
-  const voiceAdapter = createVoiceAdapter(runtimeState);
+  const voiceAdapter = createVoiceAdapter(runtimeState, client);
   runtimeState.voiceState.adapter = voiceAdapter;
 
   const registry = createBuiltInModuleRegistry({
@@ -95,6 +95,7 @@ function setupModules(client, modules, runtimeConfig, logger) {
   installRuntimeObservers(eventBus, logger, runtimeState);
   wireDiscordEvents(client, eventBus);
 
+  const activeModules = [];
   for (const moduleId of selected) {
     const moduleDef = registry[moduleId];
     if (!moduleDef || typeof moduleDef.setup !== 'function') {
@@ -104,6 +105,7 @@ function setupModules(client, modules, runtimeConfig, logger) {
     const moduleContext = createModuleContext(eventBus, moduleDef);
     try {
       moduleDef.setup(moduleContext);
+      activeModules.push(moduleDef);
       logger.log('info', `Loaded module: ${moduleDef.name}`);
     } catch (error) {
       eventBus.publish('core.module_error', {
@@ -114,7 +116,19 @@ function setupModules(client, modules, runtimeConfig, logger) {
     }
   }
 
-  return { eventBus, runtimeState, voiceAdapter, persistence };
+  const onReady = async () => {
+    for (const mod of activeModules) {
+      if (typeof mod.onReady === 'function') {
+        try {
+          await mod.onReady();
+        } catch (error) {
+          logger.log('error', `Module ${mod.module_id} ready hook failed: ${error.message}`);
+        }
+      }
+    }
+  };
+
+  return { eventBus, runtimeState, voiceAdapter, persistence, onReady };
 }
 
 module.exports = {

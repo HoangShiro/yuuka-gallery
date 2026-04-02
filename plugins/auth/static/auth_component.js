@@ -21,9 +21,35 @@ class AuthPluginComponent {
         if (tabs) tabs.style.display = '';
     }
 
-    _setLoggedOutUI(message = '') {
+    _setLoggedOutUI(message = '', status = 'login') {
         document.body.className = 'is-logged-out';
         if (!this.authContainer) return;
+        
+        if (status === 'waiting') {
+            const token = this.getToken() || '';
+            this.authContainer.innerHTML = `
+                <div class="auth-form-wrapper auth-waiting-wrapper">
+                    <span class="material-symbols-outlined waiting-icon">hourglass_empty</span>
+                    <h3>Đang chờ duyệt</h3>
+                    <p>Token của bạn đã được gửi vào danh sách chờ.</p>
+                    <div class="waiting-token-display">
+                        <code>${token.substring(0, 18)}...</code>
+                        <span class="material-symbols-outlined" title="Copy Token" onclick="Yuuka.ui.copyToClipboard('${token}').then(() => showSuccess('Đã copy token!'))">content_copy</span>
+                    </div>
+                    <p class="waiting-hint">Vui lòng liên hệ Admin để được cấp quyền truy cập.</p>
+                    <button type="button" id="btn-back-to-login" class="secondary-btn">Quay lại đăng nhập</button>
+                </div>`;
+            
+            const backBtn = this.authContainer.querySelector('#btn-back-to-login');
+            if (backBtn) {
+                backBtn.onclick = () => {
+                    localStorage.removeItem(this.tokenKey);
+                    window.location.reload();
+                };
+            }
+            return;
+        }
+
         const extra = message ? `<p class="error-msg">${message}</p>` : '';
         this.authContainer.innerHTML = `
             <div class="auth-form-wrapper">

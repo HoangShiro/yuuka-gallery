@@ -190,7 +190,7 @@ body.account-plugin-active {
     background: #ffe6e6;
 }
 
-.action-btn.btn-promote:hover {
+.action-btn.btn-promote:hover, .action-btn.btn-approve:hover {
     color: #2ecc71;
     background: #eafaf1;
 }
