@@ -16,6 +16,8 @@
             "utils/module.js",
             "pages/policy_manager.js",
             "pages/character_picker.js",
+            "pages/tts_engine_picker.js",
+            "pages/brain_abilities.js",
             "pages/dashboard.js",
             "discord_bot.js"
         ],

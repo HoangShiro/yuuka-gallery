@@ -49,6 +49,9 @@ def _build_persona_prompt(data, plugin=None, user_hash=None):
     custom_system_prompt = data.get('system_prompt', '').strip()
     session_state = data.get('session_state', {})
     available_capabilities = data.get('available_capabilities', [])
+    include_chat_system_rule = bool(data.get('include_chat_system_rule', True))
+    include_chat_format_rule = bool(data.get('include_chat_format_rule', True))
+    chat_system_rule_override = data.get('chat_system_rule_override', '')
 
     def replace_names(text):
         if not text:
@@ -58,11 +61,13 @@ def _build_persona_prompt(data, plugin=None, user_hash=None):
     prompt_parts = []
 
     # 1. Behavioral rules first (primacy effect — LLM reads these before anything else)
-    chat_system_rule = plugin.get_rule_content(user_hash, 'chat_system') if plugin and user_hash else ""
+    chat_system_rule = chat_system_rule_override if isinstance(chat_system_rule_override, str) else ""
+    if not chat_system_rule and include_chat_system_rule:
+        chat_system_rule = plugin.get_rule_content(user_hash, 'chat_system') if plugin and user_hash else ""
     if chat_system_rule:
         prompt_parts.append(replace_names(chat_system_rule))
 
-    chat_format_rule = plugin.get_formatted_chat_rule(user_hash, data) if plugin and user_hash else ""
+    chat_format_rule = plugin.get_formatted_chat_rule(user_hash, data) if include_chat_format_rule and plugin and user_hash else ""
     if chat_format_rule:
         prompt_parts.append(chat_format_rule)
 
@@ -91,8 +96,31 @@ def _build_persona_prompt(data, plugin=None, user_hash=None):
     ]
     prompt_parts.append("\n".join(state_desc))
 
-    return "\n\n".join(prompt_parts)
+    return "\n\n".join([p for p in prompt_parts if p])
 
+def _extract_stream_chunk_text(chunk):
+    try:
+        if isinstance(chunk, dict):
+            choices = chunk.get("choices") or []
+            if choices:
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+                return str(content or "")
+            message = chunk.get("message") or {}
+            return str(message.get("content") or chunk.get("content") or "")
+        choices = getattr(chunk, "choices", None) or []
+        if choices:
+            delta = getattr(choices[0], "delta", None)
+            content = getattr(delta, "content", None) if delta else None
+            if content:
+                return str(content)
+            message = getattr(choices[0], "message", None)
+            message_content = getattr(message, "content", None) if message else None
+            if message_content:
+                return str(message_content)
+        return str(getattr(chunk, "content", "") or "")
+    except Exception:
+        return ""
 
 def _extract_chat_text(response):
     text = ""
@@ -486,6 +514,13 @@ def register_routes(blueprint, plugin):
                 actor_global = (memo_ctx.get('actor_global_summary') or {}).get('summary')
                 if actor_global:
                     user_info_lines.append(f"Fact about {author_name}: {actor_global}")
+                event_ctx = discord_context.get('event_context') or {}
+                reply_ref = event_ctx.get('reply_reference')
+                if reply_ref and isinstance(reply_ref, dict):
+                    ref_name = reply_ref.get('display_name', 'someone')
+                    ref_content = reply_ref.get('content', '')
+                    if ref_content:
+                        user_info_lines.append(f'{author_name} is referring to {ref_name}\'s message with content "{ref_content}".')
                 user_info_lines.append("</user_info>")
                 compact_history[-1]['content'] += "\n".join(user_info_lines)
 
@@ -500,9 +535,38 @@ def register_routes(blueprint, plugin):
             ]
 
             # Format context blocks
-            voice_info = info_ctx.get('voice')
-            if voice_info:
-                ctx_lines.append(f"Speaker Voice Activity: in '{voice_info.get('voice_channel_name')}' with {voice_info.get('member_count', 0)} members.")
+            bot_voice = info_ctx.get('bot_voice')
+            user_voice = info_ctx.get('user_voice')
+            
+            if bot_voice:
+                b_members = bot_voice.get('members', [])
+                b_member_names = [m.get('display_name') for m in b_members if not m.get('is_bot')]
+                b_member_str = f"along with humans: {', '.join(b_member_names)}" if b_member_names else "with no humans"
+                ctx_lines.append(f"Your Voice State (Bot): Currently joined in '{bot_voice.get('channel_name')}' {b_member_str}.")
+            else:
+                ctx_lines.append(f"Your Voice State (Bot): NOT joined in any voice channel.")
+                
+            if user_voice:
+                ctx_lines.append(f"User's Voice State: User is currently in '{user_voice.get('channel_name')}'.")
+            else:
+                ctx_lines.append(f"User's Voice State: User is NOT in any voice channel.")
+
+            voice_status = info_ctx.get('voice_status')
+            if voice_status:
+                music_ch = voice_status.get('music') or {}
+                m_vol = voice_status.get('music_volume', 50)
+                speak_vol = voice_status.get('speak_volume', 100)
+                
+                playing_text = ""
+                m_now = music_ch.get('now_playing')
+                if m_now:
+                    m_meta = m_now.get('metadata') or {}
+                    m_title = m_meta.get('title') or m_now.get('id')
+                    playing_text = f"Playing music: '{m_title}'."
+                else:
+                    playing_text = "No music playing."
+                    
+                ctx_lines.append(f"Voice Queue State: {playing_text} (Current Volumes: Speak={speak_vol}%, Music={m_vol}%)")
 
             conv_summary = (memo_ctx.get('conversation_summary') or {}).get('summary')
             if conv_summary:
@@ -523,6 +587,11 @@ def register_routes(blueprint, plugin):
                 for fact in facts[:5]:
                     ctx_lines.append(f" - {fact.get('value', '')}")
 
+            abilities_ctx = discord_context.get('abilities_context', {})
+            abilities_html = abilities_ctx.get('abilities_html')
+            if abilities_html:
+                ctx_lines.append(abilities_html)
+
             ctx_lines.append("</discord_context>")
 
             bridge_system = "\n".join(ctx_lines)
@@ -537,6 +606,14 @@ def register_routes(blueprint, plugin):
                 'system_prompt': bridge_system,
                 'session_state': data.get('session_state') or {},
             }
+            discord_rule_data = {
+                'primary_language': data.get('primary_language') or data.get('language_primary') or 'English',
+                'secondary_language': data.get('secondary_language') or data.get('language_secondary') or 'Japanese',
+            }
+            discord_system_rule = plugin.get_formatted_discord_chat_rule(user_hash, discord_rule_data) if plugin and user_hash else ""
+            prompt_data['include_chat_format_rule'] = False
+            if discord_system_rule:
+                prompt_data['chat_system_rule_override'] = discord_system_rule
             system_prompt = _build_persona_prompt(prompt_data, plugin, user_hash)
 
             model = data.get('model') or 'deepseek-v3.1:671b-cloud'
@@ -550,6 +627,57 @@ def register_routes(blueprint, plugin):
 
             llm_messages = [{'role': 'system', 'content': system_prompt}]
             llm_messages.extend(compact_history)
+
+            stream_response = bool(data.get('stream', False))
+            if stream_response:
+                def generate():
+                    accumulated = []
+                    yield json.dumps({
+                        "event": "start",
+                        "session_id": session_id,
+                        "character_id": character_id,
+                    }, ensure_ascii=False) + "\n"
+                    try:
+                        from integrations.openai import get_client
+                        client = get_client(provider="ollama")
+                        response = client.chat.completions.create(
+                            model=model,
+                            messages=llm_messages,
+                            stream=True,
+                            timeout=60,
+                            **kwargs,
+                        )
+                        for chunk in response:
+                            content = _extract_stream_chunk_text(chunk)
+                            if not content:
+                                continue
+                            accumulated.append(content)
+                            yield json.dumps({
+                                "event": "delta",
+                                "content": content,
+                            }, ensure_ascii=False) + "\n"
+                        text = ''.join(accumulated).strip()
+                        if not text:
+                            yield json.dumps({"event": "error", "error": "Empty response from model."}, ensure_ascii=False) + "\n"
+                            return
+                        history.append({'role': 'assistant', 'content': text})
+                        session_data = {
+                            'id': session_id,
+                            'messages': history[-40:],
+                            'discord_context': discord_context,
+                        }
+                        saved_session = plugin.save_session(user_hash, character_id, session_id, session_data)
+                        yield json.dumps({
+                            "event": "complete",
+                            "status": "success",
+                            "session_id": saved_session.get('id', session_id),
+                            "character_id": character_id,
+                            "response": text,
+                            "llm_input": llm_messages,
+                        }, ensure_ascii=False) + "\n"
+                    except Exception as e:
+                        yield json.dumps({"event": "error", "error": str(e)}, ensure_ascii=False) + "\n"
+                return Response(stream_with_context(generate()), mimetype='application/x-ndjson')
 
             response = plugin.core_api.ai_service.request(
                 provider='ollama',

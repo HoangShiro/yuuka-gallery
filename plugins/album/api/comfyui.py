@@ -74,6 +74,19 @@ def register_routes(blueprint, plugin):
                 except (ValueError, AttributeError):
                     continue
 
+                small_width = round(base_width / 1.5 / 8) * 8
+                small_height = round(base_height / 1.5 / 8) * 8
+                small_entry = {
+                    "name": f"{option.get('name', f'{base_width}x{base_height}')} / 1.5 ({small_width}x{small_height})",
+                    "value": f"{small_width}x{small_height}",
+                    "dataAttrs": {
+                        "mode": "standard",
+                        "baseWidth": str(small_width),
+                        "baseHeight": str(small_height)
+                    }
+                }
+                size_variants.append(small_entry)
+
                 base_entry = {
                     "name": option.get("name", f"{base_width}x{base_height}"),
                     "value": f"{base_width}x{base_height}",

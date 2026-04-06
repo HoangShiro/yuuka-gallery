@@ -54,6 +54,7 @@ class DiscordBotRunner:
             "user_hash": self.runtime.user_hash,
             "cache_dir": str(cache_root),
             "chat_character_id": (self.runtime.config.get("chat_character_id") or "").strip(),
+            "chat_character_name": (self.runtime.config.get("chat_character_name") or "").strip(),
             "chat_model": (self.runtime.config.get("chat_model") or "").strip(),
             "chat_bridge_url": (
                 self.runtime.config.get("chat_bridge_url")
@@ -63,7 +64,17 @@ class DiscordBotRunner:
                 self.runtime.config.get("chat_bridge_key")
                 or os.getenv("CHAT_BRIDGE_KEY", "")
             ).strip(),
+            "chat_primary_language": (self.runtime.config.get("chat_primary_language") or "English").strip() or "English",
+            "chat_secondary_language": (self.runtime.config.get("chat_secondary_language") or "Japanese").strip() or "Japanese",
+            "chat_secondary_to_channel": bool(self.runtime.config.get("chat_secondary_to_channel", False)),
+            "tts_engine": (self.runtime.config.get("tts_engine") or "aivisspeech").strip() or "aivisspeech",
+            "tts_engine_base_url": (self.runtime.config.get("tts_engine_base_url") or "http://127.0.0.1:10101").strip() or "http://127.0.0.1:10101",
+            "tts_speaker_id": str(self.runtime.config.get("tts_speaker_id") or "").strip(),
+            "tts_speaker_name": str(self.runtime.config.get("tts_speaker_name") or "").strip(),
+            "tts_speaker_avatar_url": str(self.runtime.config.get("tts_speaker_avatar_url") or "").strip(),
+            "tts_text_source": str(self.runtime.config.get("tts_text_source") or "secondary").strip().lower() or "secondary",
             "policies": self.runtime.config.get("policies") or {},
+            "brain_tools": self.runtime.config.get("brain_tools") or {"toggles": {}},
         }
         if not config_payload["token"]:
             self.runtime.update_state("error", "Discord token is missing.")

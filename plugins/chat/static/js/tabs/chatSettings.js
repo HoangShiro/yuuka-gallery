@@ -1,5 +1,90 @@
 Object.assign(window.ChatComponent.prototype, {
     // --- Theme Settings ---
+    getDiscordLanguageOptions() {
+        return [
+            'English',
+            'Japanese',
+            'Vietnamese',
+            'Chinese',
+            'Korean',
+            'Spanish',
+            'French',
+            'German'
+        ];
+    },
+
+    initDiscordLanguageDropdown(container, storageKey, fallbackValue) {
+        if (!container) return;
+        const trigger = container.querySelector('[data-role="chat-language-trigger"]');
+        const menu = container.querySelector('[data-role="chat-language-menu"]');
+        if (!trigger || !menu) return;
+
+        const options = this.getDiscordLanguageOptions();
+        let currentValue = localStorage.getItem(storageKey) || fallbackValue;
+
+        const closeMenu = () => {
+            menu.style.display = 'none';
+            trigger.setAttribute('aria-expanded', 'false');
+        };
+
+        const renderMenu = () => {
+            trigger.textContent = currentValue;
+            menu.innerHTML = options.map((language) => `
+                <button
+                    type="button"
+                    data-role="chat-language-option"
+                    data-value="${language}"
+                    style="width: 100%; padding: 10px 12px; border: none; border-bottom: 1px solid var(--chat-border); background: ${language === currentValue ? 'color-mix(in srgb, var(--chat-primary) 12%, transparent)' : 'transparent'}; color: var(--chat-text); text-align: left; cursor: pointer; font-size: 0.95rem;"
+                >${language}</button>
+            `).join('');
+
+            menu.querySelectorAll('[data-role="chat-language-option"]').forEach((optionBtn) => {
+                optionBtn.addEventListener('click', () => {
+                    currentValue = optionBtn.getAttribute('data-value') || fallbackValue;
+                    localStorage.setItem(storageKey, currentValue);
+                    renderMenu();
+                    closeMenu();
+                });
+            });
+        };
+
+        renderMenu();
+        closeMenu();
+
+        trigger.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const isOpen = menu.style.display === 'block';
+            const allMenus = this.container.querySelectorAll('[data-role="chat-language-menu"]');
+            allMenus.forEach((menuEl) => {
+                menuEl.style.display = 'none';
+            });
+            const allTriggers = this.container.querySelectorAll('[data-role="chat-language-trigger"]');
+            allTriggers.forEach((triggerEl) => {
+                triggerEl.setAttribute('aria-expanded', 'false');
+            });
+            if (!isOpen) {
+                menu.style.display = 'block';
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+        });
+
+        if (!this._chatLanguageDropdownDocumentHandler) {
+            this._chatLanguageDropdownDocumentHandler = (event) => {
+                if (!this.container.contains(event.target)) return;
+                const dropdown = event.target.closest('#chat-discord-primary-language, #chat-discord-secondary-language');
+                if (dropdown) return;
+                this.container.querySelectorAll('[data-role="chat-language-menu"]').forEach((menuEl) => {
+                    menuEl.style.display = 'none';
+                });
+                this.container.querySelectorAll('[data-role="chat-language-trigger"]').forEach((triggerEl) => {
+                    triggerEl.setAttribute('aria-expanded', 'false');
+                });
+            };
+            document.addEventListener('click', this._chatLanguageDropdownDocumentHandler);
+        }
+    },
+
     renderThemeSettings() {
         const container = this.container.querySelector('#theme-cards');
         if (!container) return;
@@ -198,6 +283,12 @@ Object.assign(window.ChatComponent.prototype, {
             autoLineBreakToggle.addEventListener('change', (e) => {
                 localStorage.setItem('chat-auto-line-break', e.target.checked);
             });
+        }
+
+        const languageOptions = this.getDiscordLanguageOptions();
+        if (languageOptions.length) {
+            this.initDiscordLanguageDropdown(this.container.querySelector('#chat-discord-primary-language'), 'chat-discord-primary-language', 'English');
+            this.initDiscordLanguageDropdown(this.container.querySelector('#chat-discord-secondary-language'), 'chat-discord-secondary-language', 'Japanese');
         }
 
         const btnAddRule = this.container.querySelector('#btn-chat-add-rule');

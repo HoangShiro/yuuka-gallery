@@ -28,6 +28,27 @@ class ChannelModule(BotModule):
             ],
         }
 
+    def get_brain_capabilities(self) -> dict:
+        return {
+            "instructions": [
+                "Quản lý text channel trong guild khi có quyền Manage Channels.",
+            ],
+            "tools": [
+                {
+                    "tool_id": "channel_create_text",
+                    "title": "Create text channel",
+                    "description": "Tạo text channel mới trong guild.",
+                    "default_enabled": True,
+                },
+                {
+                    "tool_id": "channel_manage",
+                    "title": "Rename/lock/unlock channel",
+                    "description": "Đổi tên, khóa hoặc mở khóa channel hiện tại.",
+                    "default_enabled": True,
+                },
+            ],
+        }
+
     def setup(self, bot, log) -> None:
         log.add("info", "core.channel runs in JS runtime and does not register Python discord.py handlers.")
 

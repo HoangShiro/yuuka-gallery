@@ -951,6 +951,128 @@ html.dark-mode .discord-policy-setting__input {
     transform: translateY(-1px);
 }
 
+.discord-brain-abilities__group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+}
+
+.discord-brain-abilities__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-3);
+}
+
+.discord-brain-abilities__module-id {
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    font-family: "Cascadia Code", "Fira Code", monospace;
+}
+
+.discord-brain-abilities__instructions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+}
+
+.discord-brain-abilities__instruction {
+    border-left: 2px solid rgba(66, 165, 245, 0.45);
+    padding-left: var(--spacing-3);
+    color: var(--color-secondary-text);
+}
+
+.discord-brain-tool-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+}
+
+.discord-brain-tool-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-card-bg);
+    padding: var(--spacing-3);
+    cursor: pointer;
+}
+
+.discord-brain-tool-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--spacing-3);
+}
+
+.discord-brain-tool-card__meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+}
+
+.discord-brain-tool-card__meta h5 {
+    margin: 0;
+    color: var(--color-primary-text);
+    font-size: 1em;
+}
+
+.discord-brain-tool-card__meta p {
+    margin: 0;
+    color: var(--color-secondary-text);
+}
+
+.discord-brain-tool-card__details {
+    margin-top: var(--spacing-3);
+    border-top: 1px dashed var(--color-border);
+    padding-top: var(--spacing-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-3);
+}
+
+.discord-brain-tool-card__details[hidden] {
+    display: none;
+}
+
+.discord-brain-tool-card__detail-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+}
+
+.discord-brain-tool-card__detail-label {
+    font-size: var(--font-size-sm);
+    color: var(--color-secondary-text);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.discord-brain-tool-card__detail-value {
+    color: var(--color-primary-text);
+    font-weight: var(--font-weight-medium);
+}
+
+.discord-brain-tool-card__detail-id {
+    color: var(--color-secondary-text);
+    font-family: "Cascadia Code", "Fira Code", monospace;
+    font-size: var(--font-size-sm);
+}
+
+.discord-brain-tool-card__instruction-list {
+    margin: 0;
+    padding-left: var(--spacing-4);
+    color: var(--color-secondary-text);
+}
+
+.discord-brain-tool-card__instruction-empty {
+    margin: 0;
+    color: var(--color-secondary-text);
+}
+
+.discord-brain-tool-card--expanded {
+    border-color: rgba(66, 165, 245, 0.45);
+    background: rgba(66, 165, 245, 0.06);
+}
+
 .discord-bot-module-placeholder {
     font-size: var(--font-size-sm);
     color: var(--color-secondary-text);

@@ -99,6 +99,31 @@ DEFAULT_RULES = {
             "At the END of EVERY message, append a <system_update> block as instructed."
         )
     },
+    "chat_discord_system": {
+        "id": "chat_discord_system",
+        "name": "Chat Discord System",
+        "is_default": True,
+        "content": (
+            "CRITICAL INSTRUCTION: You are {{char}} chatting inside a Discord server.\n"
+            "NEVER break character. NEVER acknowledge you are an AI.\n"
+            "Discord server, channel, and participant details may appear in the context — respond ONLY as {{char}}.\n"
+            "Keep the reply short, conversational, and proportional to the latest message unless detail is requested.\n"
+            "Return EXACTLY one HTML block for the message and ONE OR MORE <call_command> tags using this format:\n"
+            "<discord-reply><message language=\"{{primary_language}}\">Primary language reply here.</message><message language=\"{{secondary_language}}\">Secondary language reply here.</message></discord-reply>\n"
+            "<call_command>{\"tool_id\": \"command_name_1\", \"payload\": {\"arg1\": \"value\"}}</call_command>\n"
+            "<call_command>{\"tool_id\": \"command_name_2\", \"payload\": {\"arg1\": \"value\"}}</call_command>\n"
+            "Rules:\n"
+            "- The first <message> MUST contain the full in-character reply in {{primary_language}}.\n"
+            "- The second <message> MUST contain the same reply, naturally localized into {{secondary_language}}.\n"
+            "- Prefer 1-3 short sentences total unless the user explicitly asks for more detail.\n"
+            "- You CAN execute multiple commands by adding multiple <call_command> blocks.\n"
+            "- You MUST always return at least one <call_command> tag appended at the very end.\n"
+            "- If you do not wish to call any command, use <call_command>Null</call_command>.\n"
+            "- Every <call_command> MUST be a valid JSON object with \"tool_id\" and \"payload\" fields as shown in the tools list.\n"
+            "- Do NOT append <system_update> or any other metadata tags.\n"
+            "- Do NOT include any text before or after."
+        )
+    },
     "chat_format": {
         "id": "chat_format",
         "name": "Chat Format",
@@ -405,6 +430,20 @@ class ChatScenarioMixin:
         chat_format_rule = chat_format_rule.replace("{{mentioned_names_hint}}", mentioned_hint)
 
         return chat_format_rule
+
+    def get_formatted_discord_chat_rule(self, user_hash, data):
+        """Get the chat_discord_system rule and populate it with current language preferences."""
+        discord_rule = self.get_rule_content(user_hash, 'chat_discord_system')
+        if not discord_rule:
+            return ""
+
+        primary_language = str(data.get('primary_language') or 'English').strip() or 'English'
+        secondary_language = str(data.get('secondary_language') or 'Japanese').strip() or 'Japanese'
+
+        discord_rule = discord_rule.replace("{{primary_language}}", primary_language)
+        discord_rule = discord_rule.replace("{{secondary_language}}", secondary_language)
+
+        return discord_rule
 
     def get_scene_by_id(self, user_hash, scene_id):
         """Get a single scene by ID."""

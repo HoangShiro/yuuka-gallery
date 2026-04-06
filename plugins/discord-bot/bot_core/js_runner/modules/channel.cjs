@@ -9,6 +9,32 @@ module.exports = function createChannelModule(deps) {
     module_id: 'core.channel',
     name: 'Channel Tools',
     setup(ctx) {
+      ctx.registerBrainInstruction('Quản lý text channel trong guild khi actor có quyền Manage Channels.');
+      ctx.registerBrainTool({
+        tool_id: 'channel_create_text',
+        title: 'Create text channel',
+        description: 'Tạo text channel mới trong guild.',
+        call_event: 'channel.action_requested',
+        input_schema: {
+          action: '"create_text"',
+          name: 'string',
+          guild: 'DiscordGuild',
+          interaction: 'DiscordInteraction',
+        },
+      });
+      ctx.registerBrainTool({
+        tool_id: 'channel_manage',
+        title: 'Rename/lock/unlock channel',
+        description: 'Đổi tên, khóa, hoặc mở khóa channel hiện tại.',
+        call_event: 'channel.action_requested',
+        input_schema: {
+          action: '"rename"|"lock"|"unlock"',
+          name: 'string?',
+          channel: 'DiscordChannel',
+          guild: 'DiscordGuild',
+          interaction: 'DiscordInteraction',
+        },
+      });
       addCommandDefinition(runtimeState, new SlashCommandBuilder()
         .setName('create-text')
         .setDescription('Create a text channel in the current guild')

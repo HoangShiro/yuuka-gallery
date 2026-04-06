@@ -23,10 +23,31 @@ async function replyToInteraction(interaction, payload = {}) {
   if (!normalized.content && !normalized.embeds) {
     normalized.content = 'Done.';
   }
-  if (interaction.deferred || interaction.replied) {
-    return interaction.editReply(normalized);
+  const replyPayload = { ...normalized, ephemeral: Boolean(payload.ephemeral) };
+  const editPayload = { ...normalized };
+  delete editPayload.ephemeral;
+  try {
+    if (interaction.deferred || interaction.replied) {
+      try {
+        return await interaction.editReply(editPayload);
+      } catch (error) {
+        const message = String(error?.message || error || '');
+        const code = Number(error?.code || 0);
+        if (typeof interaction.followUp === 'function' && (code === 40060 || /interaction has already been acknowledged/i.test(message))) {
+          return await interaction.followUp(replyPayload);
+        }
+        throw error;
+      }
+    }
+    return await interaction.reply(replyPayload);
+  } catch (error) {
+    const message = String(error?.message || error || '');
+    const code = Number(error?.code || 0);
+    if (code === 10062 || /unknown interaction/i.test(message)) {
+      return null;
+    }
+    throw error;
   }
-  return interaction.reply({ ...normalized, ephemeral: Boolean(payload.ephemeral) });
 }
 
 module.exports = {

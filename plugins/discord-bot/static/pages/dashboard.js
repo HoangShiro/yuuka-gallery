@@ -794,6 +794,10 @@ class DiscordBotDashboardPage {
     }
 
     async _handleModulePageClick(event) {
+        if (await this._forwardModulePageEventToRenderer('onClick', event)) {
+            return;
+        }
+
         const addButton = event.target.closest('[data-action="add-channel-id"]');
         if (addButton && this.modulePageBodyEl.contains(addButton)) {
             const policyId = addButton.getAttribute('data-policy-id');
@@ -840,6 +844,16 @@ class DiscordBotDashboardPage {
     }
 
     async _handleModulePageChange(event) {
+        if (await this._forwardModulePageEventToRenderer('onChange', event)) {
+            return;
+        }
+
+        const brainToolToggle = event.target.closest('[data-role="brain-tool-toggle"]');
+        if (brainToolToggle && this.modulePageBodyEl.contains(brainToolToggle)) {
+            await this._saveBrainToolStateFromModulePage();
+            return;
+        }
+
         const toggle = event.target.closest('[data-role="policy-toggle"]');
         if (toggle && this.modulePageBodyEl.contains(toggle)) {
             const policyId = toggle.getAttribute('data-policy-id');
@@ -864,6 +878,27 @@ class DiscordBotDashboardPage {
             });
             return;
         }
+    }
+
+    async _saveBrainToolStateFromModulePage() {
+        const bot = this.state.activeBot;
+        if (!bot || !this.modulePageBodyEl) {
+            return;
+        }
+        const toggles = {};
+        this.modulePageBodyEl.querySelectorAll('[data-role="brain-tool-toggle"]').forEach((input) => {
+            const toolKey = input.getAttribute('data-tool-key');
+            if (!toolKey) return;
+            toggles[toolKey] = Boolean(input.checked);
+        });
+        await this._saveBotConfiguration({
+            showSuccessMessage: false,
+            extraProps: {
+                brain_tools: {
+                    toggles
+                }
+            }
+        });
     }
 
     async _addChannelIdFromModulePage(policyId, settingKey) {
@@ -1201,6 +1236,37 @@ class DiscordBotDashboardPage {
         return '';
     }
 
+    _getActiveModuleRenderer() {
+        const moduleId = this.state.activeModulePage;
+        if (!moduleId) {
+            return null;
+        }
+        const module = this.state.modules.find((item) => item.id === moduleId);
+        if (!module) {
+            return null;
+        }
+        const cacheKey = this.Utils.createModuleUiCacheKey(moduleId, this.state.activeBot?.bot_id);
+        const moduleUi = this.state.moduleUiCache[cacheKey] || module.ui || {};
+        const rendererName = moduleUi?.renderer;
+        if (!rendererName) {
+            return null;
+        }
+        return window.Yuuka?.plugins?.discordBotRenderers?.[rendererName] || null;
+    }
+
+    async _forwardModulePageEventToRenderer(handlerName, event) {
+        const renderer = this._getActiveModuleRenderer();
+        if (!renderer || typeof renderer[handlerName] !== 'function') {
+            return false;
+        }
+        try {
+            return Boolean(await renderer[handlerName](this, event));
+        } catch (error) {
+            console.error('[DiscordBot] Renderer event handler failed:', error);
+            return false;
+        }
+    }
+
     _updateButtons() {
         const bot = this.state.activeBot;
         const jsRuntimeReady = this.state.jsRuntimeAvailable;
@@ -1412,6 +1478,12 @@ class DiscordBotDashboardPage {
         this._updateButtons();
         try {
             await this.pluginApi.post(`/bots/${this.state.activeBot.bot_id}/kill`);
+            
+            // Clear logs and console UI
+            this.state.logs = [];
+            this.state.lastSeq = 0;
+            this._renderConsole();
+            
             await this.refreshBots();
             showError('Kill request sent.');
         } catch (error) {

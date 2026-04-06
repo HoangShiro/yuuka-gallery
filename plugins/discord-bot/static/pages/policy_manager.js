@@ -70,6 +70,28 @@ window.Yuuka.plugins.discordBotRenderers['policy-manager'] = {
                     currentValue,
                 });
             }
+            if (key.endsWith('_volume')) {
+                return `
+                    <label class="discord-policy-setting discord-policy-setting--range">
+                        <span class="discord-policy-setting__label">${dashboard.Utils.escapeHtml(key)} (<span data-role="range-value">${dashboard.Utils.escapeHtml(String(currentValue ?? defaultValue))}</span>%)</span>
+                        <div class="discord-policy-range-wrapper" style="display: flex; align-items: center; gap: 8px;">
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                class="discord-policy-setting__input"
+                                data-role="policy-setting"
+                                data-policy-id="${policyId}"
+                                data-setting-key="${dashboard.Utils.escapeHtml(key)}"
+                                value="${dashboard.Utils.escapeHtml(String(currentValue ?? defaultValue))}"
+                                style="flex: 1;"
+                                oninput="this.parentElement.previousElementSibling.querySelector('[data-role=range-value]').textContent = this.value"
+                            />
+                        </div>
+                    </label>
+                `;
+            }
             return `
                 <label class="discord-policy-setting">
                     <span class="discord-policy-setting__label">${dashboard.Utils.escapeHtml(key)}</span>
@@ -180,14 +202,28 @@ window.Yuuka.plugins.discordBotRenderers['policy-manager'] = {
     },
 
     onChange: async function(dashboard, event) {
-        const toggle = event.target.closest('[data-role="policy-toggle"]');
-        if (toggle && dashboard.modulePageBodyEl.contains(toggle)) {
+        const input = event.target;
+        if (!dashboard.modulePageBodyEl.contains(input)) {
+            return false;
+        }
+
+        const toggle = input.closest('[data-role="policy-toggle"]');
+        if (toggle) {
             const policyId = toggle.getAttribute('data-policy-id');
             if (policyId) {
                 await this._savePolicyFromModulePage(dashboard, policyId);
             }
             return true;
         }
+
+        if (input.type === 'range' && input.getAttribute('data-role') === 'policy-setting') {
+            const policyId = input.getAttribute('data-policy-id');
+            if (policyId) {
+                await this._savePolicyFromModulePage(dashboard, policyId);
+            }
+            return true;
+        }
+        
         return false;
     },
 

@@ -21,6 +21,12 @@ class BotModule(ABC):
     def get_policy_definitions(self) -> list[dict]:
         return []
 
+    def get_brain_capabilities(self) -> dict:
+        return {
+            "instructions": [],
+            "tools": [],
+        }
+
     @abstractmethod
     def setup(self, bot: "commands.Bot", log: BotLogBuffer) -> None:  # pragma: no cover - interface
         raise NotImplementedError

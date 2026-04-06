@@ -6,7 +6,9 @@ from .chat import ChatModule
 from .echo import EchoModule
 from .message import MessageModule
 from .ping import PingModule
+from .tts import TTSModule
 from .voice import VoiceModule
+from .play_music import PlayMusicModule
 
 AVAILABLE_MODULES = {
     PingModule.module_id: PingModule(),
@@ -15,8 +17,10 @@ AVAILABLE_MODULES = {
     ChatModule.module_id: ChatModule(),
     MessageModule.module_id: MessageModule(),
     ChannelModule.module_id: ChannelModule(),
+    TTSModule.module_id: TTSModule(),
     VoiceModule.module_id: VoiceModule(),
     BrainModule.module_id: BrainModule(),
+    PlayMusicModule.module_id: PlayMusicModule(),
 }
 
 DEFAULT_MODULE_IDS = (PingModule.module_id,)
@@ -31,6 +35,8 @@ __all__ = [
     "ChatModule",
     "MessageModule",
     "ChannelModule",
+    "TTSModule",
     "VoiceModule",
     "BrainModule",
+    "PlayMusicModule",
 ]

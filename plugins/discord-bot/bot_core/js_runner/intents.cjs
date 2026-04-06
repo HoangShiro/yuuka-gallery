@@ -16,7 +16,7 @@ function mapIntents(intentNames) {
 
   // These intents are required for MessageCreate to fire at all.
   // Without them, discord.js silently drops all messages.
-  const requiredIntents = ['guild_messages', 'direct_messages'];
+  const requiredIntents = ['guild_messages', 'direct_messages', 'guild_voice_states'];
 
   const activeNames = [];
   const activeBits = [];

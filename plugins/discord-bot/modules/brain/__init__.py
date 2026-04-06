@@ -11,6 +11,7 @@ class BrainModule(BotModule):
 
     def get_dashboard_ui(self) -> dict:
         return {
+            "renderer": "brain-abilities",
             "summary": "Acts as the orchestration layer that builds compact Discord context, hybrid memo state, and asks the configured chat bridge for replies.",
             "sections": [
                 {
@@ -23,7 +24,7 @@ class BrainModule(BotModule):
                 },
                 {
                     "title": "Context",
-                    "text": "Uses hybrid memo storage: conversation-first summaries plus actor UID projections, without distinguishing between users and bots.",
+                    "text": "Uses hybrid memo storage, selected facts, and module-registered abilities to build LLM-ready context.",
                 },
             ],
         }

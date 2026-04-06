@@ -49,7 +49,30 @@ class ChatModule(BotModule):
                     "items": [
                         {"label": "Bridge URL", "value": "chat_bridge_url (optional)"},
                         {"label": "Bridge key", "value": "chat_bridge_key or CHAT_BRIDGE_KEY env"},
+                        {"label": "Secondary language output", "value": "Send secondary translation as a second plain-text line in Discord channel"},
                     ],
+                },
+            ],
+        }
+
+    def get_brain_capabilities(self) -> dict:
+        return {
+            "instructions": [
+                "Dùng character bridge để trả lời theo persona và ngữ cảnh Discord.",
+                "Có thể reset session chat hoặc xóa actor summary theo yêu cầu.",
+            ],
+            "tools": [
+                {
+                    "tool_id": "chat_reset_session",
+                    "title": "Reset chat session",
+                    "description": "Reset session chat theo ngữ cảnh channel/guild.",
+                    "default_enabled": True,
+                },
+                {
+                    "tool_id": "chat_reset_actor_fact",
+                    "title": "Reset actor facts",
+                    "description": "Xóa summary/facts của actor khỏi bộ nhớ.",
+                    "default_enabled": True,
                 },
             ],
         }

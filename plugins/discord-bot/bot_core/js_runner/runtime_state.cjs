@@ -23,6 +23,10 @@ function createRuntimeState() {
       records: [],
       sequence: 0,
     },
+    brainState: {
+      instructionsByModule: new Map(),
+      toolsByModule: new Map(),
+    },
   };
 }
 
@@ -31,6 +35,133 @@ function addCommandDefinition(state, builder) {
     return;
   }
   state.commandDefinitions.push(builder.toJSON());
+}
+
+function normalizeBrainInstruction(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+  return text.replace(/\s+/g, ' ');
+}
+
+function normalizeBrainTool(moduleId, definition = {}) {
+  const toolId = String(definition.tool_id || definition.id || '').trim();
+  if (!toolId) {
+    return null;
+  }
+  const title = String(definition.title || toolId).trim() || toolId;
+  const description = String(definition.description || '').trim();
+  const callEvent = String(definition.call_event || '').trim();
+  const inputSchema = definition.input_schema && typeof definition.input_schema === 'object' && !Array.isArray(definition.input_schema)
+    ? { ...definition.input_schema }
+    : {};
+  return {
+    module_id: String(moduleId || '').trim() || 'unknown',
+    tool_id: toolId,
+    title,
+    description,
+    call_event: callEvent,
+    input_schema: inputSchema,
+    default_enabled: definition.default_enabled !== false,
+  };
+}
+
+function registerBrainInstruction(state, moduleId, instruction) {
+  if (!state?.brainState?.instructionsByModule) {
+    return null;
+  }
+  const normalizedModuleId = String(moduleId || '').trim() || 'unknown';
+  const normalizedInstruction = normalizeBrainInstruction(instruction);
+  if (!normalizedInstruction) {
+    return null;
+  }
+  const current = state.brainState.instructionsByModule.get(normalizedModuleId) || [];
+  if (!current.includes(normalizedInstruction)) {
+    current.push(normalizedInstruction);
+    state.brainState.instructionsByModule.set(normalizedModuleId, current);
+  }
+  return {
+    module_id: normalizedModuleId,
+    instruction: normalizedInstruction,
+  };
+}
+
+function registerBrainTool(state, moduleId, definition = {}) {
+  if (!state?.brainState?.toolsByModule) {
+    return null;
+  }
+  const normalized = normalizeBrainTool(moduleId, definition);
+  if (!normalized) {
+    return null;
+  }
+  const current = state.brainState.toolsByModule.get(normalized.module_id) || [];
+  const existingIndex = current.findIndex((item) => item.tool_id === normalized.tool_id);
+  if (existingIndex >= 0) {
+    current[existingIndex] = {
+      ...current[existingIndex],
+      ...normalized,
+    };
+  } else {
+    current.push(normalized);
+  }
+  state.brainState.toolsByModule.set(normalized.module_id, current);
+  return normalized;
+}
+
+function isBrainToolEnabled(runtimeConfig, moduleId, toolId, defaultEnabled = true) {
+  const toggles = runtimeConfig?.brain_tools && typeof runtimeConfig.brain_tools === 'object'
+    ? runtimeConfig.brain_tools.toggles || {}
+    : {};
+  const key = `${String(moduleId || '').trim()}:${String(toolId || '').trim()}`;
+  if (Object.prototype.hasOwnProperty.call(toggles, key)) {
+    return Boolean(toggles[key]);
+  }
+  return Boolean(defaultEnabled);
+}
+
+function collectBrainAbilities(state, runtimeConfig = {}) {
+  const toolsByModuleMap = state?.brainState?.toolsByModule instanceof Map
+    ? state.brainState.toolsByModule
+    : new Map();
+  const instructionsByModuleMap = state?.brainState?.instructionsByModule instanceof Map
+    ? state.brainState.instructionsByModule
+    : new Map();
+  const moduleIds = new Set([
+    ...toolsByModuleMap.keys(),
+    ...instructionsByModuleMap.keys(),
+  ]);
+  const modules = [];
+  const toolsForLlm = [];
+  for (const moduleId of [...moduleIds].sort()) {
+    const instructions = [...(instructionsByModuleMap.get(moduleId) || [])];
+    const allTools = [...(toolsByModuleMap.get(moduleId) || [])];
+    const tools = allTools.map((tool) => {
+      const enabled = isBrainToolEnabled(runtimeConfig, moduleId, tool.tool_id, tool.default_enabled);
+      return {
+        ...tool,
+        enabled,
+      };
+    });
+    const enabledTools = tools.filter((tool) => tool.enabled);
+    toolsForLlm.push(...enabledTools.map((tool) => ({
+      module_id: moduleId,
+      tool_id: tool.tool_id,
+      title: tool.title,
+      description: tool.description,
+      call_event: tool.call_event,
+      input_schema: tool.input_schema,
+    })));
+    modules.push({
+      module_id: moduleId,
+      instructions,
+      tools,
+    });
+  }
+  return {
+    modules,
+    tools_for_llm: toolsForLlm,
+  };
 }
 
 function normalizePolicyDefinition(moduleId, definition = {}) {
@@ -303,6 +434,9 @@ function selectContextFacts(state, scope = {}, options = {}) {
 module.exports = {
   createRuntimeState,
   addCommandDefinition,
+  registerBrainInstruction,
+  registerBrainTool,
+  collectBrainAbilities,
   registerPolicyDefinition,
   setPolicyToggle,
   setPolicySettings,

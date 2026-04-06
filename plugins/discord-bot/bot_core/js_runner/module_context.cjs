@@ -1,4 +1,6 @@
-function createModuleContext(eventBus, moduleDef) {
+const { registerBrainInstruction, registerBrainTool } = require('./runtime_state.cjs');
+
+function createModuleContext(eventBus, moduleDef, runtimeState) {
   return {
     module_id: moduleDef.module_id,
     subscribe(eventName, handler) {
@@ -28,6 +30,12 @@ function createModuleContext(eventBus, moduleDef) {
         ...(payload || {}),
         module_id: moduleDef.module_id,
       });
+    },
+    registerBrainInstruction(instruction) {
+      return registerBrainInstruction(runtimeState, moduleDef.module_id, instruction);
+    },
+    registerBrainTool(definition = {}) {
+      return registerBrainTool(runtimeState, moduleDef.module_id, definition);
     },
   };
 }

@@ -102,7 +102,7 @@ function setupModules(client, modules, runtimeConfig, logger) {
       logger.log('warning', `Unknown module skipped: ${moduleId}`);
       continue;
     }
-    const moduleContext = createModuleContext(eventBus, moduleDef);
+    const moduleContext = createModuleContext(eventBus, moduleDef, runtimeState);
     try {
       moduleDef.setup(moduleContext);
       activeModules.push(moduleDef);

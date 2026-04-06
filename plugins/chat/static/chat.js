@@ -187,6 +187,25 @@ class ChatComponent {
                                     </label>
                                 </div>
 
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 1rem;">
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label for="chat-discord-primary-language">Discord primary language</label>
+                                        <div id="chat-discord-primary-language" style="position: relative; margin-top: 0.5rem;">
+                                            <button type="button" data-role="chat-language-trigger" style="width: 100%; min-height: 44px; padding: 10px 36px 10px 12px; background: var(--chat-panel-bg); border: 1px solid var(--chat-border); color: var(--chat-text); border-radius: 8px; cursor: pointer; font-size: 0.95rem; text-align: left; display: flex; align-items: center;"></button>
+                                            <span class="material-symbols-outlined" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--chat-text-secondary);">expand_more</span>
+                                            <div data-role="chat-language-menu" style="display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--chat-panel-bg); border: 1px solid var(--chat-border); border-radius: 10px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16); z-index: 50; max-height: 240px; overflow-y: auto;"></div>
+                                        </div>
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 0;">
+                                        <label for="chat-discord-secondary-language">Discord secondary language</label>
+                                        <div id="chat-discord-secondary-language" style="position: relative; margin-top: 0.5rem;">
+                                            <button type="button" data-role="chat-language-trigger" style="width: 100%; min-height: 44px; padding: 10px 36px 10px 12px; background: var(--chat-panel-bg); border: 1px solid var(--chat-border); color: var(--chat-text); border-radius: 8px; cursor: pointer; font-size: 0.95rem; text-align: left; display: flex; align-items: center;"></button>
+                                            <span class="material-symbols-outlined" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--chat-text-secondary);">expand_more</span>
+                                            <div data-role="chat-language-menu" style="display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--chat-panel-bg); border: 1px solid var(--chat-border); border-radius: 10px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16); z-index: 50; max-height: 240px; overflow-y: auto;"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div style="margin-top: 1.5rem;">
                                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                                         <h4 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--chat-text-secondary);">Chat Rule Format</h4>

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
+import urllib.parse
+import urllib.request
 from typing import Dict, List, Tuple
 
 from flask import Blueprint, abort, jsonify, request
@@ -132,20 +135,42 @@ class DiscordBotPlugin:
                     import uuid
                     bot_id = f"bot_{uuid.uuid4().hex[:8]}"
 
+            existing_entry = bots.get(bot_id, {})
+
+            def _payload_string(key: str, default: str = "") -> str:
+                if key in payload:
+                    return str(payload.get(key) or "").strip()
+                return str(existing_entry.get(key) or default).strip()
+
+            def _payload_bool(key: str, default: bool = False) -> bool:
+                if key in payload:
+                    return bool(payload.get(key, default))
+                return bool(existing_entry.get(key, default))
+
             token = (payload.get("token") or "").strip()
             name = (payload.get("name") or "My Discord Bot").strip()
             modules = payload.get("modules") or []
             auto_start = bool(payload.get("auto_start", False))
-            chat_character_id = (payload.get("chat_character_id") or "").strip()
-            chat_model = (payload.get("chat_model") or "").strip()
-            chat_bridge_url = (payload.get("chat_bridge_url") or "").strip()
+            chat_character_id = _payload_string("chat_character_id")
+            chat_character_name = _payload_string("chat_character_name")
+            chat_model = _payload_string("chat_model")
+            chat_bridge_url = _payload_string("chat_bridge_url")
             if not chat_bridge_url:
                  # Standard local bridge fallback
                  chat_bridge_url = "http://127.0.0.1:5000/api/plugin/chat/generate/discord_bridge"
-            chat_bridge_key = (payload.get("chat_bridge_key") or "").strip()
+            chat_bridge_key = _payload_string("chat_bridge_key")
+            chat_primary_language = _payload_string("chat_primary_language", "English")
+            chat_secondary_language = _payload_string("chat_secondary_language", "Japanese")
+            chat_secondary_to_channel = _payload_bool("chat_secondary_to_channel", False)
+            tts_engine = _payload_string("tts_engine", "aivisspeech") or "aivisspeech"
+            tts_engine_base_url = _payload_string("tts_engine_base_url", "http://127.0.0.1:10101") or "http://127.0.0.1:10101"
+            tts_speaker_id = _payload_string("tts_speaker_id")
+            tts_speaker_name = _payload_string("tts_speaker_name")
+            tts_speaker_avatar_url = _payload_string("tts_speaker_avatar_url")
+            tts_text_source = (_payload_string("tts_text_source", "secondary") or "secondary").lower()
             incoming_policy_state = payload.get("policies") or {}
-            
-            existing_entry = bots.get(bot_id, {})
+            incoming_brain_tool_state = payload.get("brain_tools") or {}
+
             token = token or str(existing_entry.get("token") or "").strip()
             # Note: We allow empty tokens at config level; 
             # the bot_core will fail to start it, but that's handled at runtime.
@@ -157,6 +182,12 @@ class DiscordBotPlugin:
                 modules=modules,
                 include_admin=is_admin,
             )
+            brain_tool_state = self._merge_brain_tool_state(
+                existing_entry.get("brain_tools") or {},
+                incoming_brain_tool_state,
+                modules=modules,
+                include_admin=is_admin,
+            )
             bots[bot_id] = {
                 "token": token,
                 "name": name,
@@ -164,10 +195,21 @@ class DiscordBotPlugin:
                 "auto_start": auto_start,
                 "intents": intents_list,
                 "chat_character_id": chat_character_id,
+                "chat_character_name": chat_character_name,
                 "chat_model": chat_model,
                 "chat_bridge_url": chat_bridge_url,
                 "chat_bridge_key": chat_bridge_key,
+                "chat_primary_language": chat_primary_language,
+                "chat_secondary_language": chat_secondary_language,
+                "chat_secondary_to_channel": chat_secondary_to_channel,
+                "tts_engine": tts_engine,
+                "tts_engine_base_url": tts_engine_base_url,
+                "tts_speaker_id": tts_speaker_id,
+                "tts_speaker_name": tts_speaker_name,
+                "tts_speaker_avatar_url": tts_speaker_avatar_url,
+                "tts_text_source": tts_text_source,
                 "policies": policy_state,
+                "brain_tools": brain_tool_state,
                 "created_at": existing_entry.get("created_at") or _iso_now(),
                 "updated_at": _iso_now(),
             }
@@ -309,6 +351,30 @@ class DiscordBotPlugin:
                 "ui": self._module_dashboard_ui(module, bot_id=bot_id, bot_config=bot_cfg),
             })
 
+        @self.blueprint.route("/tts/speakers", methods=["GET"])
+        def get_tts_speakers():
+            user_hash = self.core_api.verify_token_and_get_user_hash()
+            engine = str(request.args.get("engine") or "aivisspeech").strip().lower() or "aivisspeech"
+            base_url = str(request.args.get("base_url") or "http://127.0.0.1:10101").strip() or "http://127.0.0.1:10101"
+            bot_id = str(request.args.get("bot_id") or "").strip()
+            if bot_id:
+                bot_cfg = self._load_user_configs(user_hash).get("bots", {}).get(bot_id, {})
+                if not request.args.get("base_url"):
+                    base_url = str(bot_cfg.get("tts_engine_base_url") or base_url).strip() or base_url
+                if not request.args.get("engine"):
+                    engine = str(bot_cfg.get("tts_engine") or engine).strip().lower() or engine
+            if engine != "aivisspeech":
+                abort(400, description=f"Unsupported TTS engine '{engine}'.")
+            try:
+                speakers = self._fetch_aivisspeech_speakers(base_url)
+                return jsonify({
+                    "engine": engine,
+                    "base_url": base_url,
+                    "speakers": speakers,
+                })
+            except Exception as exc:  # noqa: BLE001
+                abort(502, description=f"Failed to fetch speakers from TTS engine: {exc}")
+
     # ------------------------------------------------------------------ #
     # Runtime helpers
     # ------------------------------------------------------------------ #
@@ -399,11 +465,167 @@ class DiscordBotPlugin:
                 ui["bot_id"] = bot_id
                 if bot_config:
                     ui["chat_character_id"] = bot_config.get("chat_character_id") or ""
+                    ui["chat_character_name"] = bot_config.get("chat_character_name") or ""
                     ui["chat_bridge_url"] = bot_config.get("chat_bridge_url") or ""
                     ui["chat_bridge_key"] = bot_config.get("chat_bridge_key") or ""
+                    ui["chat_primary_language"] = bot_config.get("chat_primary_language") or "English"
+                    ui["chat_secondary_language"] = bot_config.get("chat_secondary_language") or "Japanese"
+                    ui["chat_secondary_to_channel"] = bool(bot_config.get("chat_secondary_to_channel", False))
+            elif ui.get("renderer") == "brain-abilities":
+                ui["bot_id"] = bot_id
+                ui["supports_live_edit"] = True
+                include_admin = self._module_is_admin(module) or False
+                modules = (bot_config or {}).get("modules") or []
+                brain_state = self._merge_brain_tool_state(
+                    (bot_config or {}).get("brain_tools") or {},
+                    {},
+                    modules=modules,
+                    include_admin=include_admin,
+                )
+                ui["ability_groups"] = self._collect_brain_tool_groups(modules, brain_state, include_admin=include_admin)
+            elif ui.get("renderer") == "tts-engine-picker":
+                ui["bot_id"] = bot_id
+                if bot_config:
+                    ui["tts_engine"] = bot_config.get("tts_engine") or "aivisspeech"
+                    ui["tts_engine_base_url"] = bot_config.get("tts_engine_base_url") or "http://127.0.0.1:10101"
+                    ui["tts_speaker_id"] = str(bot_config.get("tts_speaker_id") or "")
+                    ui["tts_speaker_name"] = bot_config.get("tts_speaker_name") or ""
+                    ui["tts_speaker_avatar_url"] = bot_config.get("tts_speaker_avatar_url") or ""
+                    ui["tts_text_source"] = bot_config.get("tts_text_source") or "secondary"
+                    ui["chat_primary_language"] = bot_config.get("chat_primary_language") or "English"
+                    ui["chat_secondary_language"] = bot_config.get("chat_secondary_language") or "Japanese"
             return ui
         except Exception:
             return {}
+
+    def _fetch_aivisspeech_speakers(self, base_url: str) -> List[dict]:
+        normalized_base = str(base_url or "http://127.0.0.1:10101").strip().rstrip("/") or "http://127.0.0.1:10101"
+        endpoint = f"{normalized_base}/speakers"
+        req = urllib.request.Request(endpoint, headers={"Accept": "application/json"}, method="GET")
+        with urllib.request.urlopen(req, timeout=8) as response:
+            body = response.read().decode("utf-8")
+        payload = json.loads(body or "[]")
+        speakers: List[dict] = []
+        if not isinstance(payload, list):
+            return speakers
+        for speaker in payload:
+            if not isinstance(speaker, dict):
+                continue
+            speaker_name = str(speaker.get("name") or speaker.get("speakerName") or "").strip()
+            avatar_url = str(
+                speaker.get("avatar_url")
+                or speaker.get("avatar")
+                or speaker.get("portrait")
+                or speaker.get("icon")
+                or ""
+            ).strip()
+            styles = speaker.get("styles") or []
+            if isinstance(styles, list) and styles:
+                for style in styles:
+                    if not isinstance(style, dict):
+                        continue
+                    style_id = style.get("id")
+                    if style_id is None:
+                        continue
+                    style_name = str(style.get("name") or style.get("styleName") or speaker_name or f"Speaker {style_id}").strip()
+                    speakers.append({
+                        "id": str(style_id),
+                        "speaker_id": str(style_id),
+                        "name": speaker_name or style_name,
+                        "style_name": style_name,
+                        "avatar_url": avatar_url,
+                        "engine": "aivisspeech",
+                        "base_url": normalized_base,
+                    })
+                continue
+            speaker_id = speaker.get("id")
+            if speaker_id is None:
+                continue
+            speakers.append({
+                "id": str(speaker_id),
+                "speaker_id": str(speaker_id),
+                "name": speaker_name or f"Speaker {speaker_id}",
+                "style_name": "",
+                "avatar_url": avatar_url,
+                "engine": "aivisspeech",
+                "base_url": normalized_base,
+            })
+        return speakers
+
+    def _collect_brain_tool_groups(self, modules: List[str], brain_tool_state: dict, *, include_admin: bool) -> List[dict]:
+        normalized_state = self._merge_brain_tool_state({}, brain_tool_state, modules=modules, include_admin=include_admin)
+        toggles = dict(normalized_state.get("toggles") or {})
+        groups: List[dict] = []
+        for module_id in self._sanitize_module_ids(modules, include_admin=include_admin):
+            if module_id == "core.brain":
+                continue
+            module = AVAILABLE_MODULES.get(module_id)
+            if not module:
+                continue
+            getter = getattr(module, "get_brain_capabilities", None)
+            data = getter() if callable(getter) else {}
+            if not isinstance(data, dict):
+                continue
+            tools = data.get("tools") or []
+            instructions = data.get("instructions") or []
+            normalized_tools = []
+            for tool in tools:
+                if not isinstance(tool, dict):
+                    continue
+                tool_id = str(tool.get("tool_id") or "").strip()
+                if not tool_id:
+                    continue
+                key = f"{module_id}:{tool_id}"
+                default_enabled = bool(tool.get("default_enabled", True))
+                normalized_tools.append({
+                    "key": key,
+                    "tool_id": tool_id,
+                    "title": str(tool.get("title") or tool_id),
+                    "description": str(tool.get("description") or ""),
+                    "default_enabled": default_enabled,
+                    "enabled": bool(toggles.get(key, default_enabled)),
+                })
+            groups.append({
+                "module_id": module_id,
+                "module_name": getattr(module, "name", module_id),
+                "instructions": [str(item) for item in instructions if str(item).strip()],
+                "tools": sorted(normalized_tools, key=lambda item: str(item.get("title") or item.get("tool_id") or "")),
+            })
+        return sorted(groups, key=lambda item: str(item.get("module_name") or item.get("module_id") or ""))
+
+    def _merge_brain_tool_state(self, base_state: dict, incoming_state: dict, *, modules: List[str], include_admin: bool) -> dict:
+        merged_toggles = dict((base_state or {}).get("toggles") or {})
+        incoming_toggles = dict((incoming_state or {}).get("toggles") or {})
+        known_keys: set[str] = set()
+        defaults: Dict[str, bool] = {}
+        for module_id in self._sanitize_module_ids(modules, include_admin=include_admin):
+            if module_id == "core.brain":
+                continue
+            module = AVAILABLE_MODULES.get(module_id)
+            if not module:
+                continue
+            getter = getattr(module, "get_brain_capabilities", None)
+            data = getter() if callable(getter) else {}
+            if not isinstance(data, dict):
+                continue
+            for tool in data.get("tools") or []:
+                if not isinstance(tool, dict):
+                    continue
+                tool_id = str(tool.get("tool_id") or "").strip()
+                if not tool_id:
+                    continue
+                key = f"{module_id}:{tool_id}"
+                known_keys.add(key)
+                defaults[key] = bool(tool.get("default_enabled", True))
+        for key, value in incoming_toggles.items():
+            if key in known_keys:
+                merged_toggles[key] = bool(value)
+        for key in known_keys:
+            if key not in merged_toggles:
+                merged_toggles[key] = defaults.get(key, True)
+        return {
+            "toggles": {key: bool(merged_toggles.get(key, defaults.get(key, True))) for key in sorted(known_keys)},
+        }
 
     def _collect_policy_groups(self, modules: List[str], policy_state: dict, *, include_admin: bool) -> List[dict]:
         grouped: Dict[str, dict] = {}
@@ -546,6 +768,14 @@ class DiscordBotPlugin:
                 bot_cfg["intents"] = self._default_intents_list()
             if "policies" not in bot_cfg or not isinstance(bot_cfg.get("policies"), dict):
                 bot_cfg["policies"] = {"toggles": {}, "settings": {}}
+            if "brain_tools" not in bot_cfg or not isinstance(bot_cfg.get("brain_tools"), dict):
+                bot_cfg["brain_tools"] = {"toggles": {}}
+            bot_cfg["tts_engine"] = str(bot_cfg.get("tts_engine") or "aivisspeech").strip() or "aivisspeech"
+            bot_cfg["tts_engine_base_url"] = str(bot_cfg.get("tts_engine_base_url") or "http://127.0.0.1:10101").strip() or "http://127.0.0.1:10101"
+            bot_cfg["tts_speaker_id"] = str(bot_cfg.get("tts_speaker_id") or "").strip()
+            bot_cfg["tts_speaker_name"] = str(bot_cfg.get("tts_speaker_name") or "").strip()
+            bot_cfg["tts_speaker_avatar_url"] = str(bot_cfg.get("tts_speaker_avatar_url") or "").strip()
+            bot_cfg["tts_text_source"] = str(bot_cfg.get("tts_text_source") or "secondary").strip().lower() or "secondary"
             normalized_created = normalize_timestamp(bot_cfg.get("created_at"))
             if normalized_created:
                 bot_cfg["created_at"] = normalized_created
@@ -583,6 +813,12 @@ class DiscordBotPlugin:
             abort(404, description=f"Bot '{bot_id}' not found for current user.")
         runtime_config = dict(bot_config)
         runtime_config["modules"] = self._sanitize_module_ids(runtime_config.get("modules") or [], include_admin=include_admin) or self._default_module_ids(include_admin=include_admin)
+        runtime_config["brain_tools"] = self._merge_brain_tool_state(
+            runtime_config.get("brain_tools") or {},
+            {},
+            modules=runtime_config["modules"],
+            include_admin=include_admin,
+        )
         return self._get_or_create_runtime(user_hash, bot_id, runtime_config)
 
     def _start_runtime(self, user_hash: str, runtime: BotRuntime) -> None:

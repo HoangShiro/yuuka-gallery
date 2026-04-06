@@ -9,6 +9,28 @@ module.exports = function createMessageModule(deps) {
     module_id: 'core.message',
     name: 'Message Tools',
     setup(ctx) {
+      ctx.registerBrainInstruction('Có thể gửi, chỉnh sửa hoặc xóa message do bot quản lý trong channel hiện tại.');
+      ctx.registerBrainTool({
+        tool_id: 'message_send',
+        title: 'Send message',
+        description: 'Gửi message văn bản đến channel.',
+        call_event: 'message.send_requested',
+        input_schema: {
+          channel: 'DiscordTextChannel',
+          content: 'string',
+        },
+      });
+      ctx.registerBrainTool({
+        tool_id: 'message_manage_last',
+        title: 'Manage last bot message',
+        description: 'Sửa hoặc xóa message gần nhất do bot gửi trong channel.',
+        call_event: 'message.manage_requested',
+        input_schema: {
+          action: '"edit"|"delete"',
+          channel_id: 'string',
+          content: 'string?',
+        },
+      });
       addCommandDefinition(runtimeState, new SlashCommandBuilder()
         .setName('message-send')
         .setDescription('Send a plain text message through the bot')

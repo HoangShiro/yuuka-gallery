@@ -53,9 +53,24 @@ module.exports = function createBrainModule(deps) {
         if (!raw || message.author?.bot) {
           return;
         }
-        if (!lowered.startsWith('!ask ') && !isMention) {
+
+        const { isPolicyEnabled, matchesPolicyChannelAllowlist } = require('../runtime_state.cjs');
+        let shouldTriggerBrain = false;
+        
+        if (lowered.startsWith('!ask ')) {
+          shouldTriggerBrain = true;
+        } else if (isMention) {
+          const naturalChatAllowed = isPolicyEnabled(runtimeState, 'core.chat.natural_chat') && 
+                                     matchesPolicyChannelAllowlist(runtimeState, 'core.chat.natural_chat', message.channel?.id);
+          if (!naturalChatAllowed) {
+            shouldTriggerBrain = true;
+          }
+        }
+
+        if (!shouldTriggerBrain) {
           return;
         }
+        
         const prompt = lowered.startsWith('!ask ') ? raw.slice('!ask '.length).trim() : raw.replace(/<@!?\d+>/g, '').trim();
         if (!prompt) {
           return;

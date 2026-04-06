@@ -28,6 +28,27 @@ class MessageModule(BotModule):
             ],
         }
 
+    def get_brain_capabilities(self) -> dict:
+        return {
+            "instructions": [
+                "Gửi/sửa/xóa message do bot quản lý trong channel hiện tại.",
+            ],
+            "tools": [
+                {
+                    "tool_id": "message_send",
+                    "title": "Send message",
+                    "description": "Gửi message văn bản đến channel.",
+                    "default_enabled": True,
+                },
+                {
+                    "tool_id": "message_manage_last",
+                    "title": "Manage last bot message",
+                    "description": "Sửa hoặc xóa message gần nhất của bot theo channel.",
+                    "default_enabled": True,
+                },
+            ],
+        }
+
     def setup(self, bot, log) -> None:
         log.add("info", "core.message runs in JS runtime and does not register Python discord.py handlers.")
 
