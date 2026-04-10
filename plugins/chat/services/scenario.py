@@ -119,6 +119,7 @@ DEFAULT_RULES = {
             "- You CAN execute multiple commands by adding multiple <call_command> blocks.\n"
             "- You MUST always return at least one <call_command> tag appended at the very end.\n"
             "- If you do not wish to call any command, use <call_command>Null</call_command>.\n"
+            "- If you decide NOT to respond to the user (e.g., you are ignoring them or have nothing to say), you MUST return [IGNORE] inside the <discord-reply> block instead of a message.\n"
             "- Every <call_command> MUST be a valid JSON object with \"tool_id\" and \"payload\" fields as shown in the tools list.\n"
             "- Do NOT append <system_update> or any other metadata tags.\n"
             "- Do NOT include any text before or after."

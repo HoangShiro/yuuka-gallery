@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { Client, Events, Partials } = require('discord.js');
+const fs = require('fs');
 
 const { mapIntents } = require('./intents.cjs');
 const { emit, createLogger } = require('./logging.cjs');
@@ -13,6 +14,9 @@ function parseArgs(argv) {
     if (part === '--config') {
       result.config = argv[i + 1];
       i += 1;
+    } else if (part === '--config-file') {
+      result.configFile = argv[i + 1];
+      i += 1;
     }
   }
   return result;
@@ -20,17 +24,28 @@ function parseArgs(argv) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (!args.config) {
-    emit({ event: 'error', message: 'Missing --config payload.' });
+  if (!args.config && !args.configFile) {
+    emit({ event: 'error', message: 'Missing runner config payload.' });
     process.exit(2);
     return;
   }
 
+  let rawConfig = args.config;
+  if (!rawConfig && args.configFile) {
+    try {
+      rawConfig = fs.readFileSync(args.configFile, 'utf8');
+    } catch (error) {
+      emit({ event: 'error', message: `Unable to read config file: ${error.message || String(error)}` });
+      process.exit(2);
+      return;
+    }
+  }
+
   let config;
   try {
-    config = JSON.parse(args.config);
+    config = JSON.parse(rawConfig);
   } catch (_) {
-    emit({ event: 'error', message: 'Invalid JSON in --config payload.' });
+    emit({ event: 'error', message: 'Invalid JSON in runner config payload.' });
     process.exit(2);
     return;
   }

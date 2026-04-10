@@ -5,6 +5,26 @@ const util = require('util');
 
 const execFileAsync = util.promisify(execFile);
 
+function appendYtDlpAuthArgs(args, options = {}) {
+  const cookiesFile = String(options.cookies_file || '').trim();
+  const cookiesFromBrowser = String(options.cookies_from_browser || '').trim();
+  if (cookiesFile) {
+    args.push('--cookies', cookiesFile);
+  } else if (cookiesFromBrowser) {
+    args.push('--cookies-from-browser', cookiesFromBrowser);
+  }
+}
+
+function appendSponsorBlockArgs(args, options = {}) {
+  if (!options.sponsorblock_enabled) return;
+  const categoriesRaw = String(
+    options.sponsorblock_categories ||
+    'sponsor,selfpromo,intro,outro,interaction'
+  ).trim();
+  if (!categoriesRaw) return;
+  args.push('--sponsorblock-remove', categoriesRaw);
+}
+
 // Helper to check if yt-dlp is available in PATH
 async function checkYtDlp() {
   try {
@@ -88,7 +108,7 @@ function generateTrackId(url) {
 /**
  * Resolves a search query or URL into TrackInfo object(s)
  */
-async function resolveTrack(query, isSearch = false, maxResults = 1) {
+async function resolveTrack(query, isSearch = false, maxResults = 1, options = {}) {
   const isUrl = /^https?:\/\//i.test(query);
   const searchPrefix = isSearch || !isUrl ? (query.includes('music') ? 'ytmusicsearch' : 'ytsearch') : '';
   const searchTarget = searchPrefix ? `${searchPrefix}${maxResults}:${query}` : query;
@@ -100,6 +120,7 @@ async function resolveTrack(query, isSearch = false, maxResults = 1) {
     '--ignore-errors',
     searchTarget
   ];
+  appendYtDlpAuthArgs(args, options);
 
   try {
     const { stdout } = await execFileAsync('yt-dlp', args, { maxBuffer: 1024 * 1024 * 10 });
@@ -130,7 +151,7 @@ async function resolveTrack(query, isSearch = false, maxResults = 1) {
   }
 }
 
-async function resolvePlaylist(url, limit = 50) {
+async function resolvePlaylist(url, limit = 50, options = {}) {
   const args = [
     '--flat-playlist',
     '--dump-json',
@@ -138,6 +159,7 @@ async function resolvePlaylist(url, limit = 50) {
     '--ignore-errors',
     url
   ];
+  appendYtDlpAuthArgs(args, options);
 
   try {
     const { stdout } = await execFileAsync('yt-dlp', args, { maxBuffer: 1024 * 1024 * 10 });
@@ -178,7 +200,7 @@ async function resolvePlaylist(url, limit = 50) {
  * So we download to a temp base name (no extension) and let yt-dlp add `.opus`,
  * then rename to the final target path.
  */
-async function getAudioStream(trackInfo, musicCache) {
+async function getAudioStream(trackInfo, musicCache, options = {}) {
   musicCache.ensureDir();
   const cachedPath = musicCache.getCachedPath(trackInfo.id);
   if (cachedPath) {
@@ -197,6 +219,8 @@ async function getAudioStream(trackInfo, musicCache) {
     '--no-playlist',
     trackInfo.source_url
   ];
+  appendYtDlpAuthArgs(args, options);
+  appendSponsorBlockArgs(args, options);
 
   try {
     await execFileAsync('yt-dlp', args, { timeout: 300000 }); // 5 min timeout

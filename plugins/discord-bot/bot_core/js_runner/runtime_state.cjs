@@ -1,3 +1,5 @@
+const { ActionRowBuilder, ComponentType } = require('discord.js');
+
 function createRuntimeState() {
   return {
     commandDefinitions: [],
@@ -14,6 +16,9 @@ function createRuntimeState() {
     messageState: {
       lastBotMessageByChannel: new Map(),
     },
+    messageViewState: {
+      definitionsById: new Map(),
+    },
     voiceState: {
       joinedChannelByGuild: new Map(),
       lastVoiceFactByGuild: new Map(),
@@ -27,6 +32,245 @@ function createRuntimeState() {
       instructionsByModule: new Map(),
       toolsByModule: new Map(),
     },
+    toolReplyState: {
+      formattersByToolId: new Map(),
+    },
+  };
+}
+
+function mapToObject(mapValue) {
+  if (!(mapValue instanceof Map)) {
+    return {};
+  }
+  const obj = {};
+  for (const [key, value] of mapValue.entries()) {
+    const normalizedKey = String(key || '').trim();
+    if (!normalizedKey) {
+      continue;
+    }
+    obj[normalizedKey] = value;
+  }
+  return obj;
+}
+
+function snapshotPolicyState(state) {
+  if (!state?.policyState) {
+    return { toggles: {}, settings: {} };
+  }
+  return {
+    toggles: mapToObject(state.policyState.toggles),
+    settings: mapToObject(state.policyState.settings),
+  };
+}
+
+function notifyPolicyStateChanged(state, reason = 'updated') {
+  if (typeof state?.onPolicyStateChanged !== 'function') {
+    return;
+  }
+  try {
+    state.onPolicyStateChanged({
+      reason,
+      policy_state: snapshotPolicyState(state),
+    });
+  } catch (_) {
+    // ignore notification failures to keep runtime stable
+  }
+}
+
+function normalizeToolReplyFormatter(moduleId, definition = {}) {
+  const toolId = String(definition.tool_id || definition.id || '').trim();
+  if (!toolId) {
+    return null;
+  }
+  if (typeof definition.build_payload !== 'function') {
+    return null;
+  }
+  return {
+    module_id: String(moduleId || '').trim() || 'unknown',
+    tool_id: toolId,
+    build_payload: definition.build_payload,
+  };
+}
+
+function registerToolReplyFormatter(state, moduleId, definition = {}) {
+  if (!(state?.toolReplyState?.formattersByToolId instanceof Map)) {
+    return null;
+  }
+  const normalized = normalizeToolReplyFormatter(moduleId, definition);
+  if (!normalized) {
+    return null;
+  }
+  state.toolReplyState.formattersByToolId.set(normalized.tool_id, normalized);
+  return normalized;
+}
+
+function resolveToolReplyFormatter(state, toolId) {
+  if (!(state?.toolReplyState?.formattersByToolId instanceof Map)) {
+    return null;
+  }
+  const normalizedToolId = String(toolId || '').trim();
+  if (!normalizedToolId) {
+    return null;
+  }
+  return state.toolReplyState.formattersByToolId.get(normalizedToolId) || null;
+}
+
+function normalizeMessageViewDefinition(moduleId, definition = {}) {
+  const viewId = String(definition.view_id || definition.id || '').trim();
+  if (!viewId) {
+    return null;
+  }
+  const moduleIdNormalized = String(moduleId || definition.module_id || '').trim() || 'unknown';
+  const title = String(definition.title || viewId).trim() || viewId;
+  const description = String(definition.description || '').trim();
+  const build = typeof definition.build === 'function' ? definition.build : null;
+  const items = Array.isArray(definition.items) ? [...definition.items] : [];
+  const components = Array.isArray(definition.components) ? [...definition.components] : [];
+  return {
+    module_id: moduleIdNormalized,
+    view_id: viewId,
+    title,
+    description,
+    build,
+    items,
+    components,
+  };
+}
+
+function registerMessageView(state, moduleId, definition = {}) {
+  if (!(state?.messageViewState?.definitionsById instanceof Map)) {
+    return null;
+  }
+  const normalized = normalizeMessageViewDefinition(moduleId, definition);
+  if (!normalized) {
+    return null;
+  }
+  state.messageViewState.definitionsById.set(normalized.view_id, normalized);
+  return normalized;
+}
+
+function toRowIndex(item) {
+  const candidate = item?.row ?? item?.data?.row;
+  const parsed = Number(candidate);
+  if (!Number.isInteger(parsed)) {
+    return null;
+  }
+  if (parsed < 0 || parsed > 4) {
+    return null;
+  }
+  return parsed;
+}
+
+function isActionRowComponent(item) {
+  if (!item) {
+    return false;
+  }
+  if (typeof item.toJSON === 'function') {
+    const raw = item.toJSON();
+    return Number(raw?.type) === Number(ComponentType.ActionRow);
+  }
+  return Number(item?.type) === Number(ComponentType.ActionRow);
+}
+
+function assembleActionRows(items = []) {
+  const rows = [[], [], [], [], []];
+  const actionRows = [];
+  let droppedCount = 0;
+
+  for (const item of items) {
+    if (!item) {
+      continue;
+    }
+    if (isActionRowComponent(item)) {
+      if (actionRows.length >= 5) {
+        droppedCount += 1;
+        continue;
+      }
+      actionRows.push(item);
+      continue;
+    }
+
+    let placed = false;
+    const targetRow = toRowIndex(item);
+    if (targetRow != null && rows[targetRow].length < 5) {
+      rows[targetRow].push(item);
+      placed = true;
+    }
+    if (!placed) {
+      for (let i = 0; i < 5; i += 1) {
+        if (rows[i].length < 5) {
+          rows[i].push(item);
+          placed = true;
+          break;
+        }
+      }
+    }
+    if (!placed) {
+      droppedCount += 1;
+    }
+  }
+
+  const filledRows = rows
+    .filter((entry) => entry.length > 0)
+    .map((entry) => new ActionRowBuilder().addComponents(...entry));
+  const merged = [...actionRows, ...filledRows];
+  if (merged.length > 5) {
+    droppedCount += (merged.length - 5);
+    merged.length = 5;
+  }
+
+  return {
+    components: merged,
+    dropped_count: droppedCount,
+  };
+}
+
+async function resolveMessageView(state, viewRef, payload = {}) {
+  if (!(state?.messageViewState?.definitionsById instanceof Map)) {
+    return null;
+  }
+  const viewId = typeof viewRef === 'string'
+    ? String(viewRef).trim()
+    : String(viewRef?.view_id || viewRef?.id || '').trim();
+  if (!viewId) {
+    return null;
+  }
+  const definition = state.messageViewState.definitionsById.get(viewId);
+  if (!definition) {
+    return null;
+  }
+
+  const buildCtx = {
+    payload,
+    view_ref: viewRef,
+    module_id: definition.module_id,
+    view_id: definition.view_id,
+  };
+  const built = definition.build
+    ? await Promise.resolve(definition.build(buildCtx))
+    : null;
+
+  const directComponents = Array.isArray(built?.components)
+    ? built.components
+    : (Array.isArray(definition.components) && definition.components.length ? definition.components : []);
+  if (directComponents.length > 0) {
+    return {
+      module_id: definition.module_id,
+      view_id: definition.view_id,
+      components: directComponents.filter(Boolean),
+      dropped_count: 0,
+    };
+  }
+
+  const items = Array.isArray(built?.items)
+    ? built.items
+    : (Array.isArray(built) ? built : definition.items);
+  const assembled = assembleActionRows(Array.isArray(items) ? items : []);
+  return {
+    module_id: definition.module_id,
+    view_id: definition.view_id,
+    components: assembled.components,
+    dropped_count: assembled.dropped_count,
   };
 }
 
@@ -211,6 +455,7 @@ function registerPolicyDefinition(state, moduleId, definition = {}) {
   if (typeof state.schedulePersist === 'function') {
     state.schedulePersist();
   }
+  notifyPolicyStateChanged(state, 'definition_registered');
   return normalized;
 }
 
@@ -230,6 +475,7 @@ function setPolicySettings(state, policyId, settings = {}) {
   if (typeof state.schedulePersist === 'function') {
     state.schedulePersist();
   }
+  notifyPolicyStateChanged(state, 'settings_updated');
   return true;
 }
 
@@ -262,6 +508,7 @@ function setPolicyToggle(state, policyId, enabled) {
   if (typeof state.schedulePersist === 'function') {
     state.schedulePersist();
   }
+  notifyPolicyStateChanged(state, 'toggle_updated');
   return true;
 }
 
@@ -436,10 +683,15 @@ module.exports = {
   addCommandDefinition,
   registerBrainInstruction,
   registerBrainTool,
+  registerToolReplyFormatter,
+  resolveToolReplyFormatter,
+  registerMessageView,
+  resolveMessageView,
   collectBrainAbilities,
   registerPolicyDefinition,
   setPolicyToggle,
   setPolicySettings,
+  snapshotPolicyState,
   applyConfiguredPolicies,
   isPolicyEnabled,
   resolvePolicySetting,

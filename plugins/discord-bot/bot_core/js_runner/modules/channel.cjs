@@ -35,6 +35,38 @@ module.exports = function createChannelModule(deps) {
           interaction: 'DiscordInteraction',
         },
       });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'channel_create_text',
+        build_payload({ call_results, actor }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const name = safeChannelName(result) || 'channel mới';
+          return {
+            content: `Đã tạo text channel ${name}.`,
+            title: 'Channel Tools',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'channel_manage',
+        build_payload({ call_results, actor, meta }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const name = safeChannelName(result) || 'channel';
+          const action = String(meta?.call_payload?.action || '').trim().toLowerCase();
+          const content = action === 'rename'
+            ? `Đã đổi tên ${name}.`
+            : (action === 'lock'
+              ? `Đã khóa ${name}.`
+              : (action === 'unlock' ? `Đã mở khóa ${name}.` : `Đã cập nhật ${name}.`));
+          return {
+            content,
+            title: 'Channel Tools',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
       addCommandDefinition(runtimeState, new SlashCommandBuilder()
         .setName('create-text')
         .setDescription('Create a text channel in the current guild')
@@ -126,6 +158,9 @@ module.exports = function createChannelModule(deps) {
         const resultChannel = Array.isArray(result) ? result.find(Boolean) : result;
         await replyToInteraction(interaction, {
           content: resultChannel ? `Đã thực hiện action cho channel ${safeChannelName(resultChannel)}.` : 'Đã thực hiện action cho channel.',
+          title: 'Channel Tools',
+          tone: 'success',
+          user: interaction.user,
           ephemeral: true,
         });
         ctx.publish('bot.command_executed', {

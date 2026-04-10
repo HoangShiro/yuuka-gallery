@@ -10,6 +10,109 @@ const {
 } = require('./discord_utils.cjs');
 const { collectBrainAbilities, selectContextFacts } = require('./runtime_state.cjs');
 
+const PRIMARY_LANGUAGE_TIMEZONES = {
+  japanese: 'Asia/Tokyo',
+  vietnamese: 'Asia/Ho_Chi_Minh',
+  chinese: 'Asia/Shanghai',
+  korean: 'Asia/Seoul',
+  spanish: 'Europe/Madrid',
+  french: 'Europe/Paris',
+  german: 'Europe/Berlin',
+};
+
+function resolveTimezoneFromPrimaryLanguage(runtimeConfig = {}) {
+  const primaryLanguage = String(runtimeConfig.chat_primary_language || '').trim().toLowerCase();
+  return PRIMARY_LANGUAGE_TIMEZONES[primaryLanguage] || null;
+}
+
+function resolveLocalTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function formatDateParts(date = new Date(), timeZone) {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      fractionalSecondDigits: 3,
+      hourCycle: 'h23',
+    });
+    const parts = formatter.formatToParts(date);
+    const values = {};
+    for (const part of parts) {
+      if (part.type !== 'literal') {
+        values[part.type] = part.value;
+      }
+    }
+    return values.year && values.month && values.day
+      ? values
+      : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getTimeZoneOffset(date = new Date(), timeZone) {
+  const parts = formatDateParts(date, timeZone);
+  if (!parts) {
+    return null;
+  }
+  const utcMillis = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+    Number(parts.fractionalSecond || '0'),
+  );
+  return utcMillis - date.getTime();
+}
+
+function formatOffset(offsetMillis) {
+  if (typeof offsetMillis !== 'number' || Number.isNaN(offsetMillis)) {
+    return 'Z';
+  }
+  if (offsetMillis === 0) {
+    return 'Z';
+  }
+  const sign = offsetMillis >= 0 ? '+' : '-';
+  const totalMinutes = Math.floor(Math.abs(offsetMillis) / 60000);
+  const hours = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
+  const minutes = String(totalMinutes % 60).padStart(2, '0');
+  return `${sign}${hours}:${minutes}`;
+}
+
+function formatCurrentTimeForContext(runtimeConfig = {}) {
+  const now = new Date();
+  const configuredTimeZone = resolveTimezoneFromPrimaryLanguage(runtimeConfig);
+  const timeZone = configuredTimeZone || resolveLocalTimezone();
+  const parts = timeZone ? formatDateParts(now, timeZone) : null;
+  const offsetMillis = timeZone ? getTimeZoneOffset(now, timeZone) : null;
+  if (parts && offsetMillis !== null) {
+    const isoLike = `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${parts.fractionalSecond || '000'}${formatOffset(offsetMillis)}`;
+    return {
+      iso: timeZone ? `${isoLike} (${timeZone})` : isoLike,
+      timezone: timeZone || '',
+      source: configuredTimeZone ? 'primary_language' : 'local',
+    };
+  }
+  return {
+    iso: toIsoDate(now),
+    timezone: '',
+    source: 'local',
+  };
+}
+
 function buildInfoContext(client, source = {}) {
   const message = source.message || null;
   const interaction = source.interaction || null;
@@ -17,6 +120,7 @@ function buildInfoContext(client, source = {}) {
   const guild = source.guild || message?.guild || interaction?.guild || null;
   const actor = source.actor || message?.author || interaction?.user || null;
   const recentVoiceFact = source.voice_fact || null;
+  const currentTime = formatCurrentTimeForContext(source.runtime_config || {});
   const botVoiceChannel = guild?.members?.me?.voice?.channel || null;
   const userVoiceChannel = actor && guild ? guild.members?.cache?.get(actor.id)?.voice?.channel || null : null;
   const guilds = client.guilds?.cache ? [...client.guilds.cache.values()].slice(0, 8) : [];
@@ -70,6 +174,9 @@ function buildInfoContext(client, source = {}) {
           channel_name: safeChannelName(userVoiceChannel),
         }
       : null,
+    current_time: currentTime.iso,
+    current_timezone: currentTime.timezone,
+    current_time_source: currentTime.source,
     available_guilds: guilds.map((item) => ({ id: String(item.id || ''), name: safeGuildName(item) })),
     accessible_channels: accessibleChannels,
   };
@@ -197,7 +304,7 @@ function buildDiscordContextBundle(client, state, source = {}, runtimeConfig = {
     history_context: buildHistoryContext(state, { ...source, conversation_key: conversationKey }),
     long_memo_context: buildMemoContext(state, { ...source, conversation_key: conversationKey }),
     info_context: {
-      ...buildInfoContext(client, { ...source, voice_fact: voiceFact }),
+      ...buildInfoContext(client, { ...source, voice_fact: voiceFact, runtime_config: runtimeConfig }),
       voice_status: voiceStatus,
     },
     selected_facts: selectedFacts.map((item) => ({

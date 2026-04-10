@@ -1,4 +1,4 @@
-const { registerBrainInstruction, registerBrainTool } = require('./runtime_state.cjs');
+const { registerBrainInstruction, registerBrainTool, registerMessageView, registerToolReplyFormatter } = require('./runtime_state.cjs');
 
 function createModuleContext(eventBus, moduleDef, runtimeState) {
   return {
@@ -36,6 +36,12 @@ function createModuleContext(eventBus, moduleDef, runtimeState) {
     },
     registerBrainTool(definition = {}) {
       return registerBrainTool(runtimeState, moduleDef.module_id, definition);
+    },
+    registerMessageView(definition = {}) {
+      return registerMessageView(runtimeState, moduleDef.module_id, definition);
+    },
+    registerToolReplyFormatter(definition = {}) {
+      return registerToolReplyFormatter(runtimeState, moduleDef.module_id, definition);
     },
   };
 }

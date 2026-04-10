@@ -52,6 +52,31 @@ class GenerationService:
 
             return response
 
+    def peek_user_status(self, user_hash):
+        """Return a status snapshot without consuming events or clearing finished tasks."""
+        with self._get_user_lock(user_hash):
+            state = self.user_states.get(user_hash, {"tasks": {}, "events": []})
+            return {
+                "tasks": state["tasks"].copy(),
+                "events": list(state["events"]),
+            }
+
+    def dismiss_task(self, user_hash, task_id):
+        """Remove a completed task and any matching emitted events from memory."""
+        with self._get_user_lock(user_hash):
+            state = self.user_states.get(user_hash)
+            if not state:
+                return False
+            task = state.get("tasks", {}).get(task_id)
+            if task and task.get("is_running"):
+                return False
+            state.get("tasks", {}).pop(task_id, None)
+            state["events"] = [
+                event for event in state.get("events", [])
+                if str((event.get("data") or {}).get("task_id") or "") != str(task_id)
+            ]
+            return True
+
     def request_cancellation(self, user_hash, task_id):
         with self._get_user_lock(user_hash):
             task = self.user_states.get(user_hash, {}).get("tasks", {}).get(task_id)

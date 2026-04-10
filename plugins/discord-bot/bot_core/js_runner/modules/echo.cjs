@@ -1,4 +1,5 @@
 const { safeGuildName, safeUserTag } = require('../discord_utils.cjs');
+const { replyToMessage } = require('../interaction_helpers.cjs');
 
 module.exports = function createEchoModule() {
   return {
@@ -17,7 +18,7 @@ module.exports = function createEchoModule() {
         if (!echoed) {
           return;
         }
-        await message.reply(echoed);
+        await replyToMessage(message, { content: echoed, title: 'Echo', tone: 'info', user: message.author });
         ctx.publish('bot.command_executed', {
           command: 'echo',
           guild: safeGuildName(message.guild),

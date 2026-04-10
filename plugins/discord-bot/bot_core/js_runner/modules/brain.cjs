@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { requestBrainReply } = require('../chat_bridge.cjs');
-const { replyToInteraction } = require('../interaction_helpers.cjs');
+const { replyToInteraction, replyToMessage } = require('../interaction_helpers.cjs');
 const { updateHybridMemo } = require('../memo_store.cjs');
 const { addCommandDefinition } = require('../runtime_state.cjs');
 const {
@@ -35,7 +35,7 @@ module.exports = function createBrainModule(deps) {
         if (!message || !message.author) {
           return;
         }
-        const participant = makeParticipant(message.author);
+        const participant = makeParticipant(message.author, message.member);
         updateHybridMemo(runtimeState, {
           conversation_key: conversationKeyFromMessage(message),
           actor_uid: participant?.uid || '',
@@ -83,7 +83,7 @@ module.exports = function createBrainModule(deps) {
           guild: message.guild,
           event_context: { event_type: 'brain.message', trigger: lowered.startsWith('!ask ') ? '!ask' : 'mention' },
         });
-        await message.reply(reply.reply);
+        await replyToMessage(message, { content: reply.reply, title: 'Brain', tone: 'info', user: message.author });
         ctx.publish('brain.reply_ready', {
           conversation_key: reply.conversation_key,
           session_id: reply.session_id,
@@ -124,13 +124,16 @@ module.exports = function createBrainModule(deps) {
           const summary = runtimeState.memo.conversationSummaries.get(key);
           await replyToInteraction(interaction, {
             content: summary ? truncateText(summary.summary, 1500) : 'Chưa có memo summary cho channel này.',
+            title: 'Brain Summary',
+            tone: summary ? 'info' : 'warning',
+            user: interaction.user,
             ephemeral: true,
           });
           return;
         }
         if (interaction.commandName === 'brain-decide-reply-mode') {
           const mode = interaction.channel?.isDMBased && interaction.channel.isDMBased() ? 'private' : 'public';
-          await replyToInteraction(interaction, { content: `Brain sẽ ưu tiên mode \`${mode}\` cho ngữ cảnh hiện tại.`, ephemeral: true });
+          await replyToInteraction(interaction, { content: `Brain sẽ ưu tiên mode \`${mode}\` cho ngữ cảnh hiện tại.`, title: 'Brain Reply Mode', tone: 'info', user: interaction.user, ephemeral: true });
           return;
         }
         if (interaction.commandName !== 'brain-ask') {
@@ -145,7 +148,7 @@ module.exports = function createBrainModule(deps) {
           guild: interaction.guild,
           event_context: { event_type: 'brain.app_command', command_name: 'brain-ask' },
         });
-        await replyToInteraction(interaction, { content: reply.reply });
+        await replyToInteraction(interaction, { content: reply.reply, title: 'Brain', tone: 'info', user: interaction.user });
         ctx.publish('bot.command_executed', {
           command: 'brain-ask',
           guild: safeGuildName(interaction.guild),

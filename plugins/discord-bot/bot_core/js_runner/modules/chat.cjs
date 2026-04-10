@@ -1,7 +1,8 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { requestBrainReply, requestChatBridge, streamBrainReply } = require('../chat_bridge.cjs');
 const { buildDiscordContextBundle } = require('../context_builder.cjs');
-const { replyToInteraction } = require('../interaction_helpers.cjs');
+const { normalizeDiscordPayload, replyToInteraction, replyToMessage } = require('../interaction_helpers.cjs');
+const { buildToolReplyPayload, buildToolErrorPayload, buildUnknownToolPayload } = require('../tool_reply_helpers.cjs');
 const { clearMemoForConversation, clearActorSummary } = require('../memo_store.cjs');
 const {
   addCommandDefinition,
@@ -10,8 +11,11 @@ const {
   registerPolicyDefinition,
 } = require('../runtime_state.cjs');
 const {
+  collectMessageAttachments,
   conversationKeyFromInteraction,
   conversationKeyFromMessage,
+  extractAttachmentText,
+  extractMessageText,
   safeChannelName,
   safeDisplayName,
   safeGuildName,
@@ -23,6 +27,49 @@ const {
 const POLICY_MESSAGE_COMMANDS = 'core.chat.message_commands';
 const POLICY_NATURAL_CHAT = 'core.chat.natural_chat';
 const POLICY_APP_RESET = 'core.chat.app_command_reset';
+const MAX_TOOL_FOLLOW_UP_ATTEMPTS = 2;
+
+function isToolFollowUpRequested(payload) {
+  return payload?.followup === true;
+}
+
+function summarizeToolIssue(toolId, payload) {
+  const normalizedToolId = String(toolId || '').trim() || 'unknown_tool';
+  const tone = String(payload?.tone || 'warning').trim().toLowerCase() || 'warning';
+  const content = String(payload?.content || '').trim();
+  const llmHint = String(payload?.llm_followup_hint || '').trim();
+  return {
+    toolId: normalizedToolId,
+    tone,
+    content,
+    llmHint,
+  };
+}
+
+function buildToolIssueFollowUpPrompt(issueSummaries = [], attempt = 1) {
+  const details = issueSummaries
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((item) => {
+      const toolId = String(item?.toolId || '').trim() || 'unknown_tool';
+      const tone = String(item?.tone || 'warning').trim() || 'warning';
+      const content = String(item?.content || '').trim();
+      const llmHint = String(item?.llmHint || '').trim();
+      const resultBlock = content ? `Result:\n---\n${content}\n---` : 'Result: (empty)';
+      const hintBlock = llmHint ? `Instruction:\n${llmHint}` : '';
+      return [`- ${toolId} (${tone})`, resultBlock, hintBlock].filter(Boolean).join('\n');
+    })
+    .join('\n\n');
+  const detailBlock = details ? `\nTool follow-up details:\n${details}\n` : '';
+  return [
+    `[System] Follow-up tool attempt ${attempt}/${MAX_TOOL_FOLLOW_UP_ATTEMPTS}.`,
+    'One or more tools requested follow-up.',
+    detailBlock.trim(),
+    'Continue handling the user\'s most recent request.',
+    'If needed, select another appropriate tool and call it again with <call_command>.',
+    'Prioritize the most reasonable next step based on the latest tool results.',
+  ].filter(Boolean).join('\n');
+}
 
 function buildDiscordReplyText(bridge, runtimeConfig) {
   const primaryReply = String(bridge?.reply || '').trim();
@@ -39,7 +86,8 @@ function wantsNaturalReply(message, runtimeState) {
     return false;
   }
   const raw = String(message.content || '').trim();
-  if (!raw || raw.startsWith('!')) {
+  const normalizedText = extractMessageText(message);
+  if (!normalizedText || raw.startsWith('!')) {
     return false;
   }
   if (!isPolicyEnabled(runtimeState, POLICY_NATURAL_CHAT)) {
@@ -116,6 +164,49 @@ function stripStreamMarkupFragments(text) {
     .replace(/<[^\s<]*$/g, '')
     .replace(/<\/?[a-z_][^\s<]*$/gi, '')
     .trim();
+}
+
+const MUSIC_URL_REGEX = /https?:\/\/(?:www\.|music\.)?(?:youtube\.com|youtu\.be|soundcloud\.com)[^\s>"]+/gi;
+
+function collectMusicUrls(text) {
+  const matches = String(text || '').match(MUSIC_URL_REGEX);
+  if (!matches || matches.length === 0) {
+    return [];
+  }
+  return [...new Set(matches.map((u) => String(u || '').trim()).filter(Boolean))];
+}
+
+function buildResolvedTrackContextLines(resolvedTracks = []) {
+  const lines = [];
+  for (const item of resolvedTracks) {
+    const title = String(item?.title || '').trim();
+    const uploader = String(item?.uploader || '').trim();
+    if (!title) continue;
+    if (uploader) {
+      lines.push(`("${title}" by "${uploader}")`);
+    } else {
+      lines.push(`("${title}")`);
+    }
+  }
+  return lines;
+}
+
+function buildAttachmentEventContext(message) {
+  const audioTypes = new Set(['wav', 'wave', 'mp3', 'ogg', 'oga', 'opus', 'flac', 'm4a', 'aac', 'webm', 'mp4', 'mpeg']);
+  return collectMessageAttachments(message).slice(0, 4).map((item) => ({
+    name: item.name,
+    content_type: item.content_type || item.type,
+    type: item.type,
+    url: item.url,
+    size: item.size,
+    is_audio: (() => {
+      const normalizedType = String(item.content_type || item.type || '').toLowerCase();
+      if (normalizedType.startsWith('audio/')) {
+        return true;
+      }
+      return audioTypes.has(normalizedType);
+    })(),
+  }));
 }
 
 function createReplySentenceEmitter(ctx, runtimeConfig, sourceMeta = {}) {
@@ -246,6 +337,28 @@ module.exports = function createChatModule(deps) {
           guild_id: 'string?',
         },
       });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'chat_reset_session',
+        build_payload({ actor }) {
+          return {
+            content: 'Đã reset session chat cho ngữ cảnh hiện tại.',
+            title: 'Chat',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'chat_reset_actor_fact',
+        build_payload({ actor }) {
+          return {
+            content: 'Đã xóa thông tin tóm tắt/facts của actor.',
+            title: 'Chat',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
       registerPolicyDefinition(runtimeState, 'core.chat', {
         policy_id: POLICY_NATURAL_CHAT,
         group_id: 'chat',
@@ -326,17 +439,19 @@ module.exports = function createChatModule(deps) {
           return;
         }
         const raw = String(message.content || '').trim();
-        if (!raw) {
+        const attachmentText = extractAttachmentText(message);
+        const normalizedMessageText = extractMessageText(message);
+        const lowered = raw.toLowerCase();
+        if (!raw && !attachmentText) {
           return;
         }
-        const lowered = raw.toLowerCase();
         const characterId = String(runtimeConfig.chat_character_id || '').trim();
         if (lowered === '!chat-reset') {
           if (!isPolicyEnabled(runtimeState, POLICY_MESSAGE_COMMANDS)) {
             return;
           }
           if (!characterId) {
-            await message.reply('Chat module chưa được cấu hình `chat_character_id`.');
+            await replyToMessage(message, { content: 'Chat module chưa được cấu hình `chat_character_id`.', title: 'Chat', tone: 'error', user: message.author });
             return;
           }
           const resetPayload = {
@@ -349,7 +464,7 @@ module.exports = function createChatModule(deps) {
           const c_key = conversationKeyFromMessage(message);
           clearMemoForConversation(runtimeState, c_key);
           await requestChatBridge(runtimeConfig, resetPayload);
-          await message.reply('Đã reset session chat cho kênh hiện tại.');
+          await replyToMessage(message, { content: 'Đã reset session chat cho kênh hiện tại.', title: 'Chat', tone: 'success', user: message.author });
           ctx.publish('bot.command_executed', {
             command: 'chat-reset',
             guild: safeGuildName(message.guild),
@@ -363,7 +478,7 @@ module.exports = function createChatModule(deps) {
         if (lowered === '!fact-reset') {
           if (!isPolicyEnabled(runtimeState, POLICY_MESSAGE_COMMANDS)) return;
           clearActorSummary(runtimeState, String(message.author.id));
-          await message.reply('Đã xóa tất cả thông tin tóm tắt về bạn trong bộ nhớ của tôi.');
+          await replyToMessage(message, { content: 'Đã xóa tất cả thông tin tóm tắt về bạn trong bộ nhớ của tôi.', title: 'Chat', tone: 'success', user: message.author });
           ctx.publish('bot.command_executed', {
             command: 'fact-reset',
             guild: safeGuildName(message.guild),
@@ -377,20 +492,39 @@ module.exports = function createChatModule(deps) {
           if (!isPolicyEnabled(runtimeState, POLICY_MESSAGE_COMMANDS)) {
             return;
           }
-          prompt = raw.slice('!chat '.length).trim();
+          const commandPrompt = raw.slice('!chat '.length).trim();
+          prompt = [commandPrompt, attachmentText].filter(Boolean).join('\n').trim();
+          eventContext = { event_type: 'message.command', trigger: '!chat' };
+        } else if (lowered === '!chat' && attachmentText) {
+          if (!isPolicyEnabled(runtimeState, POLICY_MESSAGE_COMMANDS)) {
+            return;
+          }
+          prompt = attachmentText;
           eventContext = { event_type: 'message.command', trigger: '!chat' };
         } else if (wantsNaturalReply(message, runtimeState)) {
-          prompt = raw;
+          prompt = normalizedMessageText;
           eventContext = { event_type: 'message.natural_chat', trigger: 'allowed_channel' };
         } else {
           return;
         }
         if (!characterId) {
-          await message.reply('Chat module chưa được cấu hình `chat_character_id`.');
+          await replyToMessage(message, { content: 'Chat module chưa được cấu hình `chat_character_id`.', title: 'Chat', tone: 'error', user: message.author });
           return;
         }
         if (!prompt) {
           return;
+        }
+        const latestAttachments = buildAttachmentEventContext(message);
+        if (latestAttachments.length > 0) {
+          eventContext.attachments = latestAttachments;
+        }
+
+        const mentionsBot = client.user && message.mentions?.users?.has(client.user.id);
+        const mentionMatch = raw.match(/^<@!?(\d+)>|^<@&(\d+)>/);
+        let recordOnly = false;
+        
+        if (mentionMatch && !mentionsBot) {
+          recordOnly = true;
         }
 
         // --- Fetch referenced (replied-to) message for user_info context ---
@@ -398,8 +532,11 @@ module.exports = function createChatModule(deps) {
           try {
             const refMsg = await message.channel.messages.fetch(message.reference.messageId);
             if (refMsg) {
-              const refContent = String(refMsg.content || '').trim();
+              const refContent = extractMessageText(refMsg);
               const isBot = refMsg.author?.id === client.user?.id;
+              if (isBot) {
+                recordOnly = false;
+              }
               const refDisplayName = isBot
                 ? 'YOUR'
                 : safeDisplayName(refMsg.author, refMsg.member);
@@ -420,15 +557,26 @@ module.exports = function createChatModule(deps) {
 
         await message.channel.sendTyping();
 
-        // --- Music Prefetch Mechanism ---
-        // Look for music URLs in the prompt OR the referenced message (if any) to start background caching
-        const musicUrlRegex = /https?:\/\/(?:www\.|music\.)?(?:youtube\.com|youtu\.be|soundcloud\.com)[^\s>"]+/gi;
-        const combinedForCache = `${prompt} ${eventContext?.reply_reference?.content || ''}`;
-        const mUrls = combinedForCache.match(musicUrlRegex);
-        if (mUrls && mUrls.length > 0) {
-          const uniqueUrls = [...new Set(mUrls)];
-          for (const u of uniqueUrls) {
-            ctx.publish('music.prefetch_requested', { url: u });
+        // --- Music URL Context + Prefetch ---
+        const combinedForMusic = `${prompt} ${eventContext?.reply_reference?.content || ''}`;
+        const musicUrls = collectMusicUrls(combinedForMusic);
+        if (musicUrls.length > 0) {
+          const resolvedTracks = [];
+          for (const url of musicUrls.slice(0, 3)) {
+            try {
+              const resList = await ctx.call('music.resolve_requested', { query: url });
+              const resolved = Array.isArray(resList) ? resList[0] : null;
+              if (resolved?.track) {
+                resolvedTracks.push(resolved.track);
+              }
+            } catch (_) {}
+          }
+          const contextLines = buildResolvedTrackContextLines(resolvedTracks);
+          if (contextLines.length > 0) {
+            prompt = `${prompt}\n${contextLines.join('\n')}`.trim();
+          }
+          for (const url of musicUrls) {
+            ctx.publish('music.prefetch_requested', { url });
           }
         }
         // Fire-and-forget: sync bot nickname to character name in this guild.
@@ -448,7 +596,60 @@ module.exports = function createChatModule(deps) {
           guild: message.guild,
           channel: message.channel,
         };
+
+        const publishBridgeTrace = (bridgePayload = {}) => {
+          ctx.publish('bot.llm_trace', {
+            guild: safeGuildName(message.guild),
+            channel: safeChannelName(message.channel),
+            author: safeUserTag(message.author),
+            prompt: bridgePayload.llm_input,
+            response: bridgePayload.raw_response,
+          });
+        };
+
+        const emitReplyCompletion = (bridgePayload = {}, extra = {}) => {
+          ctx.publish('chat.reply_completed', {
+            ...sourceMeta,
+            ...extra,
+            session_id: bridgePayload.session_id,
+            conversation_key: bridgePayload.conversation_key,
+            reply: bridgePayload.reply,
+            secondary_reply: bridgePayload.secondary_reply || '',
+          });
+        };
+
+        const processFollowUpBridge = async (followUpBridge = {}, followUpAttempt = 1) => {
+          const followUpEmitter = createReplySentenceEmitter(ctx, runtimeConfig, sourceMeta);
+          followUpEmitter.flush(followUpBridge);
+          await followUpEmitter.drain();
+
+          const followUpContent = buildDiscordReplyText(followUpBridge, runtimeConfig);
+          let followUpMessage = null;
+          if (followUpContent) {
+            if (isNaturalChat) {
+              followUpMessage = await message.reply(followUpContent).catch(() => null);
+            } else {
+              followUpMessage = await replyToMessage(message, {
+                content: followUpContent,
+                title: 'Chat',
+                tone: 'info',
+                user: message.author,
+              }).catch(() => null);
+            }
+          }
+
+          if (followUpMessage) {
+            runtimeState.messageState.lastBotMessageByChannel.set(String(message.channel?.id || ''), followUpMessage);
+          }
+
+          emitReplyCompletion(followUpBridge, {
+            follow_up_attempt: followUpAttempt,
+            follow_up: true,
+          });
+          publishBridgeTrace(followUpBridge);
+        };
         const sentenceEmitter = createReplySentenceEmitter(ctx, runtimeConfig, sourceMeta);
+        const isNaturalChat = eventContext?.event_type === 'message.natural_chat';
         
         let earlyReplyPromise = null;
         let primarySent = false;
@@ -460,13 +661,18 @@ module.exports = function createChatModule(deps) {
           actor: message.author,
           channel: message.channel,
           guild: message.guild,
+          emit_on_delta: true,
           event_context: eventContext,
+          record_only: recordOnly,
         }, {
           onDelta(delta) {
-            sentenceEmitter.push(delta);
             rawStreamText += String(delta || '');
+            if (rawStreamText.includes('[IGNORE]')) {
+              return;
+            }
+            sentenceEmitter.push(delta);
             
-            if (!primarySent && rawStreamText.includes('</message>')) {
+            if (isNaturalChat && !primarySent && rawStreamText.includes('</message>')) {
               primarySent = true;
               const [primaryReply] = extractVisibleMessages(rawStreamText);
               const cleanPrimary = stripStreamMarkupFragments(primaryReply)
@@ -477,7 +683,7 @@ module.exports = function createChatModule(deps) {
                 .replace(/&amp;/g, '&')
                 .trim();
                 
-              if (cleanPrimary) {
+              if (cleanPrimary && !cleanPrimary.includes('[IGNORE]')) {
                 earlyReplyPromise = message.reply(cleanPrimary).catch(err => {
                   console.error('[Chat] Early reply error:', err);
                   return null;
@@ -486,7 +692,23 @@ module.exports = function createChatModule(deps) {
             }
           },
         });
-        sentenceEmitter.flush(bridge);
+        
+        if (bridge.ignore) {
+          console.log('[Chat] Bot decided to ignore this message ([IGNORE] keyword detected).');
+          
+          if (!recordOnly) {
+            // Notify user that bot has "seen" the message
+            const botName = String(runtimeConfig.chat_character_name || 'Bot').trim();
+            await replyToMessage(message, {
+              content: `*${botName} đã seen tin nhắn của bạn.*`,
+              title: 'Chat',
+              tone: 'info',
+              user: message.author
+            }).catch(() => {});
+          }
+        } else {
+          sentenceEmitter.flush(bridge);
+        }
         await sentenceEmitter.drain();
         
         const finalContent = buildDiscordReplyText(bridge, runtimeConfig);
@@ -496,28 +718,39 @@ module.exports = function createChatModule(deps) {
           sentMessage = await earlyReplyPromise;
         }
 
-        if (sentMessage) {
-          if (finalContent && finalContent !== sentMessage.content) {
-            sentMessage = await sentMessage.edit(finalContent).catch(err => {
-              console.error('[Chat] Edit reply error:', err);
-              return sentMessage;
-            });
+        if (bridge.ignore) {
+          // If we are ignoring, but somehow an early reply was sent (should not happen with the check above),
+          // we might want to delete it or just leave it. The check cleanPrimary.includes('[IGNORE]') 
+          // should prevent it.
+          if (sentMessage) {
+            await sentMessage.delete().catch(() => {});
+            sentMessage = null;
           }
         } else {
-          sentMessage = await message.reply(finalContent);
+          if (sentMessage) {
+            if (finalContent && finalContent !== sentMessage.content) {
+              const editPayload = isNaturalChat
+                ? finalContent
+                : normalizeDiscordPayload({ content: finalContent, title: 'Chat', tone: 'info', user: message.author });
+              sentMessage = await sentMessage.edit(editPayload).catch(err => {
+                console.error('[Chat] Edit reply error:', err);
+                return sentMessage;
+              });
+            }
+          } else {
+            if (isNaturalChat) {
+              sentMessage = await message.reply(finalContent).catch(() => null);
+            } else {
+              sentMessage = await replyToMessage(message, { content: finalContent, title: 'Chat', tone: 'info', user: message.author }).catch(() => null);
+            }
+          }
         }
         
         if (sentMessage) {
           runtimeState.messageState.lastBotMessageByChannel.set(String(message.channel?.id || ''), sentMessage);
         }
 
-        ctx.publish('chat.reply_completed', {
-          ...sourceMeta,
-          session_id: bridge.session_id,
-          conversation_key: bridge.conversation_key,
-          reply: bridge.reply,
-          secondary_reply: bridge.secondary_reply || '',
-        });
+        emitReplyCompletion(bridge, { ignored: bridge.ignore });
 
         // --- Multi-Tool Execution Pipeline ---
         // Handle one or more <call_command> tags from the LLM response
@@ -525,18 +758,22 @@ module.exports = function createChatModule(deps) {
           ? bridge.call_commands
           : (bridge.call_command && typeof bridge.call_command === 'object' && bridge.call_command.tool_id ? [bridge.call_command] : []);
 
-        if (rawCommands.length > 0) {
+        const executeToolCommands = async (commands = [], followUpAttempt = 0) => {
+          if (!Array.isArray(commands) || commands.length === 0) {
+            return;
+          }
           const { collectBrainAbilities } = require('../runtime_state.cjs');
           const abilities = collectBrainAbilities(runtimeState, runtimeConfig);
           const toolsForLlm = (abilities && typeof abilities === 'object' && Array.isArray(abilities.tools_for_llm)) ? abilities.tools_for_llm : [];
-          
-          for (const activeCmd of rawCommands) {
+          const issueSummaries = [];
+
+          for (const activeCmd of commands) {
             if (!activeCmd || typeof activeCmd !== 'object' || !activeCmd.tool_id) continue;
 
             const reqId = String(activeCmd.tool_id || '').trim();
             // Fuzzy match: exact tool_id → separator match (::, :, /, .) → module_id match
             let tool = toolsForLlm.find(t => t.tool_id === reqId);
-            
+
             if (!tool) {
               // Try splitting by common separators like :: or / or .
               const parts = reqId.split(/[:.\/]+/).map(p => p.trim()).filter(Boolean);
@@ -551,10 +788,10 @@ module.exports = function createChatModule(deps) {
 
             if (tool && tool.call_event) {
               console.log(`[Tool Call] LLM executed internal tool: ${tool.tool_id} (requested: ${reqId})`);
-              
+
               // --- Super-Fuzzy Tool Resolver ---
               let rawPayload = activeCmd.payload || activeCmd.args || {};
-              
+
               if (rawPayload && typeof rawPayload === 'object') {
                 const payloadKeys = Object.keys(rawPayload);
 
@@ -567,7 +804,7 @@ module.exports = function createChatModule(deps) {
                       console.log(`[Tool Resolver] Detected nested tool "${key}" in payload. Unwrapping...`);
                       tool = matched;
                       rawPayload = val;
-                      break; 
+                      break;
                     }
                   }
                 }
@@ -586,6 +823,13 @@ module.exports = function createChatModule(deps) {
                 requester_id: String(message.author?.id || ''),
               };
 
+              if (tool.tool_id === 'rag_search_web') {
+                const tavilyKey = String(runtimeConfig?.tavily_api_key || '').trim();
+                if (tavilyKey) {
+                  fullPayload.tavily_api_key = tavilyKey;
+                }
+              }
+
               // Sanitize placeholder guild_id values from LLM
               if (fullPayload.guild_id === 'current' || fullPayload.guild_id === 'auto') {
                 fullPayload.guild_id = sourceMeta.guild_id;
@@ -600,25 +844,72 @@ module.exports = function createChatModule(deps) {
               }
 
               if (typeof ctx.call === 'function') {
-                ctx.call(tool.call_event, fullPayload).catch(e => {
+                try {
+                  const callResults = await ctx.call(tool.call_event, fullPayload);
+                  const payload = buildToolReplyPayload(runtimeState, tool.tool_id, callResults, message.author, {
+                    call_event: tool.call_event,
+                    call_payload: fullPayload,
+                  });
+                  await replyToMessage(message, payload);
+                  if (isToolFollowUpRequested(payload)) {
+                    issueSummaries.push(summarizeToolIssue(tool.tool_id, payload));
+                  }
+                } catch (e) {
                   console.log(`[Tool Call Error] ${tool.tool_id}: ${e.message}`);
-                });
+                  const errorPayload = buildToolErrorPayload(tool.tool_id, e, message.author);
+                  await replyToMessage(message, errorPayload).catch(() => {});
+                }
               } else {
                 ctx.publish(tool.call_event, fullPayload);
               }
             } else {
               console.log(`[Tool Call Warning] Unknown tool requested: ${activeCmd.tool_id}`);
+              const warningPayload = buildUnknownToolPayload(activeCmd.tool_id, message.author);
+              await replyToMessage(message, warningPayload).catch(() => {});
             }
           }
+
+          if (issueSummaries.length > 0 && followUpAttempt < MAX_TOOL_FOLLOW_UP_ATTEMPTS) {
+            const nextAttempt = followUpAttempt + 1;
+            const followUpPrompt = buildToolIssueFollowUpPrompt(issueSummaries, nextAttempt);
+            try {
+              await message.channel.sendTyping().catch(() => {});
+              const followUpBridge = await requestBrainReply(runtimeConfig, client, runtimeState, {
+                prompt: followUpPrompt,
+                message,
+                actor: message.author,
+                channel: message.channel,
+                guild: message.guild,
+                event_context: {
+                  event_type: 'message.tool_issue_follow_up',
+                  trigger: 'tool_followup_flag',
+                  follow_up_attempt: nextAttempt,
+                },
+              });
+              await processFollowUpBridge(followUpBridge, nextAttempt);
+              const followUpCommands = Array.isArray(followUpBridge.call_commands) && followUpBridge.call_commands.length > 0
+                ? followUpBridge.call_commands
+                : (followUpBridge.call_command && typeof followUpBridge.call_command === 'object' && followUpBridge.call_command.tool_id ? [followUpBridge.call_command] : []);
+              if (followUpCommands.length > 0) {
+                await executeToolCommands(followUpCommands, nextAttempt);
+              }
+            } catch (followUpErr) {
+              const followUpErrorPayload = {
+                content: `[System] Không thể follow-up LLM sau tool followup: ${String(followUpErr?.message || followUpErr || 'Unknown error')}`,
+                title: 'Tool Follow-up',
+                tone: 'error',
+                user: message.author,
+              };
+              await replyToMessage(message, followUpErrorPayload).catch(() => {});
+            }
+          }
+        };
+
+        if (rawCommands.length > 0) {
+          await executeToolCommands(rawCommands, 0);
         }
 
-        ctx.publish('bot.llm_trace', {
-          guild: safeGuildName(message.guild),
-          channel: safeChannelName(message.channel),
-          author: safeUserTag(message.author),
-          prompt: bridge.llm_input,
-          response: bridge.raw_response
-        });
+        publishBridgeTrace(bridge);
 
         ctx.publish('bot.command_executed', {
           command: eventContext?.event_type === 'message.natural_chat' ? 'natural-chat' : 'chat',
@@ -661,7 +952,12 @@ module.exports = function createChatModule(deps) {
           const c_key = conversationKeyFromInteraction(interaction);
           clearMemoForConversation(runtimeState, c_key);
           await requestChatBridge(runtimeConfig, resetPayload);
-          await replyToInteraction(interaction, { content: 'Đã reset session chat cho ngữ cảnh hiện tại.', ephemeral: true });
+          await replyToInteraction(interaction, {
+            content: 'Đã reset session chat cho ngữ cảnh hiện tại.',
+            title: 'Chat',
+            tone: 'success',
+            user: interaction.user,
+          });
           ctx.publish('bot.command_executed', {
             command: 'chat-reset',
             guild: safeGuildName(interaction.guild),

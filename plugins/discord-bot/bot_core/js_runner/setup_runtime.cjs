@@ -2,7 +2,7 @@ const { EventBus } = require('./event_bus.cjs');
 const { wireDiscordEvents } = require('./discord_event_wiring.cjs');
 const { createModuleContext } = require('./module_context.cjs');
 const { createBuiltInModuleRegistry } = require('./modules/index.cjs');
-const { addContextFact, applyConfiguredPolicies, createRuntimeState } = require('./runtime_state.cjs');
+const { addContextFact, applyConfiguredPolicies, createRuntimeState, snapshotPolicyState } = require('./runtime_state.cjs');
 const { createRuntimePersistence } = require('./runtime_persistence.cjs');
 const { createVoiceAdapter } = require('./voice_adapter.cjs');
 const { truncateText } = require('./discord_utils.cjs');
@@ -79,6 +79,40 @@ function setupModules(client, modules, runtimeConfig, logger) {
   const persistence = createRuntimePersistence(runtimeConfig, logger);
   runtimeState.schedulePersist = () => persistence.scheduleSave(runtimeState);
   runtimeState.flushPersist = () => persistence.flush(runtimeState);
+
+  let policySyncTimer = null;
+  runtimeState.onPolicyStateChanged = () => {
+    if (policySyncTimer) {
+      clearTimeout(policySyncTimer);
+    }
+    policySyncTimer = setTimeout(() => {
+      policySyncTimer = null;
+      logger.emit({
+        event: 'core_config_sync',
+        patch: {
+          policies: snapshotPolicyState(runtimeState),
+        },
+      });
+    }, 220);
+  };
+
+  const originalFlushPersist = runtimeState.flushPersist;
+  runtimeState.flushPersist = () => {
+    if (policySyncTimer) {
+      clearTimeout(policySyncTimer);
+      policySyncTimer = null;
+      logger.emit({
+        event: 'core_config_sync',
+        patch: {
+          policies: snapshotPolicyState(runtimeState),
+        },
+      });
+    }
+    if (typeof originalFlushPersist === 'function') {
+      originalFlushPersist();
+    }
+  };
+
   persistence.loadInto(runtimeState);
   applyConfiguredPolicies(runtimeState, runtimeConfig?.policies || {});
   const voiceAdapter = createVoiceAdapter(runtimeState, client);

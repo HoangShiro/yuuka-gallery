@@ -26,6 +26,7 @@ class BotRuntime:
     actual_id: Optional[str] = None
     avatar_url: Optional[str] = None
     persist_name_callback: Optional[Callable[[str], None]] = None
+    persist_config_callback: Optional[Callable[[dict], None]] = None
 
     def update_state(self, state: str, error: Optional[str] = None) -> None:
         with self.lock:

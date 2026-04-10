@@ -28,6 +28,20 @@ class PlayMusicModule(BotModule):
                     "max_size_gb": 1,
                 },
             },
+            {
+                "policy_id": "core.play_music.ytdlp",
+                "group_id": "music",
+                "group_name": "Music Player",
+                "title": "yt-dlp settings",
+                "description": "Configure yt-dlp options like SponsorBlock and cookies for age-restricted content.",
+                "default_enabled": True,
+                "settings": {
+                    "sponsorblock_enabled": True,
+                    "sponsorblock_categories": "sponsor,selfpromo,intro,outro,interaction",
+                    "cookies_file": "",
+                    "cookies_from_browser": "",
+                },
+            },
         ]
 
     def get_dashboard_ui(self) -> dict:

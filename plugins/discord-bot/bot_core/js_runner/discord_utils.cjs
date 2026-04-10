@@ -1,3 +1,48 @@
+function getCollectionValues(collection) {
+  if (!collection) {
+    return [];
+  }
+  if (typeof collection.values === 'function') {
+    return [...collection.values()];
+  }
+  if (Array.isArray(collection)) {
+    return collection;
+  }
+  return [];
+}
+
+function safeAttachmentTypeLabel(attachment) {
+  const rawContentType = String(
+    attachment?.contentType
+    || attachment?.content_type
+    || ''
+  ).trim().toLowerCase();
+  if (rawContentType) {
+    return rawContentType.split(';')[0] || rawContentType;
+  }
+  const name = String(attachment?.name || '').trim();
+  const dotIndex = name.lastIndexOf('.');
+  if (dotIndex >= 0 && dotIndex < name.length - 1) {
+    return name.slice(dotIndex + 1).toLowerCase();
+  }
+  return 'unknown';
+}
+
+function collectMessageAttachments(message) {
+  return getCollectionValues(message?.attachments).map((attachment) => {
+    const name = truncateText(String(attachment?.name || 'unnamed file').trim(), 120) || 'unnamed file';
+    const type = truncateText(safeAttachmentTypeLabel(attachment), 80) || 'unknown';
+    return {
+      name,
+      type,
+      label: `${name} (${type})`,
+      url: String(attachment?.url || attachment?.proxyURL || '').trim(),
+      size: Number(attachment?.size || 0) || 0,
+      content_type: String(attachment?.contentType || attachment?.content_type || '').trim(),
+    };
+  }).filter((attachment) => attachment.name);
+}
+
 function safeUserTag(user) {
   if (!user) {
     return 'UnknownUser';
@@ -107,16 +152,38 @@ function extractMessageText(message) {
   if (!message) {
     return '';
   }
-  return truncateText(message.content || '', 500);
+  const rawText = truncateText(message.content || '', 500);
+  const attachments = collectMessageAttachments(message);
+  if (!attachments.length) {
+    return rawText;
+  }
+  const attachmentLine = attachments.length === 1
+    ? `*Send the file ${attachments[0].label}*`
+    : `*Send the files ${attachments.map((item) => item.label).join(', ')}*`;
+  if (!rawText) {
+    return truncateText(attachmentLine, 500);
+  }
+  return truncateText(`${rawText}\n${attachmentLine}`, 500);
 }
 
-function makeParticipant(user) {
+function extractAttachmentText(message) {
+  const attachments = collectMessageAttachments(message);
+  if (!attachments.length) {
+    return '';
+  }
+  if (attachments.length === 1) {
+    return `*Send the file ${attachments[0].label}*`;
+  }
+  return `*Send the files ${attachments.map((item) => item.label).join(', ')}*`;
+}
+
+function makeParticipant(user, member) {
   if (!user) {
     return null;
   }
   return {
     uid: String(user.id || ''),
-    display_name: safeUserTag(user),
+    display_name: safeDisplayName(user, member),
     avatar_url: avatarUrlOfUser(user),
     is_bot: Boolean(user.bot),
   };
@@ -134,6 +201,8 @@ module.exports = {
   conversationKeyFromInteraction,
   sessionIdFromMessage,
   sessionIdFromInteraction,
+  collectMessageAttachments,
+  extractAttachmentText,
   extractMessageText,
   makeParticipant,
 };

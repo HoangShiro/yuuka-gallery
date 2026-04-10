@@ -34,6 +34,27 @@ function normalizeInputType(inputType) {
   return raw;
 }
 
+function clampPlaybackSpeed(speed) {
+  const raw = Number(speed);
+  if (!Number.isFinite(raw)) return 1.0;
+  return Math.max(0.25, Math.min(3.0, raw));
+}
+
+function buildAtempoFilters(speed) {
+  let remaining = clampPlaybackSpeed(speed);
+  const filters = [];
+  while (remaining > 2.0) {
+    filters.push('atempo=2.0');
+    remaining /= 2.0;
+  }
+  while (remaining < 0.5) {
+    filters.push('atempo=0.5');
+    remaining /= 0.5;
+  }
+  filters.push(`atempo=${remaining.toFixed(3)}`);
+  return filters;
+}
+
 // ---------------------------------------------------------------------------
 // PCM helpers
 // ---------------------------------------------------------------------------
@@ -94,30 +115,51 @@ class AudioChannel {
     this._ended = false;
     this._startedPlayback = false;
     this._idSeq = 0;
+    this._playbackSpeed = 1.0;
+    this._skipSilence = false;
   }
 
   _emit(ev, data) {
     if (typeof this._onEvent === 'function') this._onEvent(ev, { channel: this.name, ...data });
   }
 
-  enqueue(source, inputType, metadata) {
+  _normalizePlaybackOptions(playback = {}) {
+    const hasSpeed = playback && Object.prototype.hasOwnProperty.call(playback, 'speed');
+    const hasSkipSilence = playback && Object.prototype.hasOwnProperty.call(playback, 'skip_silence');
+    return {
+      speed: hasSpeed ? clampPlaybackSpeed(playback.speed) : this._playbackSpeed,
+      skip_silence: hasSkipSilence ? Boolean(playback.skip_silence) : this._skipSilence,
+    };
+  }
+
+  enqueue(source, inputType, metadata, playback) {
     const id = `${this.name}-${++this._idSeq}`;
-    this.queue.push({ id, source, inputType, metadata: metadata || {} });
+    const playbackOptions = this._normalizePlaybackOptions(playback);
+    this.queue.push({ id, source, inputType, metadata: metadata || {}, playback: playbackOptions });
     this._emit('track_enqueued', { item: { id, metadata: metadata || {} }, position: this.queue.length });
     if (!this.nowPlaying && !this._decoder) this._advance();
     return { id, position: this.queue.length, metadata: metadata || {} };
   }
 
-  _createDecoder(source, inputType) {
+  _createDecoder(source, inputType, playbackOptions = {}) {
     const baseArgs = ['-analyzeduration', '0', '-loglevel', '0'];
     const outArgs = ['-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', String(NUM_CHANNELS)];
     const normalizedInputType = normalizeInputType(inputType);
+    const filters = [];
+    if (Boolean(playbackOptions.skip_silence)) {
+      filters.push('silenceremove=start_periods=1:start_duration=0.20:start_threshold=-45dB:stop_periods=-1:stop_duration=0.25:stop_threshold=-45dB');
+    }
+    const speed = clampPlaybackSpeed(playbackOptions.speed);
+    if (Math.abs(speed - 1.0) > 0.001) {
+      filters.push(...buildAtempoFilters(speed));
+    }
+    const filterArgs = filters.length > 0 ? ['-af', filters.join(',')] : [];
 
     if (typeof source === 'string') {
-      return new prism.FFmpeg({ args: [...baseArgs, '-i', source, ...outArgs] });
+      return new prism.FFmpeg({ args: [...baseArgs, '-i', source, ...filterArgs, ...outArgs] });
     }
     const inArgs = normalizedInputType ? ['-f', normalizedInputType, '-i', 'pipe:0'] : ['-i', 'pipe:0'];
-    const decoder = new prism.FFmpeg({ args: [...baseArgs, ...inArgs, ...outArgs] });
+    const decoder = new prism.FFmpeg({ args: [...baseArgs, ...inArgs, ...filterArgs, ...outArgs] });
     if (Buffer.isBuffer(source)) {
       const rs = new Readable({ read() {} });
       rs.push(source);
@@ -143,7 +185,12 @@ class AudioChannel {
     this._pcmChunks = [];
     this._pcmChunksBytes = 0;
     this._startedPlayback = false;
-    this.nowPlaying = { id: entry.id, metadata: entry.metadata, noDuck: Boolean(entry.metadata?.noDuck) };
+    this.nowPlaying = {
+      id: entry.id,
+      metadata: entry.metadata,
+      noDuck: Boolean(entry.metadata?.noDuck),
+      playback: entry.playback || this._normalizePlaybackOptions(),
+    };
     this._emit('track_start', { item: this.nowPlaying, remaining: this.queue.length });
 
     // Defer decoder spawn to next tick so the event loop isn't blocked
@@ -153,7 +200,7 @@ class AudioChannel {
       // Guard: if stop/skip happened before deferred spawn fires
       if (!this.nowPlaying || this.nowPlaying.id !== entry.id) return;
       try {
-        this._decoder = this._createDecoder(entry.source, entry.inputType);
+        this._decoder = this._createDecoder(entry.source, entry.inputType, entry.playback);
         this._decoder.on('data', (chunk) => {
           this._pcmChunks.push(chunk);
           this._pcmChunksBytes += chunk.length;
@@ -253,11 +300,29 @@ class AudioChannel {
     return { id: r.id, metadata: r.metadata };
   }
 
+  setPlaybackSpeed(speed) {
+    this._playbackSpeed = clampPlaybackSpeed(speed);
+    return this._playbackSpeed;
+  }
+
+  setSkipSilence(enabled) {
+    this._skipSilence = Boolean(enabled);
+    return this._skipSilence;
+  }
+
+  getPlaybackSettings() {
+    return {
+      speed: this._playbackSpeed,
+      skip_silence: this._skipSilence,
+    };
+  }
+
   status() {
     return {
       channel: this.name,
       now_playing: this.nowPlaying,
       paused: this._paused,
+      playback_settings: this.getPlaybackSettings(),
       queue_length: this.queue.length,
       queue: this.queue.map((e) => ({ id: e.id, metadata: e.metadata })),
     };
@@ -565,7 +630,7 @@ class TrackingVoiceAdapter {
   // ---- Channel-aware playback API ----
 
   enqueue(guildId, channel, source, opts = {}) {
-    return this._getMixer(guildId).ch(channel).enqueue(source, opts.inputType, opts.metadata);
+    return this._getMixer(guildId).ch(channel).enqueue(source, opts.inputType, opts.metadata, opts.playback);
   }
   pause(guildId, channel)   { return this._getMixer(guildId).ch(channel).pause(); }
   resume(guildId, channel)  { return this._getMixer(guildId).ch(channel).resume(); }
@@ -586,6 +651,18 @@ class TrackingVoiceAdapter {
 
   setDuckRatio(guildId, ratio) {
     this._getMixer(guildId).duckRatio = Math.max(0, Math.min(1, Number(ratio) || DEFAULT_DUCK_RATIO));
+  }
+
+  setChannelPlaybackSpeed(guildId, channel, speed) {
+    return this._getMixer(guildId).ch(channel).setPlaybackSpeed(speed);
+  }
+
+  setChannelSkipSilence(guildId, channel, enabled) {
+    return this._getMixer(guildId).ch(channel).setSkipSilence(enabled);
+  }
+
+  getChannelPlaybackSettings(guildId, channel) {
+    return this._getMixer(guildId).ch(channel).getPlaybackSettings();
   }
 
   // Legacy

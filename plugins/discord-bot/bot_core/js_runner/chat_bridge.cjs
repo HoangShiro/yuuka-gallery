@@ -49,16 +49,26 @@ function parseBridgeResponse(resp) {
 
   const callCommand = callCommands.length > 0 ? callCommands[0] : null;
 
+  // Detect [IGNORE] keyword within the response (specifically within discord-reply block if present)
+  let ignore = false;
+  if (envelopeMatch && envelopeMatch[1].toLowerCase() === 'discord-reply') {
+    ignore = envelopeMatch[2].includes('[IGNORE]');
+  } else {
+    ignore = fullContent.includes('[IGNORE]');
+  }
+
   // Strip internal system tags and any immediate trailing punctuation
   reply = reply.replace(/<[a-z_]+>[\s\S]*?<\/[a-z_]+>[.,;]?\s*/gi, '').trim();
   secondaryReply = secondaryReply.replace(/<[a-z_]+>[\s\S]*?<\/[a-z_]+>[.,;]?\s*/gi, '').trim();
-  if (!reply) {
+  
+  if (!reply && !ignore) {
     return { ok: false, error: 'Bridge returned empty response.' };
   }
   return {
     ok: true,
     reply,
     secondary_reply: secondaryReply,
+    ignore,
     call_command: callCommand,
     call_commands: callCommands,
     session_id: resp.session_id || '',
@@ -94,6 +104,7 @@ function createBridgePayload(runtimeConfig, client, state, source = {}) {
       character_id: characterId,
       session_id: sessionId,
       user_message: prompt,
+      record_only: Boolean(source.record_only),
       model: String(runtimeConfig.chat_model || '').trim() || undefined,
       primary_language: String(runtimeConfig.chat_primary_language || 'English').trim() || 'English',
       secondary_language: String(runtimeConfig.chat_secondary_language || 'Japanese').trim() || 'Japanese',
@@ -234,6 +245,7 @@ async function streamBrainReply(runtimeConfig, client, state, source = {}, handl
   return {
     reply: bridge.reply,
     secondary_reply: bridge.secondary_reply || '',
+    ignore: bridge.ignore,
     session_id: bridge.session_id || sessionId,
     conversation_key: conversationKey,
     llm_input: bridge.llm_input,
@@ -253,6 +265,7 @@ async function requestBrainReply(runtimeConfig, client, state, source = {}) {
   return {
     reply: bridge.reply,
     secondary_reply: bridge.secondary_reply || '',
+    ignore: bridge.ignore,
     session_id: bridge.session_id || sessionId,
     conversation_key: conversationKey,
     llm_input: bridge.llm_input,

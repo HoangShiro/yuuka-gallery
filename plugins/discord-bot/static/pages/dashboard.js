@@ -4,6 +4,7 @@ class DiscordBotDashboardPage {
         this.api = api;
         this.activePlugins = activePlugins;
         this.pluginApi = this.api['discord-bot'];
+        this._autoScrollStorageKey = 'yuuka.discord-bot.auto-scroll';
         
         // Alias để dễ sử dụng utils trong các method
         this.Utils = window.Yuuka?.utils?.discordBot || {};
@@ -39,6 +40,8 @@ class DiscordBotDashboardPage {
         this._handleModulePageBack = this._handleModulePageBack.bind(this);
         this._handleModulePageClick = this._handleModulePageClick.bind(this);
         this._handleModulePageChange = this._handleModulePageChange.bind(this);
+        this._handleModulePageInput = this._handleModulePageInput.bind(this);
+        this._handleModulePageFocusOut = this._handleModulePageFocusOut.bind(this);
         this._handleConsoleTabClick = this._handleConsoleTabClick.bind(this);
         this._handleNewBot = this._handleNewBot.bind(this);
         this._handleDeleteBot = this._handleDeleteBot.bind(this);
@@ -48,6 +51,7 @@ class DiscordBotDashboardPage {
         console.log("[Plugin:DiscordBot] Initializing dashboard...");
         this.container.classList.add('plugin-discord-bot');
         this._buildBaseLayout();
+        this._restoreAutoScrollPreference();
         await this.refreshBots();
         this._attachHandlers();
         this._startPolling();
@@ -56,6 +60,14 @@ class DiscordBotDashboardPage {
         if (navibar) {
             navibar.setActivePlugin('discord-bot');
         }
+    }
+
+    async _handleModulePageInput(event) {
+        await this._forwardModulePageEventToRenderer('onInput', event);
+    }
+
+    async _handleModulePageFocusOut(event) {
+        await this._forwardModulePageEventToRenderer('onFocusOut', event);
     }
 
     destroy() {
@@ -217,6 +229,8 @@ class DiscordBotDashboardPage {
         if (this.modulePageBodyEl) {
             this.modulePageBodyEl.addEventListener('click', this._handleModulePageClick);
             this.modulePageBodyEl.addEventListener('change', this._handleModulePageChange);
+            this.modulePageBodyEl.addEventListener('input', this._handleModulePageInput);
+            this.modulePageBodyEl.addEventListener('focusout', this._handleModulePageFocusOut);
         }
         if (this.modulePageBackBtn) {
             this.modulePageBackBtn.addEventListener('click', this._handleModulePageBack);
@@ -237,6 +251,7 @@ class DiscordBotDashboardPage {
                     const botId = item.getAttribute('data-bot-id');
                     const bot = this.state.bots.find(b => b.bot_id === botId);
                     if (bot && (!this.state.activeBot || bot.bot_id !== this.state.activeBot.bot_id)) {
+                        await this._flushActiveModuleRendererChanges();
                         this.state.activeBot = bot;
                         this.state.logs = [];
                         this.state.lastSeq = 0;
@@ -258,8 +273,30 @@ class DiscordBotDashboardPage {
     }
 
     _handleAutoScrollToggle() {
+        this._persistAutoScrollPreference();
         if (this.autoScrollCheckbox.checked) {
             this._scrollConsoleToBottom();
+        }
+    }
+
+    _restoreAutoScrollPreference() {
+        if (!this.autoScrollCheckbox) return;
+        try {
+            const saved = window.localStorage.getItem(this._autoScrollStorageKey);
+            if (saved === 'true' || saved === 'false') {
+                this.autoScrollCheckbox.checked = saved === 'true';
+            }
+        } catch (error) {
+            console.warn('[DiscordBot] Failed to restore auto-scroll preference:', error);
+        }
+    }
+
+    _persistAutoScrollPreference() {
+        if (!this.autoScrollCheckbox) return;
+        try {
+            window.localStorage.setItem(this._autoScrollStorageKey, this.autoScrollCheckbox.checked ? 'true' : 'false');
+        } catch (error) {
+            console.warn('[DiscordBot] Failed to persist auto-scroll preference:', error);
         }
     }
 
@@ -393,6 +430,11 @@ class DiscordBotDashboardPage {
             this.consoleEl.innerHTML = `<div class="discord-bot-console-placeholder">
                 No bot is configured yet. Connect using your token to begin.
             </div>`;
+            if (this.consoleMessageEl) {
+                this.consoleMessageEl.innerHTML = `<div class="discord-bot-console-placeholder">
+                    No bot is configured yet. Connect using your token to begin.
+                </div>`;
+            }
             return;
         }
         if (this.state.logs.length === 0) {
@@ -401,6 +443,9 @@ class DiscordBotDashboardPage {
             this.consoleEl.innerHTML = `<div class="discord-bot-console-placeholder">
                 No log entries for ${safeName} yet.
             </div>`;
+            if (this.consoleMessageEl) {
+                this.consoleMessageEl.innerHTML = `<div class="discord-bot-console-placeholder">No message traces yet. Chat in a channel to generate LLM logs.</div>`;
+            }
             return;
         }
 
@@ -410,6 +455,7 @@ class DiscordBotDashboardPage {
             const nearBottom = (activeContainer.scrollTop + activeContainer.clientHeight) >= (activeContainer.scrollHeight - 32);
             if (!nearBottom) {
                 this.autoScrollCheckbox.checked = false;
+                this._persistAutoScrollPreference();
             }
         }
 
@@ -769,13 +815,13 @@ class DiscordBotDashboardPage {
         this.moduleGridEl.innerHTML = sections.join('');
     }
 
-    _handleModuleGridClick(event) {
+    async _handleModuleGridClick(event) {
         const trigger = event.target.closest('[data-action="open-module-page"]');
         if (!trigger || !this.moduleGridEl.contains(trigger)) {
             return;
         }
         const moduleId = trigger.getAttribute('data-module-id');
-        this._openModulePage(moduleId);
+        await this._openModulePage(moduleId);
     }
 
     async _handleModuleGridChange(event) {
@@ -789,8 +835,8 @@ class DiscordBotDashboardPage {
         });
     }
 
-    _handleModulePageBack() {
-        this._closeModulePage();
+    async _handleModulePageBack() {
+        await this._closeModulePage();
     }
 
     async _handleModulePageClick(event) {
@@ -996,11 +1042,14 @@ class DiscordBotDashboardPage {
         }
     }
 
-    _openModulePage(moduleId) {
+    async _openModulePage(moduleId) {
         if (!moduleId) return;
+        if (this.state.activeModulePage && this.state.activeModulePage !== moduleId) {
+            await this._flushActiveModuleRendererChanges();
+        }
         this.state.activeModulePage = moduleId;
         this._renderModulePage();
-        this._loadModuleUi(moduleId);
+        await this._loadModuleUi(moduleId);
     }
 
     async _loadModuleUi(moduleId) {
@@ -1063,7 +1112,8 @@ class DiscordBotDashboardPage {
         await this._loadModuleUi(moduleId);
     }
 
-    _closeModulePage(restoreFocus = true) {
+    async _closeModulePage(restoreFocus = true) {
+        await this._flushActiveModuleRendererChanges();
         this.state.activeModulePage = null;
         if (this.modulePageRowEl) {
             this.modulePageRowEl.hidden = true;
@@ -1267,6 +1317,19 @@ class DiscordBotDashboardPage {
         }
     }
 
+    async _flushActiveModuleRendererChanges() {
+        const renderer = this._getActiveModuleRenderer();
+        if (!renderer || typeof renderer.flushPendingChanges !== 'function') {
+            return false;
+        }
+        try {
+            return Boolean(await renderer.flushPendingChanges(this));
+        } catch (error) {
+            console.error('[DiscordBot] Renderer flush failed:', error);
+            return false;
+        }
+    }
+
     _updateButtons() {
         const bot = this.state.activeBot;
         const jsRuntimeReady = this.state.jsRuntimeAvailable;
@@ -1323,6 +1386,7 @@ class DiscordBotDashboardPage {
         );
 
         const toDisplayLabel = (moduleId) => {
+            const moduleMap = new Map(this.state.modules.map(module => [module.id, module]));
             const moduleMeta = moduleMap.get(moduleId);
             if (moduleMeta?.name && moduleMeta.name !== moduleId) {
                 return `${moduleMeta.name} (${moduleId})`;
@@ -1352,6 +1416,18 @@ class DiscordBotDashboardPage {
                 successIds.push(moduleId);
             } else {
                 failedIds.push(moduleId);
+            }
+        }
+
+        // If we are running but haven't seen any success/fail tokens yet, 
+        // wait for at least one poll to complete (up to 8 seconds).
+        if (botState === 'running' && successIds.length === 0 && failedIds.length > 0) {
+            if (loadedTokens.size === 0 && failedTokens.size === 0) {
+                const elapsed = Date.now() - (pending.startTime || 0);
+                if (elapsed < 8000) {
+                    console.log('[DiscordBot] Waiting for logs before emitting startup summary...');
+                    return;
+                }
             }
         }
 
@@ -1417,6 +1493,7 @@ class DiscordBotDashboardPage {
         this.state.pendingStartSummary = {
             afterSeq: this.state.lastSeq,
             requestedModules,
+            startTime: Date.now(),
         };
         this.state.isSubmitting = true;
         this._updateButtons();
@@ -1477,11 +1554,15 @@ class DiscordBotDashboardPage {
         this.state.isSubmitting = true;
         this._updateButtons();
         try {
+            const killCursor = Math.max(
+                this.state.lastSeq || 0,
+                ...this.state.logs.map((entry) => entry?.seq || 0)
+            );
             await this.pluginApi.post(`/bots/${this.state.activeBot.bot_id}/kill`);
             
             // Clear logs and console UI
             this.state.logs = [];
-            this.state.lastSeq = 0;
+            this.state.lastSeq = killCursor;
             this._renderConsole();
             
             await this.refreshBots();

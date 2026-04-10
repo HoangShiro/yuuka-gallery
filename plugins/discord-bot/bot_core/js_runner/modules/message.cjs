@@ -1,6 +1,6 @@
-const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
-const { replyToInteraction, sendManagedReply } = require('../interaction_helpers.cjs');
-const { addCommandDefinition } = require('../runtime_state.cjs');
+const { SlashCommandBuilder } = require('discord.js');
+const { normalizeDiscordPayload, replyToInteraction, sendManagedReply } = require('../interaction_helpers.cjs');
+const { addCommandDefinition, resolveMessageView } = require('../runtime_state.cjs');
 const { safeGuildName, safeUserTag, truncateText } = require('../discord_utils.cjs');
 
 module.exports = function createMessageModule(deps) {
@@ -31,6 +31,32 @@ module.exports = function createMessageModule(deps) {
           content: 'string?',
         },
       });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'message_send',
+        build_payload({ actor }) {
+          return {
+            content: 'Đã gửi message.',
+            title: 'Message',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'message_manage_last',
+        build_payload({ actor, meta }) {
+          const action = String(meta?.call_payload?.action || '').trim().toLowerCase();
+          const content = action === 'delete'
+            ? 'Đã xóa message gần nhất của bot.'
+            : (action === 'edit' ? 'Đã sửa message gần nhất của bot.' : 'Đã cập nhật message gần nhất của bot.');
+          return {
+            content,
+            title: 'Message',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
       addCommandDefinition(runtimeState, new SlashCommandBuilder()
         .setName('message-send')
         .setDescription('Send a plain text message through the bot')
@@ -53,11 +79,30 @@ module.exports = function createMessageModule(deps) {
         if (!channel || typeof channel.send !== 'function') {
           return;
         }
-        const sent = await sendManagedReply(channel, {
+        let resolvedComponents = Array.isArray(payload?.components) ? payload.components.filter(Boolean) : [];
+        if (!resolvedComponents.length && payload?.view_id) {
+          const resolvedView = await resolveMessageView(runtimeState, payload.view_id, payload);
+          if (resolvedView?.dropped_count > 0) {
+            ctx.publish('message.view_warning', {
+              channel_id: String(channel.id || ''),
+              view_id: resolvedView.view_id,
+              dropped_count: resolvedView.dropped_count,
+            });
+          }
+          if (Array.isArray(resolvedView?.components)) {
+            resolvedComponents = resolvedView.components.filter(Boolean);
+          }
+        }
+        const outgoing = {
           content: payload.content,
           embeds: payload.embeds,
           files: payload.files,
-        });
+          user: payload.user,
+        };
+        if (resolvedComponents.length) {
+          outgoing.components = resolvedComponents;
+        }
+        const sent = await sendManagedReply(channel, outgoing);
         runtimeState.messageState.lastBotMessageByChannel.set(String(channel.id || ''), sent);
         ctx.publish('message.sent', {
           channel_id: String(channel.id || ''),
@@ -73,7 +118,21 @@ module.exports = function createMessageModule(deps) {
           throw new Error('No managed bot message found for this channel.');
         }
         if (payload.action === 'edit') {
-          await lastMessage.edit({ content: String(payload.content || '').trim() || ' ' });
+          let resolvedComponents = Array.isArray(payload?.components) ? payload.components.filter(Boolean) : [];
+          if (!resolvedComponents.length && payload?.view_id) {
+            const resolvedView = await resolveMessageView(runtimeState, payload.view_id, payload);
+            if (Array.isArray(resolvedView?.components)) {
+              resolvedComponents = resolvedView.components.filter(Boolean);
+            }
+          }
+          const editPayload = {
+            content: String(payload.content || '').trim() || ' ',
+            user: payload.user,
+          };
+          if (resolvedComponents.length) {
+            editPayload.components = resolvedComponents;
+          }
+          await lastMessage.edit(normalizeDiscordPayload(editPayload));
         }
         if (payload.action === 'delete') {
           await lastMessage.delete();
@@ -95,9 +154,9 @@ module.exports = function createMessageModule(deps) {
         }
         if (interaction.commandName === 'message-send') {
           const content = interaction.options.getString('content', true);
-          const sent = await sendManagedReply(interaction.channel, { content });
+          const sent = await sendManagedReply(interaction.channel, { content, user: interaction.user });
           runtimeState.messageState.lastBotMessageByChannel.set(String(interaction.channelId || ''), sent);
-          await replyToInteraction(interaction, { content: 'Đã gửi message.', ephemeral: true });
+          await replyToInteraction(interaction, { content: 'Đã gửi message.', tone: 'success', title: 'Message', user: interaction.user, ephemeral: true });
           ctx.publish('bot.command_executed', {
             command: 'message-send',
             guild: safeGuildName(interaction.guild),
@@ -112,8 +171,9 @@ module.exports = function createMessageModule(deps) {
             action: 'edit',
             channel_id: String(interaction.channelId || ''),
             content,
+            user: interaction.user,
           });
-          await replyToInteraction(interaction, { content: 'Đã sửa message gần nhất của bot.', ephemeral: true });
+          await replyToInteraction(interaction, { content: 'Đã sửa message gần nhất của bot.', tone: 'success', title: 'Message', user: interaction.user, ephemeral: true });
           ctx.publish('bot.command_executed', {
             command: 'message-edit-last',
             guild: safeGuildName(interaction.guild),
@@ -126,7 +186,7 @@ module.exports = function createMessageModule(deps) {
             action: 'delete',
             channel_id: String(interaction.channelId || ''),
           });
-          await replyToInteraction(interaction, { content: 'Đã xóa message gần nhất của bot.', ephemeral: true });
+          await replyToInteraction(interaction, { content: 'Đã xóa message gần nhất của bot.', tone: 'success', title: 'Message', user: interaction.user, ephemeral: true });
           ctx.publish('bot.command_executed', {
             command: 'message-delete-last',
             guild: safeGuildName(interaction.guild),
@@ -137,10 +197,14 @@ module.exports = function createMessageModule(deps) {
         if (interaction.commandName === 'message-embed') {
           const title = interaction.options.getString('title', true);
           const description = interaction.options.getString('description', true);
-          const embed = new EmbedBuilder().setTitle(title).setDescription(description).setTimestamp(new Date());
-          const sent = await interaction.channel.send({ embeds: [embed] });
+          const sent = await sendManagedReply(interaction.channel, {
+            content: description,
+            title,
+            tone: 'info',
+            user: interaction.user,
+          });
           runtimeState.messageState.lastBotMessageByChannel.set(String(interaction.channelId || ''), sent);
-          await replyToInteraction(interaction, { content: 'Đã gửi embed.', ephemeral: true });
+          await replyToInteraction(interaction, { content: 'Đã gửi embed.', tone: 'success', title: 'Message', user: interaction.user, ephemeral: true });
           ctx.publish('message.sent', {
             channel_id: String(interaction.channelId || ''),
             message_id: String(sent.id || ''),

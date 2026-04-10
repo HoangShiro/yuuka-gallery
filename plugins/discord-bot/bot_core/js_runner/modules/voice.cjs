@@ -111,6 +111,171 @@ module.exports = function createVoiceModule(deps) {
           volume: 'number',
         },
       });
+      ctx.registerBrainTool({
+        tool_id: 'voice_set_playback_speed',
+        title: 'Set playback speed',
+        description: 'Set playback speed (0.25-3.0) for music or speak channel.',
+        call_event: 'voice.set_playback_speed',
+        input_schema: {
+          guild_id: 'string',
+          channel: '"music"|"speak"',
+          speed: 'number',
+        },
+      });
+      ctx.registerBrainTool({
+        tool_id: 'voice_set_skip_silence',
+        title: 'Toggle skip silence',
+        description: 'Enable or disable silence skipping for music or speak channel.',
+        call_event: 'voice.set_skip_silence',
+        input_schema: {
+          guild_id: 'string',
+          channel: '"music"|"speak"',
+          enabled: 'boolean',
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_join',
+        build_payload({ call_results, actor }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const channelName = safeChannelName({ name: result?.voice_channel_name, id: result?.voice_channel_id }) || result?.voice_channel_id || 'voice channel';
+          return {
+            content: `Đã tham gia: **${channelName}**`,
+            title: 'Voice Tools',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_play',
+        build_payload({ call_results, actor }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const title = result?.item?.metadata?.title || result?.metadata?.title || result?.item?.id || 'audio';
+          const channel = String(result?.channel || 'music');
+          return {
+            content: `[${channel}] Đã thêm vào hàng chờ: **${title}**.`,
+            title: 'Voice Tools',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_leave',
+        build_payload({ actor }) {
+          return {
+            content: 'Đã rời voice channel.',
+            title: 'Voice Tools',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_pause',
+        build_payload({ call_results, actor }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const channel = String(result?.channel || 'music');
+          const ok = Boolean(result?.paused);
+          return {
+            content: ok ? `[${channel}] Đã tạm dừng.` : `[${channel}] Không thể tạm dừng.`,
+            title: 'Voice Tools',
+            tone: ok ? 'success' : 'warning',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_resume',
+        build_payload({ call_results, actor }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const channel = String(result?.channel || 'music');
+          const ok = Boolean(result?.resumed);
+          return {
+            content: ok ? `[${channel}] Đã tiếp tục.` : `[${channel}] Không thể tiếp tục.`,
+            title: 'Voice Tools',
+            tone: ok ? 'success' : 'warning',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_skip',
+        build_payload({ call_results, actor, meta }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const channel = String(meta?.call_payload?.channel || result?.channel || 'music');
+          const skippedTitle = result?.skipped?.metadata?.title || result?.skipped?.id || 'nothing';
+          return {
+            content: `[${channel}] Skip: **${skippedTitle}** (${Number(result?.remaining || 0)} còn lại).`,
+            title: 'Voice Tools',
+            tone: 'info',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_stop',
+        build_payload({ call_results, actor, meta }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const channel = String(meta?.call_payload?.channel || 'music');
+          if (channel === 'all') {
+            return {
+              content: `Đã dừng tất cả. Music: ${Number(result?.music?.cleared || 0)}, Speak: ${Number(result?.speak?.cleared || 0)} cleared.`,
+              title: 'Voice Tools',
+              tone: 'success',
+              user: actor,
+            };
+          }
+          return {
+            content: `[${channel}] Đã dừng, xoá ${Number(result?.cleared || 0)} track.`,
+            title: 'Voice Tools',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_set_volume',
+        build_payload({ call_results, actor }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const channel = String(result?.channel || 'music');
+          const volume = Number(result?.volume || 0);
+          return {
+            content: `[${channel}] Volume set to **${volume}%**.`,
+            title: 'Voice Tools',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_set_playback_speed',
+        build_payload({ call_results, actor }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const channel = String(result?.channel || 'music');
+          const speed = Number(result?.speed || 1);
+          return {
+            content: `[${channel}] Playback speed set to **${speed.toFixed(2)}x**.`,
+            title: 'Voice Tools',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'voice_set_skip_silence',
+        build_payload({ call_results, actor }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          const channel = String(result?.channel || 'music');
+          const enabled = Boolean(result?.enabled);
+          return {
+            content: `[${channel}] Skip silence: **${enabled ? 'ON' : 'OFF'}**.`,
+            title: 'Voice Tools',
+            tone: 'success',
+            user: actor,
+          };
+        },
+      });
       // Relay adapter events → eventBus
       voiceAdapter._onEvent = (name, payload) => ctx.publish(name, payload);
 
@@ -148,6 +313,12 @@ module.exports = function createVoiceModule(deps) {
         .addStringOption(o => o.setName('channel').setDescription('music or speak').addChoices({ name: 'music', value: 'music' }, { name: 'speak', value: 'speak' })));
       addCommandDefinition(runtimeState, new SlashCommandBuilder().setName('voice-stop').setDescription('Stop & clear queue')
         .addStringOption(o => o.setName('channel').setDescription('music, speak, or all').addChoices({ name: 'music', value: 'music' }, { name: 'speak', value: 'speak' }, { name: 'all', value: 'all' })));
+      addCommandDefinition(runtimeState, new SlashCommandBuilder().setName('voice-speed').setDescription('Set playback speed for a channel')
+        .addStringOption(o => o.setName('channel').setDescription('music or speak').setRequired(true).addChoices({ name: 'music', value: 'music' }, { name: 'speak', value: 'speak' }))
+        .addNumberOption(o => o.setName('speed').setDescription('Playback speed from 0.25 to 3.0').setRequired(true).setMinValue(0.25).setMaxValue(3.0)));
+      addCommandDefinition(runtimeState, new SlashCommandBuilder().setName('voice-skip-silence').setDescription('Enable/disable silence skipping for a channel')
+        .addStringOption(o => o.setName('channel').setDescription('music or speak').setRequired(true).addChoices({ name: 'music', value: 'music' }, { name: 'speak', value: 'speak' }))
+        .addBooleanOption(o => o.setName('enabled').setDescription('Enable skip silence').setRequired(true)));
       addCommandDefinition(runtimeState, new SlashCommandBuilder().setName('voice-speak').setDescription('TTS placeholder')
         .addStringOption(o => o.setName('text').setDescription('Text to speak').setRequired(true)));
 
@@ -193,6 +364,9 @@ module.exports = function createVoiceModule(deps) {
         const gid = String(p?.guild_id || p?.guild?.id || '');
         if (!gid) throw new Error('guild_id required');
 
+        voiceAdapter.pause(gid, 'music');
+        voiceAdapter.pause(gid, 'speak');
+
         const maxWaitMs = 60000; // wait up to 60s for TTS to finish
         const checkInterval = 500;
         let elapsed = 0;
@@ -220,9 +394,21 @@ module.exports = function createVoiceModule(deps) {
         const conn = voiceAdapter.getStatus(gid);
         if (!conn?.connected) throw new Error(`Not connected in guild ${gid}`);
         const ch = resolveChannel(p.channel);
+        const playback = {};
+        if (p?.playback && Object.prototype.hasOwnProperty.call(p.playback, 'speed')) {
+          playback.speed = p.playback.speed;
+        } else if (Object.prototype.hasOwnProperty.call(p || {}, 'playback_speed')) {
+          playback.speed = p.playback_speed;
+        }
+        if (p?.playback && Object.prototype.hasOwnProperty.call(p.playback, 'skip_silence')) {
+          playback.skip_silence = p.playback.skip_silence;
+        } else if (Object.prototype.hasOwnProperty.call(p || {}, 'skip_silence')) {
+          playback.skip_silence = p.skip_silence;
+        }
         const result = voiceAdapter.enqueue(gid, ch, p.source, {
           inputType: p.inputType || p.input_type,
           metadata: { ...(p.metadata || {}), noDuck: Boolean(p.noDuck) },
+          playback,
         });
         // Don't record bot's own TTS output as context facts — it's redundant
         if (!p.metadata?.tts) {
@@ -316,6 +502,24 @@ module.exports = function createVoiceModule(deps) {
         return { success: true, channel, volume };
       });
 
+      ctx.subscribe('voice.set_playback_speed', async (p) => {
+        const gid = String(p?.guild_id || '');
+        if (!gid) throw new Error('guild_id required');
+        const channel = resolveChannel(p.channel);
+        const speed = voiceAdapter.setChannelPlaybackSpeed(gid, channel, p.speed);
+        deps.logger?.log('info', `[Voice] Set playback speed ${channel}=${speed} in guild ${gid}`);
+        return { guild_id: gid, channel, speed };
+      });
+
+      ctx.subscribe('voice.set_skip_silence', async (p) => {
+        const gid = String(p?.guild_id || '');
+        if (!gid) throw new Error('guild_id required');
+        const channel = resolveChannel(p.channel);
+        const enabled = voiceAdapter.setChannelSkipSilence(gid, channel, Boolean(p.enabled));
+        deps.logger?.log('info', `[Voice] Set skip silence ${channel}=${enabled} in guild ${gid}`);
+        return { guild_id: gid, channel, enabled };
+      });
+
       // Legacy TTS placeholder
       ctx.subscribe('voice.speak_requested', async (p) => {
         const result = await voiceAdapter.enqueueSpeech(String(p?.guild_id || ''), String(p?.text || ''));
@@ -332,23 +536,23 @@ module.exports = function createVoiceModule(deps) {
       // =====================================================================
       ctx.subscribe('discord.app_command', async ({ interaction }) => {
         if (!interaction?.isChatInputCommand()) return;
-        const cmds = ['join-voice','leave-voice','voice-status','voice-pause','voice-resume','voice-skip','voice-stop','voice-speak'];
+        const cmds = ['join-voice','leave-voice','voice-status','voice-pause','voice-resume','voice-skip','voice-stop','voice-speed','voice-skip-silence','voice-speak'];
         if (!cmds.includes(interaction.commandName)) return;
         if (!isPolicyEnabled(runtimeState, POLICY_APP)) {
-          await replyToInteraction(interaction, { content: 'Voice commands đang bị tắt.', ephemeral: true }); return;
+          await replyToInteraction(interaction, { content: 'Voice commands đang bị tắt.', title: 'Voice Tools', tone: 'warning', user: interaction.user, ephemeral: true }); return;
         }
         const gid = String(interaction.guildId || '');
         const memberVC = interaction.member?.voice?.channel || null;
         const chOpt = interaction.options?.getString('channel') || 'music';
 
         if (interaction.commandName === 'join-voice') {
-          if (!memberVC) { await replyToInteraction(interaction, { content: 'Bạn chưa ở trong voice channel.', ephemeral: true }); return; }
-          if (!isAllowedVC(runtimeState, String(memberVC.id||''))) { await replyToInteraction(interaction, { content: 'Channel không nằm trong allowlist.', ephemeral: true }); return; }
+          if (!memberVC) { await replyToInteraction(interaction, { content: 'Bạn chưa ở trong voice channel.', title: 'Voice Tools', tone: 'warning', user: interaction.user, ephemeral: true }); return; }
+          if (!isAllowedVC(runtimeState, String(memberVC.id||''))) { await replyToInteraction(interaction, { content: 'Channel không nằm trong allowlist.', title: 'Voice Tools', tone: 'error', user: interaction.user, ephemeral: true }); return; }
           if (!interaction.deferred && !interaction.replied) {
             await interaction.deferReply({ ephemeral: true });
           }
           await ctx.call('voice.join_requested', { guild_id: gid, voice_channel_id: String(memberVC.id||''), voice_channel_name: safeChannelName(memberVC), member_count: Number(memberVC.members?.size||0) });
-          await replyToInteraction(interaction, { content: `✅ Đã tham gia: **${safeChannelName(memberVC)}**`, ephemeral: true });
+          await replyToInteraction(interaction, { content: `Đã tham gia: **${safeChannelName(memberVC)}**`, title: 'Voice Tools', tone: 'success', user: interaction.user, ephemeral: true });
           ctx.publish('bot.command_executed', { command: 'join-voice', guild: safeGuildName(interaction.guild), author: safeUserTag(interaction.user) });
           return;
         }
@@ -358,7 +562,7 @@ module.exports = function createVoiceModule(deps) {
             await interaction.deferReply({ ephemeral: true });
           }
           await ctx.call('voice.leave_requested', { guild_id: gid });
-          await replyToInteraction(interaction, { content: '✅ Đã rời voice channel.', ephemeral: true });
+          await replyToInteraction(interaction, { content: 'Đã rời voice channel.', title: 'Voice Tools', tone: 'success', user: interaction.user, ephemeral: true });
           ctx.publish('bot.command_executed', { command: 'leave-voice', guild: safeGuildName(interaction.guild), author: safeUserTag(interaction.user) });
           return;
         }
@@ -371,25 +575,27 @@ module.exports = function createVoiceModule(deps) {
           for (const ch of ['music', 'speak']) {
             const s = ps[ch] || {};
             const np = s.now_playing;
+            const playbackSettings = s.playback_settings || {};
             L.push(`\n**[${ch.toUpperCase()}]** ${s.paused ? '⏸️' : (np ? '▶️' : '⏹️')}`);
             if (np) L.push(`  Đang phát: ${np.metadata?.title || np.id}`);
+            L.push(`  Speed: ${Number(playbackSettings.speed || 1).toFixed(2)}x | Skip silence: ${playbackSettings.skip_silence ? 'ON' : 'OFF'}`);
             if (s.queue_length) L.push(`  Hàng chờ: ${s.queue_length} track(s)`);
           }
-          await replyToInteraction(interaction, { content: L.join('\n'), ephemeral: true });
+          await replyToInteraction(interaction, { content: L.join('\n'), title: 'Voice Status', tone: 'info', user: interaction.user, ephemeral: true });
           return;
         }
 
         if (interaction.commandName === 'voice-pause') {
           const ch = resolveChannel(chOpt);
           const ok = voiceAdapter.pause(gid, ch);
-          await replyToInteraction(interaction, { content: ok ? `⏸️ [${ch}] Đã tạm dừng.` : `⚠️ [${ch}] Không thể tạm dừng.`, ephemeral: true });
+          await replyToInteraction(interaction, { content: ok ? `[${ch}] Đã tạm dừng.` : `[${ch}] Không thể tạm dừng.`, title: 'Voice Tools', tone: ok ? 'success' : 'warning', user: interaction.user, ephemeral: true });
           return;
         }
 
         if (interaction.commandName === 'voice-resume') {
           const ch = resolveChannel(chOpt);
           const ok = voiceAdapter.resume(gid, ch);
-          await replyToInteraction(interaction, { content: ok ? `▶️ [${ch}] Đã tiếp tục.` : `⚠️ [${ch}] Không thể tiếp tục.`, ephemeral: true });
+          await replyToInteraction(interaction, { content: ok ? `[${ch}] Đã tiếp tục.` : `[${ch}] Không thể tiếp tục.`, title: 'Voice Tools', tone: ok ? 'success' : 'warning', user: interaction.user, ephemeral: true });
           return;
         }
 
@@ -397,26 +603,42 @@ module.exports = function createVoiceModule(deps) {
           const ch = resolveChannel(chOpt);
           const r = voiceAdapter.skip(gid, ch);
           const title = r.skipped?.metadata?.title || r.skipped?.id || 'nothing';
-          await replyToInteraction(interaction, { content: `⏭️ [${ch}] Skip: **${title}** (${r.remaining} còn lại).`, ephemeral: true });
+          await replyToInteraction(interaction, { content: `[${ch}] Skip: **${title}** (${r.remaining} còn lại).`, title: 'Voice Tools', tone: 'info', user: interaction.user, ephemeral: true });
           return;
         }
 
         if (interaction.commandName === 'voice-stop') {
           if (chOpt === 'all') {
             const r = voiceAdapter.stopAll(gid);
-            await replyToInteraction(interaction, { content: `⏹️ Đã dừng tất cả. Music: ${r.music.cleared}, Speak: ${r.speak.cleared} cleared.`, ephemeral: true });
+            await replyToInteraction(interaction, { content: `Đã dừng tất cả. Music: ${r.music.cleared}, Speak: ${r.speak.cleared} cleared.`, title: 'Voice Tools', tone: 'success', user: interaction.user, ephemeral: true });
           } else {
             const ch = resolveChannel(chOpt);
             const r = voiceAdapter.stopChannel(gid, ch);
-            await replyToInteraction(interaction, { content: `⏹️ [${ch}] Đã dừng, xoá ${r.cleared} track.`, ephemeral: true });
+            await replyToInteraction(interaction, { content: `[${ch}] Đã dừng, xoá ${r.cleared} track.`, title: 'Voice Tools', tone: 'success', user: interaction.user, ephemeral: true });
           }
+          return;
+        }
+
+        if (interaction.commandName === 'voice-speed') {
+          const ch = resolveChannel(interaction.options.getString('channel', true));
+          const speed = interaction.options.getNumber('speed', true);
+          const applied = voiceAdapter.setChannelPlaybackSpeed(gid, ch, speed);
+          await replyToInteraction(interaction, { content: `[${ch}] Playback speed set to **${applied.toFixed(2)}x**.`, title: 'Voice Tools', tone: 'success', user: interaction.user, ephemeral: true });
+          return;
+        }
+
+        if (interaction.commandName === 'voice-skip-silence') {
+          const ch = resolveChannel(interaction.options.getString('channel', true));
+          const enabled = interaction.options.getBoolean('enabled', true);
+          const applied = voiceAdapter.setChannelSkipSilence(gid, ch, enabled);
+          await replyToInteraction(interaction, { content: `[${ch}] Skip silence: **${applied ? 'ON' : 'OFF'}**.`, title: 'Voice Tools', tone: 'success', user: interaction.user, ephemeral: true });
           return;
         }
 
         if (interaction.commandName === 'voice-speak') {
           const text = interaction.options.getString('text', true);
           await ctx.call('voice.speak_requested', { guild_id: gid, text });
-          await replyToInteraction(interaction, { content: '🔊 Đã nhận yêu cầu speak (TTS placeholder).', ephemeral: true });
+          await replyToInteraction(interaction, { content: 'Đã nhận yêu cầu speak (TTS placeholder).', title: 'Voice Tools', tone: 'info', user: interaction.user, ephemeral: true });
         }
       });
     },

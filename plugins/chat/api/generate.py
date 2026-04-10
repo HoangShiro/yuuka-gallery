@@ -502,6 +502,8 @@ def register_routes(blueprint, plugin):
 
             author_id = str(base_ctx.get('author_id') or discord_context.get('author_id') or 'unknown')
             memo_ctx = discord_context.get('long_memo_context', {})
+            info_ctx = discord_context.get('info_context', {})
+            event_ctx = discord_context.get('event_context') or {}
             
             # Enrich the actual user prompt rather than the system prompt
             if compact_history and compact_history[-1]['role'] == 'user':
@@ -514,18 +516,19 @@ def register_routes(blueprint, plugin):
                 actor_global = (memo_ctx.get('actor_global_summary') or {}).get('summary')
                 if actor_global:
                     user_info_lines.append(f"Fact about {author_name}: {actor_global}")
-                event_ctx = discord_context.get('event_context') or {}
                 reply_ref = event_ctx.get('reply_reference')
                 if reply_ref and isinstance(reply_ref, dict):
                     ref_name = reply_ref.get('display_name', 'someone')
                     ref_content = reply_ref.get('content', '')
                     if ref_content:
                         user_info_lines.append(f'{author_name} is referring to {ref_name}\'s message with content "{ref_content}".')
+                current_time = str(info_ctx.get('current_time') or '').strip()
+                if current_time:
+                    user_info_lines.append(f"Current time: {current_time}")
                 user_info_lines.append("</user_info>")
                 compact_history[-1]['content'] += "\n".join(user_info_lines)
 
             # Extract memory context elements
-            info_ctx = discord_context.get('info_context', {})
             facts = discord_context.get('selected_facts', [])
 
             ctx_lines = [
@@ -587,6 +590,21 @@ def register_routes(blueprint, plugin):
                 for fact in facts[:5]:
                     ctx_lines.append(f" - {fact.get('value', '')}")
 
+            attachments = event_ctx.get('attachments')
+            if attachments and isinstance(attachments, list):
+                ctx_lines.append("Latest Message Attachments:")
+                for attachment in attachments[:4]:
+                    if not isinstance(attachment, dict):
+                        continue
+                    file_name = str(attachment.get('name') or 'unnamed file').strip()
+                    file_type = str(attachment.get('content_type') or attachment.get('type') or 'unknown').strip()
+                    file_url = str(attachment.get('url') or '').strip()
+                    is_audio = bool(attachment.get('is_audio'))
+                    label = f" - {'audio' if is_audio else 'file'}: {file_name} ({file_type})"
+                    if file_url:
+                        label += f" URL: {file_url}"
+                    ctx_lines.append(label)
+
             abilities_ctx = discord_context.get('abilities_context', {})
             abilities_html = abilities_ctx.get('abilities_html')
             if abilities_html:
@@ -628,6 +646,45 @@ def register_routes(blueprint, plugin):
             llm_messages = [{'role': 'system', 'content': system_prompt}]
             llm_messages.extend(compact_history)
 
+            record_only = bool(data.get('record_only', False))
+            if record_only:
+                # Still save session with user message but without assistant message
+                session_data = {
+                    'id': session_id,
+                    'messages': history[-40:],
+                    'discord_context': discord_context,
+                }
+                saved_session = plugin.save_session(user_hash, character_id, session_id, session_data)
+                
+                if bool(data.get('stream', False)):
+                    def dummy_generate():
+                        yield json.dumps({
+                            "event": "start",
+                            "session_id": saved_session.get('id', session_id),
+                            "character_id": character_id,
+                        }, ensure_ascii=False) + "\n"
+                        yield json.dumps({
+                            "event": "delta",
+                            "content": "[IGNORE]",
+                        }, ensure_ascii=False) + "\n"
+                        yield json.dumps({
+                            "event": "complete",
+                            "status": "success",
+                            "session_id": saved_session.get('id', session_id),
+                            "character_id": character_id,
+                            "response": "[IGNORE]",
+                            "llm_input": llm_messages,
+                        }, ensure_ascii=False) + "\n"
+                    return Response(stream_with_context(dummy_generate()), mimetype='application/x-ndjson')
+                
+                return jsonify({
+                    "status": "success",
+                    "session_id": saved_session.get('id', session_id),
+                    "character_id": character_id,
+                    "response": "[IGNORE]",
+                    "llm_input": llm_messages,
+                })
+
             stream_response = bool(data.get('stream', False))
             if stream_response:
                 def generate():
@@ -660,17 +717,31 @@ def register_routes(blueprint, plugin):
                         if not text:
                             yield json.dumps({"event": "error", "error": "Empty response from model."}, ensure_ascii=False) + "\n"
                             return
-                        history.append({'role': 'assistant', 'content': text})
-                        session_data = {
-                            'id': session_id,
-                            'messages': history[-40:],
-                            'discord_context': discord_context,
-                        }
-                        saved_session = plugin.save_session(user_hash, character_id, session_id, session_data)
+                        
+                        # Only save assistant message if [IGNORE] is NOT present in the raw response
+                        if "[IGNORE]" not in text:
+                            history.append({'role': 'assistant', 'content': text})
+                            session_data = {
+                                'id': session_id,
+                                'messages': history[-40:],
+                                'discord_context': discord_context,
+                            }
+                            saved_session = plugin.save_session(user_hash, character_id, session_id, session_data)
+                            current_session_id = saved_session.get('id', session_id)
+                        else:
+                            # Still save session with user message but without assistant message
+                            session_data = {
+                                'id': session_id,
+                                'messages': history[-40:],
+                                'discord_context': discord_context,
+                            }
+                            saved_session = plugin.save_session(user_hash, character_id, session_id, session_data)
+                            current_session_id = saved_session.get('id', session_id)
+
                         yield json.dumps({
                             "event": "complete",
                             "status": "success",
-                            "session_id": saved_session.get('id', session_id),
+                            "session_id": current_session_id,
                             "character_id": character_id,
                             "response": text,
                             "llm_input": llm_messages,
@@ -695,7 +766,10 @@ def register_routes(blueprint, plugin):
             if not text:
                 return jsonify({"error": "Empty response from model."}), 502
 
-            history.append({'role': 'assistant', 'content': text})
+            # Only save assistant message if [IGNORE] is NOT present in the raw response
+            if "[IGNORE]" not in text:
+                history.append({'role': 'assistant', 'content': text})
+            
             session_data = {
                 'id': session_id,
                 'messages': history[-40:],

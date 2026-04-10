@@ -53,6 +53,8 @@ class DiscordBotRunner:
             "intents": list(self.runtime.config.get("intents") or []),
             "user_hash": self.runtime.user_hash,
             "cache_dir": str(cache_root),
+            "runtime_api_base_url": self.runtime.config.get("runtime_api_base_url") or "http://127.0.0.1:5000/api/plugin/discord-bot/runtime",
+            "runtime_secret": str(self.runtime.config.get("runtime_secret") or "").strip(),
             "chat_character_id": (self.runtime.config.get("chat_character_id") or "").strip(),
             "chat_character_name": (self.runtime.config.get("chat_character_name") or "").strip(),
             "chat_model": (self.runtime.config.get("chat_model") or "").strip(),
@@ -71,8 +73,30 @@ class DiscordBotRunner:
             "tts_engine_base_url": (self.runtime.config.get("tts_engine_base_url") or "http://127.0.0.1:10101").strip() or "http://127.0.0.1:10101",
             "tts_speaker_id": str(self.runtime.config.get("tts_speaker_id") or "").strip(),
             "tts_speaker_name": str(self.runtime.config.get("tts_speaker_name") or "").strip(),
-            "tts_speaker_avatar_url": str(self.runtime.config.get("tts_speaker_avatar_url") or "").strip(),
+            "tts_speaker_avatar_url": (
+                "" if str(self.runtime.config.get("tts_speaker_avatar_url") or "").strip().startswith("data:")
+                else str(self.runtime.config.get("tts_speaker_avatar_url") or "").strip()
+            ),
             "tts_text_source": str(self.runtime.config.get("tts_text_source") or "secondary").strip().lower() or "secondary",
+            "tavily_api_key": str(self.runtime.config.get("tavily_api_key") or "").strip(),
+            "tavily_max_results": self.runtime.config.get("tavily_max_results") or 5,
+            "image_gen_character_hash": str(self.runtime.config.get("image_gen_character_hash") or "").strip(),
+            "image_gen_character_name": str(self.runtime.config.get("image_gen_character_name") or "").strip(),
+            "image_gen_server_address": str(self.runtime.config.get("image_gen_server_address") or "").strip(),
+            "image_gen_ckpt_name": str(self.runtime.config.get("image_gen_ckpt_name") or "").strip(),
+            "image_gen_lora_name": str(self.runtime.config.get("image_gen_lora_name") or "").strip(),
+            "image_gen_sampler_name": str(self.runtime.config.get("image_gen_sampler_name") or "").strip(),
+            "image_gen_scheduler": str(self.runtime.config.get("image_gen_scheduler") or "").strip(),
+            "image_gen_quality": str(self.runtime.config.get("image_gen_quality") or "").strip(),
+            "image_gen_negative": str(self.runtime.config.get("image_gen_negative") or "").strip(),
+            "image_gen_outfits": str(self.runtime.config.get("image_gen_outfits") or "").strip(),
+            "image_gen_expression": str(self.runtime.config.get("image_gen_expression") or "").strip(),
+            "image_gen_action": str(self.runtime.config.get("image_gen_action") or "").strip(),
+            "image_gen_context": str(self.runtime.config.get("image_gen_context") or "").strip(),
+            "image_gen_width": self.runtime.config.get("image_gen_width"),
+            "image_gen_height": self.runtime.config.get("image_gen_height"),
+            "image_gen_steps": self.runtime.config.get("image_gen_steps"),
+            "image_gen_cfg": self.runtime.config.get("image_gen_cfg"),
             "policies": self.runtime.config.get("policies") or {},
             "brain_tools": self.runtime.config.get("brain_tools") or {"toggles": {}},
         }
@@ -82,11 +106,16 @@ class DiscordBotRunner:
             self._stop_ack.set()
             return
 
+        cache_root.mkdir(parents=True, exist_ok=True)
+        launch_config_path = cache_root / "launch_config.json"
+        with launch_config_path.open("w", encoding="utf-8") as config_file:
+            json.dump(config_payload, config_file, ensure_ascii=True)
+
         cmd = [
             node_bin,
             str(_NODE_SCRIPT),
-            "--config",
-            json.dumps(config_payload, ensure_ascii=True),
+            "--config-file",
+            str(launch_config_path),
         ]
 
         try:
@@ -211,6 +240,18 @@ class DiscordBotRunner:
 
         if event == "stopped":
             self.runtime.update_state("stopped")
+            return
+
+        if event == "core_config_sync":
+            patch = payload.get("patch")
+            if isinstance(patch, dict) and patch:
+                try:
+                    self.runtime.config.update(patch)
+                    callback = self.runtime.persist_config_callback
+                    if callable(callback):
+                        callback(patch)
+                except Exception as exc:  # noqa: BLE001
+                    self.log.add("warning", f"Failed to persist runtime config sync: {exc}")
             return
 
     @staticmethod

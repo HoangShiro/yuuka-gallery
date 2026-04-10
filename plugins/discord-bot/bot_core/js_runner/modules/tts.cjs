@@ -113,6 +113,8 @@ module.exports = function createTtsModule(deps) {
         tts: true,
         tts_engine: 'aivisspeech',
         tts_speaker_id: speaker,
+        tts_speaker_name: String(runtimeConfig.tts_speaker_name || ''),
+        tts_speaker_avatar_url: String(runtimeConfig.tts_speaker_avatar_url || ''),
         tts_text: cleaned,
         conversation_key: String(payload?.conversation_key || ''),
         session_id: String(payload?.session_id || ''),
@@ -137,6 +139,26 @@ module.exports = function createTtsModule(deps) {
           guild_id: 'string',
           actor_id: 'string?',
           text: 'string',
+        },
+      });
+      ctx.registerToolReplyFormatter({
+        tool_id: 'tts_speak',
+        build_payload({ call_results, actor }) {
+          const result = Array.isArray(call_results) ? (call_results.find(Boolean) || null) : call_results;
+          if (result?.ok === false) {
+            return {
+              content: `Không thể speak: ${String(result?.reason || 'unknown_reason')}`,
+              title: 'TTS',
+              tone: 'warning',
+              user: actor,
+            };
+          }
+          return {
+            content: 'Đã nhận yêu cầu TTS.',
+            title: 'TTS',
+            tone: 'success',
+            user: actor,
+          };
         },
       });
 

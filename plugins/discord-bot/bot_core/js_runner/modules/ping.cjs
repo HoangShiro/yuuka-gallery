@@ -1,4 +1,5 @@
 const { safeGuildName, safeUserTag } = require('../discord_utils.cjs');
+const { replyToMessage } = require('../interaction_helpers.cjs');
 
 module.exports = function createPingModule() {
   return {
@@ -12,7 +13,7 @@ module.exports = function createPingModule() {
         if (message.content.trim().toLowerCase() !== '!ping') {
           return;
         }
-        await message.reply('Pong!');
+        await replyToMessage(message, { content: 'Pong!', title: 'Ping', tone: 'success', user: message.author });
         ctx.publish('bot.command_executed', {
           command: 'ping',
           guild: safeGuildName(message.guild),
