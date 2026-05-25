@@ -471,7 +471,7 @@ Object.assign(window.ChatComponent.prototype, {
         this.renderMessages();
 
         // Scroll to bottom
-        const container = this.container.querySelector('#chat-messages-container');
+        const container = this._getChatScrollContainer ? this._getChatScrollContainer() : this.container.querySelector('#chat-messages-container');
         if (container) container.scrollTop = container.scrollHeight;
 
         await this._executeRandomEventAtIndex(targetIndex);

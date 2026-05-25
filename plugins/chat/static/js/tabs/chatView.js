@@ -68,21 +68,12 @@ Object.assign(window.ChatComponent.prototype, {
         this._renderSingleCharMemberSection(charHash);
 
         this.container.querySelector('#btn-chat-inventory').onclick = () => {
-            this._syncStatusToUI();
-            this._syncMemoryUI();
-            const panel = this.container.querySelector('#modal-inventory');
-            const chatView = this.container.querySelector('#view-chat');
-            if (panel) {
-                panel.classList.remove('hidden');
-                if (chatView) chatView.classList.add('inventory-open');
-            }
+            this._openInventoryPanel();
         };
         const closeModalBtn = this.container.querySelector('.close-modal-btn[data-modal="modal-inventory"]');
         if (closeModalBtn) {
             closeModalBtn.onclick = () => {
-                this.container.querySelector('#modal-inventory').classList.add('hidden');
-                const chatView = this.container.querySelector('#view-chat');
-                if (chatView) chatView.classList.remove('inventory-open');
+                this._closeInventoryPanel();
             };
         }
 
@@ -229,9 +220,11 @@ Object.assign(window.ChatComponent.prototype, {
                 this.renderMessages();
             }
 
+            this._openInventoryPanelIfWide();
+
             // Force scroll to bottom on initial load
             setTimeout(() => {
-                const container = this.container.querySelector('#chat-messages-container');
+                const container = this._getChatScrollContainer();
                 if (container) container.scrollTop = container.scrollHeight;
             }, 50);
 
@@ -506,6 +499,66 @@ Object.assign(window.ChatComponent.prototype, {
         panel.style.width = w + 'px';
         // Keep margin-right in sync via CSS variable on the app container
         chatApp.style.setProperty('--inventory-panel-width', w + 'px');
+        document.documentElement.style.setProperty('--chat-inventory-panel-width', w + 'px');
+        if (this.container.querySelector('#view-chat')?.classList.contains('inventory-open')) {
+            this._syncNavibarLayoutOffset();
+        }
+    },
+
+    _getChatScrollContainer() {
+        return this.container.querySelector('#chat-scroll-container') || this.container.querySelector('#chat-messages-container');
+    },
+
+    _getInventoryPanelWidth() {
+        const panel = this.container.querySelector('#modal-inventory');
+        if (!panel) return 320;
+        const width = panel.getBoundingClientRect().width || parseInt(getComputedStyle(panel).width, 10);
+        return Number.isFinite(width) && width > 0 ? width : 320;
+    },
+
+    _syncNavibarLayoutOffset() {
+        if (window.matchMedia && !window.matchMedia('(min-width: 541px)').matches) {
+            document.documentElement.style.removeProperty('--navibar-layout-right-offset');
+            return;
+        }
+        const chatView = this.container.querySelector('#view-chat');
+        const panel = this.container.querySelector('#modal-inventory');
+        const shouldOffset = chatView?.classList.contains('inventory-open') && panel && !panel.classList.contains('hidden');
+        if (!shouldOffset) {
+            document.documentElement.style.removeProperty('--navibar-layout-right-offset');
+            return;
+        }
+        const width = this._getInventoryPanelWidth();
+        document.documentElement.style.setProperty('--chat-inventory-panel-width', width + 'px');
+        document.documentElement.style.setProperty('--navibar-layout-right-offset', `var(--chat-inventory-panel-width, ${width}px)`);
+    },
+
+    _openInventoryPanel() {
+        if (this.state.activeChatGroupId && this._handleGroupInventoryOpen) {
+            this._handleGroupInventoryOpen();
+        } else {
+            this._syncStatusToUI();
+        }
+        this._syncMemoryUI();
+        const panel = this.container.querySelector('#modal-inventory');
+        const chatView = this.container.querySelector('#view-chat');
+        if (panel) panel.classList.remove('hidden');
+        if (chatView) chatView.classList.add('inventory-open');
+        this._syncNavibarLayoutOffset();
+    },
+
+    _closeInventoryPanel() {
+        const panel = this.container.querySelector('#modal-inventory');
+        const chatView = this.container.querySelector('#view-chat');
+        if (panel) panel.classList.add('hidden');
+        if (chatView) chatView.classList.remove('inventory-open');
+        this._syncNavibarLayoutOffset();
+    },
+
+    _openInventoryPanelIfWide() {
+        if (window.matchMedia && window.matchMedia('(min-width: 1024px)').matches) {
+            this._openInventoryPanel();
+        }
     },
 
     /**

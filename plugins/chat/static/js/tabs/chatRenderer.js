@@ -17,6 +17,7 @@ Object.assign(window.ChatComponent.prototype, {
 
         this._syncStatusToUI();
         const container = this.container.querySelector('#chat-messages-container');
+        const scrollContainer = this._getChatScrollContainer ? this._getChatScrollContainer() : container;
 
         // Track how many messages were rendered last time so we can suppress
         // animation on elements that already existed (re-renders due to BG change, etc.)
@@ -440,20 +441,20 @@ Object.assign(window.ChatComponent.prototype, {
                 hint.querySelector('.chat-scroll-up-hint-btn').addEventListener('click', (e) => {
                     e.stopPropagation();
                     // Scroll up to reveal older messages
-                    container.scrollTo({ top: 0, behavior: 'smooth' });
+                    scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
                     // Hide the hint (will be re-shown if user scrolls back down)
                     hint.classList.remove('visible');
                 });
             }
         }
 
-        container.scrollTop = container.scrollHeight;
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
 
         // Ensure scrolling state is tracked correctly immediately after render
         const chatView = this.container.querySelector('#view-chat');
         if (chatView) {
-            const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-            if (isNearBottom || container.scrollHeight <= container.clientHeight) {
+            const isNearBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 150;
+            if (isNearBottom || scrollContainer.scrollHeight <= scrollContainer.clientHeight) {
                 chatView.classList.remove('viewing-history');
                 chatView.classList.add('viewing-latest');
             } else {

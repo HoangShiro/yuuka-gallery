@@ -1044,6 +1044,7 @@ class NavibarComponent {
         this._tray.classList.toggle('is-search-active', this._isSearchActive);
         this._tray.classList.toggle('is-dock-active', this._isDockActive);
         this._tray.classList.toggle('is-dock-peek-open', isDockPeekVisible);
+        this.element.classList.toggle('is-dock-active', this._isDockActive);
         if (this._mainView) {
             const hideMainView = this._isSearchActive || (this._isDockActive && !this._isDockPeekOpen);
             this._mainView.classList.toggle('is-hidden', hideMainView);

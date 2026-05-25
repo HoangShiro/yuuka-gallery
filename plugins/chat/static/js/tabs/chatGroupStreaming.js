@@ -277,7 +277,7 @@ Object.assign(window.ChatComponent.prototype, {
                             targetBubble.classList.add('streaming');
                         }
                         targetBubble.innerHTML = this.formatMessageContent(fullText);
-                        const messagesContainer = this.container.querySelector('#chat-messages-container');
+                        const messagesContainer = this._getChatScrollContainer ? this._getChatScrollContainer() : this.container.querySelector('#chat-messages-container');
                         if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
                     }
                 }
@@ -813,7 +813,7 @@ Object.assign(window.ChatComponent.prototype, {
         await this._saveGroupSession();
         this.renderMessages();
 
-        const container = this.container.querySelector('#chat-messages-container');
+        const container = this._getChatScrollContainer ? this._getChatScrollContainer() : this.container.querySelector('#chat-messages-container');
         if (container) container.scrollTop = container.scrollHeight;
 
         await this._streamGroupNarratorResponse(targetIndex);
@@ -908,7 +908,7 @@ Object.assign(window.ChatComponent.prototype, {
                             .trim();
                         bubble.innerHTML = this.formatMessageContent(displayText);
                     }
-                    const container = this.container.querySelector('#chat-messages-container');
+                    const container = this._getChatScrollContainer ? this._getChatScrollContainer() : this.container.querySelector('#chat-messages-container');
                     if (container) container.scrollTop = container.scrollHeight;
                 }
             }

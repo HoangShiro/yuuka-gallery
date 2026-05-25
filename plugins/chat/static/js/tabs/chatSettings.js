@@ -329,23 +329,47 @@ Object.assign(window.ChatComponent.prototype, {
         const loadLLMModels = async () => {
             const select = this.container.querySelector('#chat-llm-model');
             if (!select) return;
+            const savedVal = localStorage.getItem('chat-llm-model') || '';
+            const escapeOptionText = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
+            select.innerHTML = '<option value="">Loading Ollama models...</option>';
             try {
                 const res = await fetch('/api/plugin/chat/generate/models', {
                     headers: { 'Authorization': `Bearer ${localStorage.getItem('yuuka-auth-token')}` }
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.models) {
-                        const savedVal = localStorage.getItem('chat-llm-model') || '';
-                        let html = '<option value="">Default</option>';
-                        data.models.forEach(c => {
-                            html += `<option value="${c.id}" ${c.id === savedVal ? 'selected' : ''}>${c.name || c.id}</option>`;
+                    if (Array.isArray(data.models)) {
+                        let hasSavedModel = !savedVal;
+                        let html = '<option value="">Default (Provider Default)</option>';
+                        data.models.forEach((model) => {
+                            const id = String(model.id || model.name || '').trim();
+                            if (!id) return;
+                            const name = String(model.name || id);
+                            if (id === savedVal) hasSavedModel = true;
+                            html += `<option value="${escapeOptionText(id)}" ${id === savedVal ? 'selected' : ''}>${escapeOptionText(name)}</option>`;
                         });
+                        if (!hasSavedModel) {
+                            html += `<option value="${escapeOptionText(savedVal)}" selected>${escapeOptionText(savedVal)} (saved, not returned by Ollama)</option>`;
+                        }
+                        if (!data.models.length) {
+                            html += '<option value="" disabled>No Ollama models found</option>';
+                        }
                         select.innerHTML = html;
+                    } else {
+                        select.innerHTML = '<option value="">Default (Provider Default)</option>';
                     }
+                } else {
+                    select.innerHTML = '<option value="">Default (Provider Default)</option>';
                 }
             } catch (err) {
                 console.warn("[Chat Settings] Failed to load LLM models:", err);
+                select.innerHTML = '<option value="">Default (Provider Default)</option>';
             }
             select.addEventListener('change', (e) => {
                 localStorage.setItem('chat-llm-model', e.target.value);

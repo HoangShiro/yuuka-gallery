@@ -233,7 +233,7 @@ Object.assign(window.ChatComponent.prototype, {
 
                     if (targetBubble) {
                         targetBubble.innerHTML = this.formatMessageContent(fullText);
-                        const messagesContainer = this.container.querySelector('#chat-messages-container');
+                        const messagesContainer = this._getChatScrollContainer ? this._getChatScrollContainer() : this.container.querySelector('#chat-messages-container');
                         messagesContainer.scrollTop = messagesContainer.scrollHeight;
                     }
 

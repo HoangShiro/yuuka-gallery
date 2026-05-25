@@ -461,6 +461,25 @@ def game_websocket(ws):
         game_service.handle_disconnect(ws)
 
 
+@sock.route('/ws/live-gen')
+def live_gen_websocket(ws):
+    """Endpoint WebSocket for the Live Gen plugin."""
+    plugin = plugin_manager.get_plugin_by_id('live-gen')
+    backend = getattr(plugin, 'backend', None) if plugin else None
+    handler = getattr(backend, 'handle_websocket', None)
+    if not callable(handler):
+        try:
+            ws.send('{"type":"error","message":"Live Gen plugin is not available."}')
+        except Exception:
+            pass
+        try:
+            ws.close()
+        except Exception:
+            pass
+        return
+    handler(ws)
+
+
 def _perform_graceful_shutdown(reason: str = None):
     global _shutdown_executed
     if _shutdown_executed:

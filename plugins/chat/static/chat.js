@@ -592,9 +592,11 @@ class ChatComponent {
                                 </button>
                             </div>
                         </header>
-                        <div id="chat-view-bg" class="chat-view-bg-container"></div>
-                        <main class="chat-main chat-messages" id="chat-messages-container">
-                            <!-- Bubbles -->
+                        <main class="chat-main chat-scroll-area" id="chat-scroll-container">
+                            <div id="chat-view-bg" class="chat-view-bg-container"></div>
+                            <div class="chat-messages" id="chat-messages-container">
+                                <!-- Bubbles -->
+                            </div>
                         </main>
                         <!-- No footer here — input is rendered via navibar dock -->
                     </div>
@@ -832,10 +834,11 @@ class ChatComponent {
         setupAutoGrow('#rule-edit-content');
 
         // Scroll listener for chat background effects
+        const chatScroll = this.container.querySelector('#chat-scroll-container');
         const chatMessages = this.container.querySelector('#chat-messages-container');
-        if (chatMessages) {
-            chatMessages.addEventListener('scroll', () => {
-                const isNearBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 150;
+        if (chatScroll && chatMessages) {
+            chatScroll.addEventListener('scroll', () => {
+                const isNearBottom = chatScroll.scrollHeight - chatScroll.scrollTop - chatScroll.clientHeight < 150;
                 const chatView = this.container.querySelector('#view-chat');
                 if (chatView) {
                     if (isNearBottom) {
@@ -1114,6 +1117,7 @@ class ChatComponent {
             const chatView = this.container.querySelector('#view-chat');
             if (panel) panel.classList.add('hidden');
             if (chatView) chatView.classList.remove('inventory-open');
+            if (this._syncNavibarLayoutOffset) this._syncNavibarLayoutOffset();
         }
 
         // Switch views

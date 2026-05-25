@@ -130,10 +130,7 @@ Object.assign(window.ChatComponent.prototype, {
             if (!confirmed) return;
             try {
                 await this.api['chat'].delete(`/group_sessions/${session.id}`);
-                const panel = this.container.querySelector('#modal-inventory');
-                if (panel) panel.classList.add('hidden');
-                const chatView = this.container.querySelector('#view-chat');
-                if (chatView) chatView.classList.remove('inventory-open');
+                this._closeInventoryPanel && this._closeInventoryPanel();
                 this.state.activeChatGroupId = null;
                 this.state.activeChatGroupSession = null;
                 this.state.activeChatSession = null;
@@ -541,13 +538,6 @@ Object.assign(window.ChatComponent.prototype, {
      * Called from chatGroupView.js when the inventory button is clicked.
      */
     _openGroupInventoryPanel() {
-        this._handleGroupInventoryOpen();
-        this._syncMemoryUI && this._syncMemoryUI();
-        const panel = this.container.querySelector('#modal-inventory');
-        const chatView = this.container.querySelector('#view-chat');
-        if (panel) {
-            panel.classList.remove('hidden');
-            if (chatView) chatView.classList.add('inventory-open');
-        }
+        this._openInventoryPanel && this._openInventoryPanel();
     },
 });

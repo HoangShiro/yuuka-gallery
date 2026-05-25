@@ -115,10 +115,7 @@ Object.assign(window.ChatComponent.prototype, {
         const closeModalBtn = this.container.querySelector('.close-modal-btn[data-modal="modal-inventory"]');
         if (closeModalBtn) {
             closeModalBtn.onclick = () => {
-                const panel = this.container.querySelector('#modal-inventory');
-                if (panel) panel.classList.add('hidden');
-                const chatView = this.container.querySelector('#view-chat');
-                if (chatView) chatView.classList.remove('inventory-open');
+                this._closeInventoryPanel && this._closeInventoryPanel();
             };
         }
 
@@ -281,6 +278,7 @@ Object.assign(window.ChatComponent.prototype, {
         this.state.activeChatSession.scenes = this.state.activeChatSession.scenes || [];
         this._lastRenderedMessageCount = (groupSession.messages && groupSession.messages.length) || 0;
         this.renderMessages && this.renderMessages();
+        this._openInventoryPanelIfWide && this._openInventoryPanelIfWide();
 
         // Render character bar AFTER dock is open (switchTab triggers _openChatDock which clears dock)
         requestAnimationFrame(() => this._renderCharacterBar(groupSession));
@@ -315,7 +313,7 @@ Object.assign(window.ChatComponent.prototype, {
 
         // Scroll to bottom
         setTimeout(() => {
-            const container = this.container.querySelector('#chat-messages-container');
+            const container = this._getChatScrollContainer ? this._getChatScrollContainer() : this.container.querySelector('#chat-messages-container');
             if (container) container.scrollTop = container.scrollHeight;
         }, 50);
     },

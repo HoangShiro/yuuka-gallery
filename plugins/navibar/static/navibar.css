@@ -11,7 +11,7 @@ html {
     right: 0;
     bottom: var(--spacing-3);
     transform: none;
-    width: 100%;
+    width: auto;
     max-width: none;
     z-index: 1600;
     display: flex;
@@ -22,6 +22,11 @@ html {
     -webkit-user-select: none;
     user-select: none;
     pointer-events: none;
+    transition: right 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#main-nav.is-dock-active {
+    right: var(--navibar-layout-right-offset, 0px);
 }
 
 #navibar-search-bar {
@@ -558,6 +563,7 @@ html.dark-mode .nav-btn.is-tool-placeholder {
     #main-nav {
         bottom: 0;
         left: 0;
+        right: 0;
         transform: none;
         margin-left: 0;
         width: 100%;

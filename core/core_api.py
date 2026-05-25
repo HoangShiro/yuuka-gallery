@@ -55,7 +55,7 @@ class CoreAPI:
         
         # Yuuka: Thêm các hằng số URL từ phiên bản cũ
         self.CSV_CHARACTERS_URL = "https://raw.githubusercontent.com/mirabarukaso/character_select_stand_alone_app/refs/heads/main/data/wai_characters.csv"
-        self.JSON_THUMBNAILS_URL = None  # URL đã hết hạn, tạm thời bỏ qua
+        self.JSON_THUMBNAILS_URL = "https://huggingface.co/datasets/flagrantia/character_select_stand_alone_app/resolve/main/wai_character_thumbs_v160.json"
         self.CACHE_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 ngày
 
     # --- 1. Dịch vụ Dữ liệu (Data Services) ---

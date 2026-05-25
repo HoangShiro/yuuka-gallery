@@ -3,6 +3,49 @@ import urllib.request
 import json
 import os
 
+def _normalize_ollama_api_base(base_url: str) -> str:
+    base_url = str(base_url or "http://localhost:11434").strip().rstrip("/")
+    if base_url.lower().endswith("/v1"):
+        base_url = base_url[:-3].rstrip("/")
+    return base_url or "http://localhost:11434"
+
+def _list_ollama_models() -> list:
+    """List locally available Ollama models using Ollama's native API."""
+    from integrations.openai import resolve_provider_config
+
+    config = resolve_provider_config(provider='ollama')
+    base_url = _normalize_ollama_api_base(config.base_url)
+    headers = dict(config.extra_headers or {})
+    if config.api_key and config.api_key not in ('ollama', 'lm-studio'):
+        headers.setdefault("Authorization", f"Bearer {config.api_key}")
+
+    req = urllib.request.Request(
+        f"{base_url}/api/tags",
+        headers=headers,
+        method="GET"
+    )
+    with urllib.request.urlopen(req, timeout=5) as res:
+        data = json.loads(res.read().decode("utf-8"))
+
+    result = []
+    seen = set()
+    for item in data.get("models", []) or []:
+        if not isinstance(item, dict):
+            continue
+        model_id = item.get("model") or item.get("name")
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        result.append({
+            "id": model_id,
+            "name": model_id,
+            "modified_at": item.get("modified_at"),
+            "size": item.get("size"),
+            "details": item.get("details") or {},
+        })
+
+    return sorted(result, key=lambda m: str(m.get("id", "")).lower())
+
 def _ollama_web_search(query: str) -> str:
     """Uses Ollama's Official Web Search API to get real-time context."""
     try:
@@ -138,8 +181,7 @@ def register_routes(blueprint, plugin):
     def list_models():
         try:
             plugin.core_api.verify_token_and_get_user_hash()
-            from integrations import openai as openai_integration
-            models = openai_integration.list_models(provider='ollama')
+            models = _list_ollama_models()
             return jsonify({'status': 'success', 'models': models})
         except Exception as e:
             import traceback
