@@ -1,0 +1,1371 @@
+body.live-gen-active {
+    overflow: hidden;
+    padding-bottom: 0;
+}
+
+body.live-gen-active > .container {
+    max-width: none;
+    width: 100%;
+    padding: 0;
+}
+
+#live-gen-container {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    transition: width 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.live-gen-page {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+}
+
+.live-gen-preview {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+}
+
+.live-gen-preview__image {
+    width: 100%;
+    height: 100%;
+    max-width: 100vw;
+    max-height: 100vh;
+    max-height: 100dvh;
+    object-fit: contain;
+    opacity: 0;
+    transform: scale(1);
+    transition: filter 0s linear;
+}
+
+.live-gen-preview__image.is-loaded {
+    opacity: 1;
+    cursor: pointer;
+}
+
+.live-gen-preview__image.is-preview {
+    filter: saturate(0.98) blur(var(--preview-blur, 0px));
+}
+
+.live-gen-preview__image.is-preview-fading {
+    transition: filter 0.16s ease;
+}
+
+.live-gen-empty {
+    display: grid;
+    place-items: center;
+    gap: var(--spacing-2);
+    color: var(--color-secondary-text);
+    text-align: center;
+    padding: var(--spacing-5);
+}
+
+.live-gen-empty.is-hidden {
+    display: none;
+}
+
+.live-gen-empty .material-symbols-outlined {
+    font-size: 42px;
+    color: var(--color-accent);
+}
+
+.live-gen-empty p {
+    margin: 0;
+    font-size: 15px;
+}
+
+.live-gen-header {
+    position: fixed;
+    top: var(--spacing-4);
+    left: var(--spacing-4);
+    right: var(--spacing-4);
+    z-index: 120;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    pointer-events: none; /* Tránh cản trở click chuột vào ảnh */
+    transition: right 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.live-gen-header > * {
+    pointer-events: auto; /* Cho phép tương tác với các nút và status */
+}
+
+.live-gen-status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    height: 34px;
+    max-width: min(420px, calc(100vw - 32px));
+    padding: 0 10px;
+    box-sizing: border-box;
+    border-radius: var(--rounded-md);
+    color: var(--color-primary-text);
+    background: color-mix(in srgb, var(--color-card-bg) 76%, transparent);
+    box-shadow: 0 4px 16px var(--color-shadow);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    font-size: 13px;
+    line-height: 1;
+}
+
+.live-gen-status__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: var(--color-secondary-text);
+}
+
+.live-gen-status__dot[data-mode="ready"] {
+    background: #2fb36d;
+}
+
+.live-gen-status__dot[data-mode="running"] {
+    background: var(--color-accent);
+    animation: live-gen-pulse 0.9s ease-in-out infinite;
+}
+
+.live-gen-status__dot[data-mode="error"] {
+    background: #e04f43;
+}
+
+.live-gen-progress {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 0;
+    z-index: 121;
+    height: 2px;
+    background: transparent;
+    overflow: hidden;
+}
+
+.live-gen-progress__bar {
+    width: 0;
+    height: 100%;
+    background: var(--color-accent);
+    transition: width 0.18s ease;
+}
+
+.live-gen-prompt-shell {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: end;
+    gap: var(--spacing-1);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+body.live-gen-active #navibar-search-bar,
+body.live-gen-active #navibar-search-bar .navibar-search-wrapper,
+body.live-gen-active #navibar-search-bar .navibar-search-form,
+body.live-gen-active #navibar-tray.is-search-active #navibar-search-bar {
+    overflow: visible;
+}
+
+body.live-gen-active #main-nav {
+    z-index: 3600;
+}
+
+.live-gen-prompt-field {
+    min-width: 0;
+}
+
+.live-gen-prompt-field .tag-autocomplete-container {
+    overflow: visible;
+    width: 100%;
+}
+
+.live-gen-prompt-field .tag-autocomplete-list {
+    bottom: calc(100% + 6px);
+    border-top: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    box-shadow: 0 10px 28px var(--color-shadow);
+    z-index: 4200;
+    max-height: 340px; /* Giới hạn chiều cao tối đa để tránh tràn màn hình */
+    overflow-y: auto;  /* Hỗ trợ cuộn dọc mượt mà */
+    scrollbar-width: thin; /* Scrollbar mảnh hiện đại */
+}
+
+/* Custom scrollbar for autocomplete predictions dropdown */
+.live-gen-prompt-field .tag-autocomplete-list::-webkit-scrollbar {
+    width: 6px;
+}
+.live-gen-prompt-field .tag-autocomplete-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+.live-gen-prompt-field .tag-autocomplete-list::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 3px;
+}
+.live-gen-prompt-field .tag-autocomplete-list::-webkit-scrollbar-thumb:hover {
+    background: var(--color-accent);
+}
+
+.live-gen-prompt-input {
+    width: 100%;
+    min-height: 36px;
+    max-height: 150px;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--color-primary-text);
+    font: inherit;
+    font-size: 15px;
+    line-height: 1.4;
+    padding: 8px 4px;
+    overflow: hidden;
+}
+
+.live-gen-prompt-input::placeholder {
+    color: var(--color-secondary-text);
+}
+
+.live-gen-prompt-action {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+}
+
+.live-gen-prompt-action .material-symbols-outlined {
+    font-size: 24px;
+}
+
+.live-gen-settings-panel {
+    position: fixed;
+    top: 0;
+    right: -400px;
+    bottom: 0;
+    width: 400px;
+    background: var(--color-card-bg);
+    border-left: 1px solid var(--color-border);
+    box-shadow: -10px 0 30px var(--color-shadow);
+    z-index: 4000;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    padding: var(--spacing-4);
+    transition: right 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.live-gen-settings-panel.open {
+    right: 0;
+}
+
+@media (max-width: 640px) {
+    .live-gen-settings-panel {
+        width: 100%;
+        right: -100vw;
+        box-shadow: none;
+        border-left: none;
+    }
+    .live-gen-settings-panel.open {
+        right: 0;
+    }
+}
+
+@media (min-width: 641px) {
+    body.live-gen-settings-open #live-gen-container {
+        width: calc(100% - 400px);
+    }
+    body.live-gen-settings-open #main-nav {
+        right: 400px !important;
+    }
+    body.live-gen-settings-open .live-gen-header {
+        right: calc(400px + var(--spacing-4));
+    }
+}
+
+.live-gen-settings-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-4);
+    flex-shrink: 0;
+}
+
+.live-gen-settings-panel__header h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: var(--font-weight-bold);
+}
+
+.live-gen-icon-btn,
+.live-gen-primary-btn,
+.live-gen-secondary-btn {
+    border: none;
+    border-radius: var(--rounded-md);
+    font: inherit;
+    cursor: pointer;
+}
+
+.live-gen-icon-btn {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    color: var(--color-primary-text);
+    background: transparent;
+}
+
+.live-gen-setting-row {
+    display: grid;
+    gap: var(--spacing-2);
+    font-size: 14px;
+    font-weight: var(--font-weight-medium);
+}
+
+.live-gen-setting-row input {
+    width: 100%;
+    min-height: 38px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    padding: 8px 10px;
+    font: inherit;
+}
+
+.live-gen-settings__hint {
+    margin: var(--spacing-3) 0 0;
+    color: var(--color-secondary-text);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.live-gen-settings-panel__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-2);
+    margin-top: var(--spacing-5);
+    flex-shrink: 0;
+}
+
+.live-gen-primary-btn,
+.live-gen-secondary-btn {
+    min-height: 36px;
+    padding: 0 14px;
+}
+
+.live-gen-primary-btn {
+    color: white;
+    background: var(--color-accent);
+}
+
+.live-gen-secondary-btn {
+    color: var(--color-primary-text);
+    background: var(--color-primary-bg);
+}
+
+@keyframes live-gen-pulse {
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.55);
+        opacity: 0.55;
+    }
+}
+
+@media (max-width: 640px) {
+    .live-gen-header {
+        top: var(--spacing-3);
+        left: var(--spacing-3);
+        right: var(--spacing-3);
+    }
+
+    .live-gen-status {
+        max-width: calc(100vw - 160px);
+    }
+
+    .live-gen-action-btn-pill .btn-label {
+        display: none;
+    }
+
+    .live-gen-action-btn-pill {
+        padding: 0;
+        width: 34px;
+        justify-content: center;
+    }
+
+    /* Mobile nav buttons - nằm bên trên navibar */
+    .live-gen-mobile-nav-buttons {
+        position: fixed;
+        bottom: calc(var(--nav-height, 56px) + 8px); /* 8px khoảng cách từ navibar */
+        left: 8px;
+        right: 8px;
+        z-index: 3700; /* Trên navibar (3600) để có thể tương tác */
+        display: none;
+        gap: var(--spacing-2);
+        align-items: center;
+        justify-content: center;
+        padding: 0; /* Bỏ padding */
+        pointer-events: none; /* Wrapper không chặn click */
+    }
+
+    body.live-gen-prompt-focused .live-gen-mobile-nav-buttons {
+        display: flex;
+    }
+
+    .live-gen-mobile-nav-btn {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-1);
+        border: none;
+        border-radius: var(--rounded-md);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: var(--font-weight-semibold);
+        padding: 0 12px;
+        height: 36px;
+        cursor: pointer;
+        background: color-mix(in srgb, var(--color-card-bg) 95%, transparent);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        color: var(--color-primary-text);
+        box-shadow: 0 2px 8px var(--color-shadow);
+        transition: all 0.2s ease;
+        white-space: nowrap;
+        flex: 1;
+        justify-content: center;
+        pointer-events: auto; /* Button có thể tương tác */
+    }
+
+    .live-gen-mobile-nav-btn .material-symbols-outlined {
+        font-size: 18px;
+    }
+
+    .live-gen-mobile-nav-btn:active {
+        transform: scale(0.95);
+    }
+
+    .live-gen-mobile-nav-btn.active {
+        background: var(--color-accent);
+        color: white;
+    }
+}
+
+/* Desktop - ẩn mobile nav buttons */
+@media (min-width: 641px) {
+    .live-gen-mobile-nav-buttons {
+        display: none !important;
+    }
+}
+
+.live-gen-settings-panel__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-4);
+    margin-top: var(--spacing-2);
+    overflow-y: auto;
+    padding-right: var(--spacing-2);
+    flex: 1;
+}
+
+.live-gen-setting-group {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-3);
+}
+
+.live-gen-setting-row select {
+    width: 100%;
+    min-height: 38px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    padding: 8px 10px;
+    font: inherit;
+    outline: none;
+}
+
+.live-gen-setting-row--checkbox {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    font-size: 14px;
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    margin-top: var(--spacing-1);
+}
+
+.live-gen-setting-row--checkbox input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    cursor: pointer;
+}
+
+/* Custom premium elements for Img2Img & Tabbed Settings */
+.live-gen-actions-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-2);
+}
+
+.live-gen-action-btn-pill {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-1);
+    border: none;
+    border-radius: var(--rounded-md);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: var(--font-weight-semibold);
+    padding: 0 12px;
+    height: 34px;
+    margin: 0; /* Triệt tiêu margin mặc định của thẻ button */
+    box-sizing: border-box;
+    cursor: pointer;
+    background: color-mix(in srgb, var(--color-card-bg) 76%, transparent);
+    color: var(--color-primary-text);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 4px 16px var(--color-shadow);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.live-gen-action-btn-pill .material-symbols-outlined {
+    font-size: 18px;
+    line-height: 1;
+}
+
+.live-gen-action-btn-pill:hover {
+    background: var(--color-primary-bg);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px var(--color-shadow);
+}
+
+.live-gen-action-btn-pill.active[data-action="keep"] {
+    background: color-mix(in srgb, #2fb36d 15%, transparent);
+    color: #2fb36d;
+    border-color: color-mix(in srgb, #2fb36d 50%, transparent);
+    box-shadow: 0 0 10px color-mix(in srgb, #2fb36d 30%, transparent);
+}
+
+.live-gen-action-btn-pill.active[data-action="keep"] .material-symbols-outlined {
+    animation: live-gen-glow-pulse 1.5s infinite alternate;
+}
+
+@keyframes live-gen-glow-pulse {
+    from {
+        text-shadow: 0 0 2px #2fb36d;
+    }
+    to {
+        text-shadow: 0 0 12px #2fb36d, 0 0 18px #2fb36d;
+    }
+}
+
+.live-gen-action-btn-pill.active[data-action="hires"] {
+    background: color-mix(in srgb, #389bf2 15%, transparent);
+    color: #389bf2;
+    border-color: color-mix(in srgb, #389bf2 50%, transparent);
+    box-shadow: 0 0 10px color-mix(in srgb, #389bf2 30%, transparent);
+}
+
+.live-gen-action-btn-pill.active[data-action="hires"] .material-symbols-outlined {
+    animation: live-gen-glow-pulse-hires 1.5s infinite alternate;
+}
+
+@keyframes live-gen-glow-pulse-hires {
+    from {
+        text-shadow: 0 0 2px #389bf2;
+    }
+    to {
+        text-shadow: 0 0 12px #389bf2, 0 0 18px #389bf2;
+    }
+}
+
+/* Settings Tabs Navigation */
+.live-gen-settings-tabs {
+    display: flex;
+    gap: var(--spacing-1);
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: var(--spacing-4);
+    padding-bottom: var(--spacing-1);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.live-gen-settings-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.live-gen-tab-btn {
+    border: none;
+    background: transparent;
+    color: var(--color-secondary-text);
+    font-weight: var(--font-weight-bold);
+    font-size: 13px;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: var(--rounded-md);
+    transition: all 0.16s ease;
+    white-space: nowrap;
+}
+
+.live-gen-tab-btn:hover {
+    color: var(--color-primary-text);
+    background: var(--color-primary-bg);
+}
+
+.live-gen-tab-btn.active {
+    color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.live-gen-tab-content {
+    display: none;
+    flex-direction: column;
+    gap: var(--spacing-4);
+}
+
+.live-gen-tab-content.active {
+    display: flex;
+}
+
+/* Premium Range Sliders styling */
+.live-gen-label-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2px;
+}
+
+.live-gen-slider-value {
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: var(--font-weight-bold);
+    background: var(--color-primary-bg);
+    padding: 2px 6px;
+    border-radius: var(--rounded-sm);
+    color: var(--color-accent);
+}
+
+.live-gen-setting-row input[type="range"] {
+    width: 100%;
+    height: 6px;
+    background: var(--color-primary-bg);
+    border: none;
+    border-radius: 3px;
+    outline: none;
+    padding: 0;
+    cursor: pointer;
+    -webkit-appearance: none;
+}
+
+.live-gen-setting-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    cursor: pointer;
+    box-shadow: 0 0 6px var(--color-accent);
+    transition: transform 0.1s ease;
+}
+
+.live-gen-setting-row input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.25);
+}
+
+/* Refine button hover pulse effect */
+.live-gen-prompt-action[data-action="refine"] {
+    color: var(--color-accent);
+}
+.live-gen-prompt-action[data-action="refine"]:hover {
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: var(--color-accent);
+    transform: scale(1.05);
+}
+
+/* Dice button hover pulse effect */
+.live-gen-prompt-action[data-action="dice"] {
+    color: var(--color-accent);
+}
+.live-gen-prompt-action[data-action="dice"]:hover {
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: var(--color-accent);
+    transform: scale(1.05);
+}
+
+/* Prompt actions wrapper for dynamic layout stacking */
+.live-gen-prompt-actions-wrapper {
+    display: flex;
+    flex-direction: row;
+    gap: var(--spacing-1);
+    align-items: center;
+    align-self: end;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.live-gen-prompt-shell.is-multiline .live-gen-prompt-actions-wrapper {
+    flex-direction: column;
+    justify-content: flex-end;
+    align-self: stretch;
+    gap: 4px;
+}
+
+/* Smooth micro-animations for button transitions */
+.live-gen-prompt-action {
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s ease, color 0.2s ease;
+}
+
+.live-gen-prompt-shell.is-multiline .live-gen-prompt-action[data-action="dice"] {
+    animation: liveGenDiceTransition 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.live-gen-prompt-shell:not(.is-multiline) .live-gen-prompt-action[data-action="dice"] {
+    animation: liveGenDiceTransitionBack 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes liveGenDiceTransition {
+    0% {
+        transform: translate(-10px, 10px) rotate(0deg) scale(0.9);
+        opacity: 0.8;
+    }
+    100% {
+        transform: translate(0, 0) rotate(180deg) scale(1);
+        opacity: 1;
+    }
+}
+
+/* --- Yuuka: Multi-LoRA Premium Styles for Live Gen Settings Panel --- */
+.live-gen-settings-panel .lora-tags-wrapper {
+    margin-top: var(--spacing-3);
+    display: none;
+    flex-direction: column;
+    gap: var(--spacing-3);
+}
+
+.live-gen-settings-panel .lora-tag-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    padding: var(--spacing-3);
+    box-shadow: 0 8px 18px -10px var(--color-shadow);
+}
+
+.live-gen-settings-panel .lora-tag-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-3);
+    margin-bottom: var(--spacing-2);
+    color: var(--color-primary-text);
+    font-weight: var(--font-weight-medium);
+}
+
+.live-gen-settings-panel .lora-tag-card__body {
+    color: var(--color-secondary-text);
+    font-size: var(--font-size-sm);
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.live-gen-settings-panel .lora-tag-toggle {
+    position: relative;
+    width: 42px;
+    height: 22px;
+    border: none;
+    border-radius: var(--rounded-full);
+    background: var(--color-border);
+    cursor: pointer;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.live-gen-settings-panel .lora-tag-toggle::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease;
+}
+
+.live-gen-settings-panel .lora-tag-toggle.is-active {
+    background: var(--color-accent);
+}
+
+.live-gen-settings-panel .lora-tag-toggle.is-active::after {
+    transform: translateX(20px);
+}
+
+.live-gen-settings-panel .lora-tag-toggle:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+.live-gen-settings-panel .lora-select-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2);
+}
+
+/* Spacing between multi-LoRA wrappers */
+.live-gen-settings-panel .lora-multi-wrapper {
+    padding-bottom: var(--spacing-4);
+    margin-bottom: var(--spacing-2);
+    border-bottom: 1px dashed var(--color-border);
+    position: relative;
+}
+
+.live-gen-settings-panel .lora-multi-wrapper:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+/* Per-LoRA strength sliders (Model & Clip) */
+.live-gen-settings-panel .lora-multi-wrapper .lora-strength-row {
+    margin: 6px 0;
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+    width: 100%;
+    flex-wrap: nowrap;
+}
+
+.live-gen-settings-panel .lora-multi-wrapper .lora-strength-row .form-group-slider {
+    flex: 1 1 0%;
+    min-width: 0;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.live-gen-settings-panel .lora-multi-wrapper[data-empty="true"] .lora-strength-row {
+    display: none !important;
+}
+
+.live-gen-settings-panel .lora-multi-wrapper .lora-strength-row span[id^="val-lora_strength_"] {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Remove button inside label */
+.live-gen-settings-panel .lora-select-group > label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-2);
+}
+
+.live-gen-settings-panel .lora-remove-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-secondary-text);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 var(--spacing-2);
+}
+
+.live-gen-settings-panel .lora-remove-btn:hover {
+    color: #d14343;
+}
+
+/* Yuuka: Multi-LoRA add placeholder card */
+.live-gen-settings-panel .lora-multi-add {
+    margin-top: var(--spacing-3);
+}
+
+.live-gen-settings-panel .lora-multi-add__btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-3);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--rounded-md);
+    background: transparent;
+    color: var(--color-secondary-text);
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.live-gen-settings-panel .lora-multi-add__btn:hover {
+    background: var(--color-primary-bg);
+    border-color: var(--color-accent);
+    color: var(--color-primary-text);
+}
+
+.live-gen-settings-panel .lora-multi-add__btn .material-symbols-outlined {
+    font-size: 24px;
+}
+
+.live-gen-settings-panel .lora-select-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-3);
+    padding: var(--spacing-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.live-gen-settings-panel .lora-select-toggle:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+.live-gen-settings-panel .lora-select-toggle.is-open {
+    border-color: var(--color-accent);
+    box-shadow: 0 12px 20px -14px var(--color-shadow);
+}
+
+.live-gen-settings-panel .lora-select-toggle__thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--rounded-md);
+    overflow: hidden;
+    background: var(--color-secondary-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.live-gen-settings-panel .lora-select-toggle__thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.live-gen-settings-panel .lora-select-toggle__meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.live-gen-settings-panel .lora-select-toggle__title {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-primary-text);
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+}
+
+.live-gen-settings-panel .lora-select-toggle__subtitle {
+    font-size: 11px;
+    color: var(--color-secondary-text);
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.live-gen-settings-panel .lora-select-toggle__icon {
+    font-size: 20px;
+    color: var(--color-secondary-text);
+    transition: transform 0.2s ease;
+}
+
+.live-gen-settings-panel .lora-select-toggle.is-open .lora-select-toggle__icon {
+    transform: rotate(180deg);
+}
+
+.live-gen-settings-panel .lora-card-panel {
+    display: none;
+    padding: var(--spacing-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    box-shadow: 0 16px 32px -24px var(--color-shadow);
+    max-height: 300px;
+    overflow: auto;
+}
+
+.live-gen-settings-panel .lora-card-panel__controls {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    margin-bottom: var(--spacing-3);
+}
+
+.live-gen-settings-panel .lora-card-panel__search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: var(--spacing-2);
+    border: 1px solid var(--color-border) !important;
+    border-radius: var(--rounded-sm);
+    background-color: var(--color-primary-bg);
+    color: var(--color-primary-text);
+}
+
+.live-gen-settings-panel .lora-card-panel__search-button {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-2);
+    border: 1px solid transparent;
+    border-radius: var(--rounded-sm);
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.live-gen-settings-panel .lora-card-panel__search-button:hover {
+    background: var(--color-border);
+}
+
+.live-gen-settings-panel .lora-select-group.is-open .lora-card-panel {
+    display: block;
+}
+
+.live-gen-settings-panel .lora-card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-2);
+    justify-items: center;
+}
+
+.live-gen-settings-panel .lora-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    background: var(--color-primary-bg);
+    color: var(--color-primary-text);
+    box-shadow: 0 10px 18px -12px var(--color-shadow);
+    cursor: pointer;
+    appearance: none;
+    text-align: center;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.live-gen-settings-panel .lora-card:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+}
+
+.live-gen-settings-panel .lora-card__thumb {
+    width: 60px;
+    height: 60px;
+    border-radius: var(--rounded-md);
+    overflow: hidden;
+    background: var(--color-secondary-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.live-gen-settings-panel .lora-card__thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.live-gen-settings-panel .lora-card__meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1);
+    max-width: 100%;
+    min-width: 0;
+}
+
+.live-gen-settings-panel .lora-card__title {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-primary-text);
+    line-height: 1.2;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+}
+
+.live-gen-settings-panel .lora-card__subtitle {
+    font-size: 9px;
+    color: var(--color-secondary-text);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+}
+
+.live-gen-settings-panel .lora-card.is-selected {
+    border-color: var(--color-accent);
+    box-shadow: 0 16px 26px -16px rgba(0, 0, 0, 0.4);
+    transform: translateY(-2px);
+}
+
+.live-gen-settings-panel .lora-card.is-selected .lora-card__title {
+    color: var(--color-accent);
+}
+
+@media (max-width: 600px) {
+    .live-gen-settings-panel .lora-card-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* --- Premium Character Autocomplete Predictions --- */
+.tag-autocomplete-list .tag-autocomplete-item--character {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background-color 0.16s ease;
+}
+
+.tag-autocomplete-list .tag-autocomplete-item--character .autocomplete-char-thumb {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--color-secondary-bg);
+    flex-shrink: 0;
+    border: 1px solid var(--color-border);
+}
+
+.tag-autocomplete-list .tag-autocomplete-item--character .autocomplete-char-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.tag-autocomplete-list .tag-autocomplete-item--character .autocomplete-char-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.tag-autocomplete-list .tag-autocomplete-item--character .autocomplete-char-name {
+    font-size: 13px;
+    font-weight: var(--font-weight-medium);
+    color: var(--color-primary-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tag-autocomplete-list .tag-autocomplete-item--character .autocomplete-char-label {
+    font-size: 10px;
+    font-weight: var(--font-weight-bold);
+    color: var(--color-accent);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* --- Timeline Panel --- */
+.live-gen-timeline-panel {
+    position: fixed;
+    top: 0;
+    right: -400px;
+    bottom: 0;
+    width: 400px;
+    background: var(--color-card-bg);
+    border-left: 1px solid var(--color-border);
+    box-shadow: -10px 0 30px var(--color-shadow);
+    z-index: 4000;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    padding: var(--spacing-4);
+    transition: right 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.live-gen-timeline-panel.open {
+    right: 0;
+}
+
+@media (max-width: 640px) {
+    .live-gen-timeline-panel {
+        width: 100%;
+        right: -100vw;
+        box-shadow: none;
+        border-left: none;
+    }
+    .live-gen-timeline-panel.open {
+        right: 0;
+    }
+}
+
+@media (min-width: 641px) {
+    body.live-gen-timeline-open #live-gen-container {
+        width: calc(100% - 400px);
+    }
+    body.live-gen-timeline-open #main-nav {
+        right: 400px !important;
+    }
+    body.live-gen-timeline-open .live-gen-header {
+        right: calc(400px + var(--spacing-4));
+    }
+}
+
+/* --- Tab contents --- */
+.live-gen-timeline-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding-right: var(--spacing-2);
+    margin-top: var(--spacing-2);
+}
+
+.live-gen-timeline-content.active {
+    display: flex;
+    flex-direction: column;
+}
+
+/* --- Timeline Grid & Header --- */
+.timeline-day-header {
+    font-size: 12px;
+    font-weight: var(--font-weight-bold);
+    color: var(--color-secondary-text);
+    margin: var(--spacing-4) 0 var(--spacing-2);
+    padding-left: var(--spacing-1);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-left: 3px solid var(--color-accent);
+    line-height: 1.2;
+}
+
+.timeline-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: var(--spacing-4);
+}
+
+.timeline-item {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border-radius: var(--rounded-md);
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    background: var(--color-primary-bg);
+}
+
+.timeline-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.25s ease;
+}
+
+.timeline-item__badge {
+    position: absolute;
+    bottom: 4px;
+    left: 4px;
+    font-size: 16px;
+    color: var(--color-accent);
+    background: none;
+    border: none;
+    padding: 0;
+    pointer-events: none;
+    user-select: none;
+    line-height: 1;
+    box-shadow: none;
+    z-index: 5;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); /* Subtle text shadow for legibility over bright backgrounds */
+}
+
+.timeline-item:hover img {
+    transform: scale(1.08);
+}
+
+.timeline-item.selected {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 10px var(--color-accent);
+}
+
+.timeline-item.selected::after {
+    content: "check_circle";
+    font-family: "Material Symbols Outlined";
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    font-size: 16px;
+    color: var(--color-accent);
+    background: var(--color-card-bg);
+    border-radius: 50%;
+    padding: 1px;
+}
+
+.timeline-item.delete-selected {
+    border-color: var(--color-error, #f44336) !important;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--color-error, #f44336) 50%, transparent) !important;
+}
+
+.timeline-item.delete-selected::after {
+    content: "remove_circle" !important;
+    font-family: "Material Symbols Outlined" !important;
+    position: absolute !important;
+    top: 4px !important;
+    right: 4px !important;
+    font-size: 16px !important;
+    color: var(--color-error, #f44336) !important;
+    background: var(--color-card-bg) !important;
+    border-radius: 50% !important;
+    padding: 1px !important;
+    display: block !important;
+}
+
+.live-gen-timeline-panel.delete-mode .timeline-day-header {
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.live-gen-timeline-panel.delete-mode .timeline-day-header:hover {
+    color: var(--color-error, #f44336);
+}
+
+.timeline-empty-message {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-5);
+    color: var(--color-secondary-text);
+    text-align: center;
+    font-size: 14px;
+    height: 200px;
+}
+
+.timeline-empty-message span {
+    font-size: 36px;
+    color: var(--color-border);
+}
+

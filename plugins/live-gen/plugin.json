@@ -1,0 +1,31 @@
+{
+    "id": "live-gen",
+    "name": "Live Gen",
+    "version": "1.0.0",
+    "author": "Yuuka",
+    "description": "Stream preview images from ComfyUI while the prompt is being edited.",
+    "static_folder": "static",
+    "entry_points": {
+        "backend": "backend:LiveGenPlugin",
+        "frontend_component": "LiveGenComponent"
+    },
+    "assets": {
+        "js": [
+            "live_gen.js"
+        ],
+        "css": [
+            "live_gen.css"
+        ]
+    },
+    "dependencies": {
+        "python": []
+    },
+    "ui": {
+        "tab": {
+            "id": "live-gen",
+            "icon": "auto_awesome",
+            "label": "Live Gen"
+        },
+        "order": 35
+    }
+}
