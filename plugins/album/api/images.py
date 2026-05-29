@@ -1,5 +1,6 @@
 from flask import jsonify, request, abort
 import os
+import base64
 from copy import deepcopy
 from ..utils import safe_int, normalize_lora_tags
 
@@ -40,21 +41,14 @@ def register_routes(blueprint, plugin):
             if not image_bytes:
                 abort(404, description="Source image file could not be loaded.")
 
-            upload_basename = f"album_hires_{image_id.replace('-', '')}.png"
-            try:
-                stored_name = plugin.core_api.comfy_api_client.upload_image_bytes(
-                    image_bytes,
-                    upload_basename,
-                    server_address
-                )
-            except ConnectionError as err:
-                abort(503, description=str(err))
+            # Encode directly into base64
+            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
 
             target_width = max(original_width * 2, original_width)
             target_height = max(original_height * 2, original_height)
 
             generation_config["_workflow_type"] = "hires_input_image"
-            generation_config["_input_image_name"] = stored_name
+            generation_config["_input_image_base64"] = image_b64
             generation_config["_input_image_width"] = original_width
             generation_config["_input_image_height"] = original_height
             generation_config["hires_base_width"] = original_width

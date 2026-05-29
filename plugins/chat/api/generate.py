@@ -130,10 +130,10 @@ def _build_persona_prompt(data, plugin=None, user_hash=None):
         prompt_parts.append(replace_names(custom_system_prompt))
 
     state_desc = [
-        f"<current_state>",
+        f"<current_state name=\"{char_name}\">",
         f"Current Location: {session_state.get('location', 'Unknown')}",
         f"Current Action: {session_state.get('action', 'Idle')}",
-        f"Currently Worn Outfits: {', '.join(session_state.get('outfits', [])) or 'None'}",
+        f"Currently Worn Outfits: {', '.join(session_state.get('outfits') or []) or 'Naked'}",
         f"Inventory/Bag: {', '.join(session_state.get('inventory', [])) or 'Empty'}",
         f"</current_state>"
     ]

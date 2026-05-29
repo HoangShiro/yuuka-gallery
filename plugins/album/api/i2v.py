@@ -348,15 +348,8 @@ def register_routes(blueprint, plugin):
         if not image_bytes:
             abort(404, description="Source image file could not be loaded.")
 
-        upload_basename = f"album_i2v_{image_id.replace('-', '')}.png"
-        try:
-            stored_name = plugin.core_api.comfy_api_client.upload_image_bytes(
-                image_bytes,
-                upload_basename,
-                server_address
-            )
-        except ConnectionError as err:
-            abort(503, description=str(err))
+        # Encode directly into base64
+        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
 
         # Map resolution preset to megapixel value
         resolution_map = {"480p": 0.4, "720p": 0.85}
@@ -375,8 +368,8 @@ def register_routes(blueprint, plugin):
             "enable_loop": i2v_config.get("enable_loop", True),
             "enable_interpolation": i2v_config.get("enable_interpolation", True),
             "resolution_mp": resolution_mp,
-            "_first_frame_image_name": stored_name,
-            "_last_frame_image_name": stored_name,
+            "_first_frame_image_base64": image_b64,
+            "_last_frame_image_base64": image_b64,
             "seed": 0,  # random seed
         }
 

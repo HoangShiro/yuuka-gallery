@@ -73,11 +73,11 @@
   },
   "10": {
     "inputs": {
-      "image": "44547607_0.png"
+      "image_base64": ""
     },
-    "class_type": "LoadImage",
+    "class_type": "Base64ToImage_Yuuka",
     "_meta": {
-      "title": "Load Image"
+      "title": "Yuuka Base64 to Image (API)"
     }
   },
   "12": {

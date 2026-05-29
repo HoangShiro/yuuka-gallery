@@ -172,6 +172,8 @@ class WorkflowBuilderService:
             "hiresfix_esrgan_input_image": HIRESFIX_ESRGAN_INPUT_IMAGE_WORKFLOW_PATH,
             "hiresfix_esrgan_input_image_lora": HIRESFIX_ESRGAN_INPUT_IMAGE_LORA_WORKFLOW_PATH,
             "dasiwa_wan2_i2v": DASIWA_WAN2_WORKFLOW_PATH,
+            "image2image": os.path.join(_WORKFLOWS_DIR, "image2image.json"),
+            "image2image_lora": os.path.join(_WORKFLOWS_DIR, "image2image_LoRA.json"),
         }
         for name, path in workflow_paths.items():
             try:
@@ -497,6 +499,16 @@ class WorkflowBuilderService:
         if workflow_type == 'dasiwa_wan2_i2v':
             return self._build_dasiwa_wan2_workflow(cfg_data, seed)
 
+        # Yuuka: Image-to-Image workflow
+        if workflow_type == 'image2image':
+            if cfg_data.get('hires_enabled'):
+                workflow, output_node_id = self._build_hiresfix_input_image_workflow(cfg_data, seed)
+            else:
+                workflow, output_node_id = self._build_image2image_workflow(cfg_data, seed)
+            if alpha_requested:
+                workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
+            return workflow, output_node_id
+
         if workflow_type == 'hires_input_image':
             workflow, output_node_id = self._build_hiresfix_input_image_workflow(cfg_data, seed)
             if alpha_requested:
@@ -507,20 +519,13 @@ class WorkflowBuilderService:
         lora_chain = self._parse_lora_chain(cfg_data)
         has_lora = ((lora_name and lora_name != "None" and str(lora_name).strip() != "") or bool(lora_chain))
 
-        # Non-alpha builders (alpha is applied as RMBG post-process below)
-        if workflow_type in ('sdxl_lora', 'lora'):
-            workflow, output_node_id = self._build_lora_workflow(cfg_data, seed)
-            if alpha_requested:
-                workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
-            return workflow, output_node_id
-
         if cfg_data.get('hires_enabled'):
             workflow, output_node_id = self._build_hiresfix_workflow(cfg_data, seed)
             if alpha_requested:
                 workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
             return workflow, output_node_id
 
-        if has_lora:
+        if workflow_type in ('sdxl_lora', 'lora') or has_lora:
             workflow, output_node_id = self._build_lora_workflow(cfg_data, seed)
             if alpha_requested:
                 workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
@@ -530,6 +535,65 @@ class WorkflowBuilderService:
         if alpha_requested:
             workflow = self._inject_rmbg_before_base64_output(workflow, output_node_id)
         return workflow, output_node_id
+
+    def _build_image2image_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
+        """Build standard Image-to-Image (Img2Img) workflow for live-gen edit mode."""
+        uploaded_name = cfg_data.get("_input_image_name")
+        base64_image = cfg_data.get("_input_image_base64")
+        if not uploaded_name and not base64_image:
+            print("[WorkflowBuilder] Missing input image name or base64 for image2image. Falling back to standard.")
+            return self._build_standard_workflow(cfg_data, seed)
+
+        lora_specs = self._parse_lora_chain(cfg_data)
+        use_lora = len(lora_specs) > 0
+
+        template_key = "image2image_lora" if use_lora else "image2image"
+        template = self.workflow_templates.get(template_key)
+
+        if not template:
+            print(f"[WorkflowBuilder] Template {template_key} not found. Falling back to standard.")
+            return self._build_standard_workflow(cfg_data, seed)
+
+        if isinstance(cfg_data, dict):
+            cfg_data["_workflow_template"] = "image2image_lora" if use_lora else "image2image"
+
+        workflow = deepcopy(template)
+
+        text_prompt = cfg_data.get(COMBINED_TEXT_PROMPT_KEY, build_full_prompt_from_cfg(cfg_data))
+        negative_prompt = ", ".join(normalize_tag_list(str(cfg_data.get("negative", DEFAULT_CONFIG["negative"]))))
+
+        # Update prompt inputs
+        workflow.setdefault("6", {}).setdefault("inputs", {})["text"] = text_prompt
+        workflow.setdefault("7", {}).setdefault("inputs", {})["text"] = negative_prompt
+
+        # Update KSampler inputs
+        workflow.setdefault("3", {}).setdefault("inputs", {})
+        workflow["3"]["inputs"]["seed"] = seed
+        workflow["3"]["inputs"]["steps"] = int(cfg_data.get("steps", DEFAULT_CONFIG["steps"]))
+        workflow["3"]["inputs"]["cfg"] = float(cfg_data.get("cfg", DEFAULT_CONFIG["cfg"]))
+        workflow["3"]["inputs"]["sampler_name"] = cfg_data.get("sampler_name", DEFAULT_CONFIG["sampler_name"])
+        workflow["3"]["inputs"]["scheduler"] = cfg_data.get("scheduler", DEFAULT_CONFIG["scheduler"])
+        # Use custom denoise for img2img edit
+        workflow["3"]["inputs"]["denoise"] = float(cfg_data.get("denoise", 0.45))
+
+        # Update Load Image node input (Base64 vs filename support)
+        base64_image = cfg_data.get("_input_image_base64")
+        if base64_image and "10" in workflow:
+            if workflow["10"].get("class_type") == "Base64ToImage_Yuuka":
+                workflow["10"]["inputs"]["image_base64"] = base64_image
+            else:
+                workflow["10"]["inputs"]["image"] = uploaded_name
+        else:
+            workflow.setdefault("10", {}).setdefault("inputs", {})["image"] = uploaded_name
+
+        workflow.setdefault("14", {}).setdefault("inputs", {})["ckpt_name"] = cfg_data.get("ckpt_name", DEFAULT_CONFIG["ckpt_name"])
+
+        if use_lora:
+            workflow, last_lora_id = self._inject_lora_chain(workflow, lora_specs)
+            if last_lora_id is None:
+                print("[WorkflowBuilder] Warning: Could not inject LoRA chain for image2image workflow.")
+
+        return workflow, "15"
 
     def _build_standard_workflow(self, cfg_data: Dict[str, Any], seed: int) -> Tuple[Dict[str, Any], str]:
         """
@@ -594,8 +658,9 @@ class WorkflowBuilderService:
     def _build_hiresfix_input_image_workflow(self, cfg_data: Dict[str, Any], seed: int, use_alpha: bool = False) -> Tuple[Dict[str, Any], str]:
         """Build hires-fix ESRGAN workflow that starts from an uploaded image."""
         uploaded_name = cfg_data.get("_input_image_name")
-        if not uploaded_name:
-            print("[WorkflowBuilder] Missing uploaded image name for hires input workflow. Falling back to standard workflow.")
+        base64_image = cfg_data.get("_input_image_base64")
+        if not uploaded_name and not base64_image:
+            print("[WorkflowBuilder] Missing uploaded image name or base64 for hires input workflow. Falling back to standard workflow.")
             return self._build_standard_workflow(cfg_data, seed)
 
         lora_specs = self._parse_lora_chain(cfg_data)
@@ -634,16 +699,20 @@ class WorkflowBuilderService:
         text_prompt = cfg_data.get(COMBINED_TEXT_PROMPT_KEY, build_full_prompt_from_cfg(cfg_data))
         negative_prompt = ", ".join(normalize_tag_list(str(cfg_data.get("negative", DEFAULT_CONFIG["negative"]))))
 
-        base_width = _safe_int(cfg_data.get("hires_base_width") or cfg_data.get("_input_image_width"), DEFAULT_CONFIG["width"])
-        base_height = _safe_int(cfg_data.get("hires_base_height") or cfg_data.get("_input_image_height"), DEFAULT_CONFIG["height"])
-        target_width = _safe_int(cfg_data.get("width"), base_width * 2)
-        target_height = _safe_int(cfg_data.get("height"), base_height * 2)
+        base_width = _safe_int(cfg_data.get("hires_base_width") or cfg_data.get("_input_image_width"), 0)
+        base_height = _safe_int(cfg_data.get("hires_base_height") or cfg_data.get("_input_image_height"), 0)
+        if not base_width:
+            base_width = _safe_int(cfg_data.get("width"), DEFAULT_CONFIG["width"])
+        if not base_height:
+            base_height = _safe_int(cfg_data.get("height"), DEFAULT_CONFIG["height"])
+        target_width = base_width * 2
+        target_height = base_height * 2
 
-        stage2_steps = _safe_int(cfg_data.get("hires_stage2_steps"), DEFAULT_CONFIG["hires_stage2_steps"])
-        stage2_cfg = _safe_float(cfg_data.get("hires_stage2_cfg"), DEFAULT_CONFIG["hires_stage2_cfg"])
-        stage2_sampler = cfg_data.get("hires_stage2_sampler_name", DEFAULT_CONFIG["hires_stage2_sampler_name"])
-        stage2_scheduler = cfg_data.get("hires_stage2_scheduler", DEFAULT_CONFIG["hires_stage2_scheduler"])
-        stage2_denoise = _safe_float(cfg_data.get("hires_stage2_denoise"), DEFAULT_CONFIG["hires_stage2_denoise"])
+        stage2_steps = _safe_int(cfg_data.get("hires_stage2_steps") or cfg_data.get("steps"), DEFAULT_CONFIG["hires_stage2_steps"])
+        stage2_cfg = _safe_float(cfg_data.get("hires_stage2_cfg") or cfg_data.get("cfg"), DEFAULT_CONFIG["hires_stage2_cfg"])
+        stage2_sampler = cfg_data.get("hires_stage2_sampler_name") or cfg_data.get("sampler_name") or DEFAULT_CONFIG["hires_stage2_sampler_name"]
+        stage2_scheduler = cfg_data.get("hires_stage2_scheduler") or cfg_data.get("scheduler") or DEFAULT_CONFIG["hires_stage2_scheduler"]
+        stage2_denoise = _safe_float(cfg_data.get("hires_stage2_denoise") or cfg_data.get("denoise"), DEFAULT_CONFIG["hires_stage2_denoise"])
 
         workflow.setdefault("6", {}).setdefault("inputs", {})["text"] = text_prompt
         workflow.setdefault("7", {}).setdefault("inputs", {})["text"] = negative_prompt
@@ -671,7 +740,15 @@ class WorkflowBuilderService:
             "ckpt_name", DEFAULT_CONFIG["ckpt_name"]
         )
 
-        workflow.setdefault("28", {}).setdefault("inputs", {})["image"] = uploaded_name
+        # Update Load Image node input (Base64 vs filename support)
+        base64_image = cfg_data.get("_input_image_base64")
+        if base64_image and "28" in workflow:
+            if workflow["28"].get("class_type") == "Base64ToImage_Yuuka":
+                workflow["28"]["inputs"]["image_base64"] = base64_image
+            else:
+                workflow["28"]["inputs"]["image"] = uploaded_name
+        else:
+            workflow.setdefault("28", {}).setdefault("inputs", {})["image"] = uploaded_name
 
         if use_lora:
             workflow, last_lora_id = self._inject_lora_chain(workflow, lora_specs)
@@ -726,8 +803,8 @@ class WorkflowBuilderService:
             base_width = _safe_int(cfg_data.get("width"), DEFAULT_CONFIG["width"])
         if not base_height:
             base_height = _safe_int(cfg_data.get("height"), DEFAULT_CONFIG["height"])
-        final_width = _safe_int(cfg_data.get("width"), DEFAULT_CONFIG["width"])
-        final_height = _safe_int(cfg_data.get("height"), DEFAULT_CONFIG["height"])
+        final_width = base_width * 2
+        final_height = base_height * 2
 
         stage1_steps = _safe_int(cfg_data.get("steps"), DEFAULT_CONFIG["steps"])
         stage1_cfg = _safe_float(cfg_data.get("cfg"), DEFAULT_CONFIG["cfg"])
@@ -937,13 +1014,23 @@ class WorkflowBuilderService:
         # Patch template nodes với giá trị từ cfg_data
         # =====================================================================
 
-        # --- Input images ---
-        # Node "1289": LoadImage (First-Frame-Image)
+        # --- Input images (Base64 vs filename support) ---
+        first_frame_base64 = cfg_data.get('_first_frame_image_base64')
+        last_frame_base64 = cfg_data.get('_last_frame_image_base64') or first_frame_base64
+
+        # Node "1289": First-Frame-Image
         if "1289" in workflow:
-            workflow["1289"]["inputs"]["image"] = first_frame_name
-        # Node "24": LoadImage (Last-Frame-Image)
+            if first_frame_base64 and workflow["1289"].get("class_type") == "Base64ToImage_Yuuka":
+                workflow["1289"]["inputs"]["image_base64"] = first_frame_base64
+            else:
+                workflow["1289"]["inputs"]["image"] = first_frame_name
+
+        # Node "24": Last-Frame-Image
         if "24" in workflow:
-            workflow["24"]["inputs"]["image"] = last_frame_name
+            if last_frame_base64 and workflow["24"].get("class_type") == "Base64ToImage_Yuuka":
+                workflow["24"]["inputs"]["image_base64"] = last_frame_base64
+            else:
+                workflow["24"]["inputs"]["image"] = last_frame_name
 
         # --- Prompts ---
         # Node "29:1044": CLIPTextEncode (Positive prompt)

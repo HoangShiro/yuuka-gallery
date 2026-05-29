@@ -691,6 +691,9 @@ window.Yuuka.plugins.simpleViewer = (() => {
                     btn.className = 'sv-viewer-toolbar-btn';
                     btn.title = btnDef.title || '';
                     btn.innerHTML = `<span class="material-symbols-outlined">${btnDef.icon}</span>`;
+                    if (btnDef._initialFilled) {
+                        btn.querySelector('.material-symbols-outlined').style.fontVariationSettings = "'FILL' 1";
+                    }
                     btn.addEventListener('click', () => {
                         if (typeof btnDef.onClick === 'function') {
                             const currentItem = items[currentIndex];

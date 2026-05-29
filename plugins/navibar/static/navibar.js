@@ -787,7 +787,9 @@ class NavibarComponent {
             const wasSubGridOpen = this._isSubGridOpen;
             const wasDockPeekOpen = this._isDockPeekOpen;
             if (this._isSearchActive) {
-                this.showSearchBar(null);
+                if (!document.body.classList.contains('live-gen-active') && !event.target.closest('.tag-autocomplete-list')) {
+                    this.showSearchBar(null);
+                }
             }
             if (wasSubGridOpen) {
                 this._isSubGridOpen = false;

@@ -405,8 +405,8 @@ class ChatScenarioMixin:
         example_mentioned = [other_member_names[0]] if other_member_names else []
         example_obj = {
             "location": "School classroom",
-            "put_on": None,
-            "take_off": None,
+            "put_on": ["glasses"],
+            "take_off": ["jacket"],
             "mentioned": example_mentioned,
             "time_skip": False,
         }

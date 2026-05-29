@@ -667,15 +667,27 @@ html.dark-mode .nav-btn.is-tool-placeholder {
     }
 }
 
+@media (min-width: 768px) {
+    #navibar-tray.is-search-active #navibar-search-bar {
+        min-width: 600px;
+    }
+}
+
 @media (min-width: 1280px) {
     #navibar-tray.is-dock-active #navibar-dock {
         max-width: clamp(520px, 60vw, 1180px);
         min-width: 600px;
+    }
+    #navibar-tray.is-search-active #navibar-search-bar {
+        min-width: 800px;
     }
 }
 
 @media (min-width: 1600px) {
     #navibar-tray.is-dock-active #navibar-dock {
         max-width: clamp(640px, 50vw, 1360px);
+    }
+    #navibar-tray.is-search-active #navibar-search-bar {
+        min-width: 960px;
     }
 }

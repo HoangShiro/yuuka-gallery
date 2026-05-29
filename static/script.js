@@ -58,8 +58,68 @@ window.Yuuka = window.Yuuka || {
                 const wrapper = document.createElement('div'); wrapper.className = 'tag-autocomplete-container'; input.parentElement.insertBefore(wrapper, input); wrapper.appendChild(input);
                 const list = document.createElement('ul'); list.className = 'tag-autocomplete-list'; wrapper.appendChild(list);
                 let activeIndex = -1; const hide = () => { list.style.display = 'none'; list.innerHTML = ''; activeIndex = -1; };
-                input.addEventListener('input', () => { const textValue = input.value; const cursor = input.selectionStart; const before = textValue.substring(0, cursor); const lastComma = before.lastIndexOf(','); const current = before.substring(lastComma + 1).trim(); if (current.length < 1) { hide(); return; } const search = current.replace(/\s+/g, '_').toLowerCase(); const matches = tagPredictions.filter(t => t.startsWith(search)).slice(0, 7); if (matches.length) { list.innerHTML = matches.map(m => `<li class="tag-autocomplete-item" data-tag="${m}">${m.replace(/_/g, ' ')}</li>`).join(''); list.style.display = 'block'; activeIndex = -1; } else hide(); });
-                const applyTag = tag => { const textValue = input.value; const cursor = input.selectionStart; const before = textValue.substring(0, cursor); const lastComma = before.lastIndexOf(','); const prefix = textValue.substring(0, lastComma + 1); const after = textValue.substring(cursor); const nextComma = after.indexOf(','); const remaining = nextComma == -1 ? '' : after.substring(nextComma); const result = `${prefix.trim() ? `${prefix.trim()} ` : ''}${tag.replace(/_/g, ' ')}, ${remaining.trim()}`.trim(); input.value = result; const newCursor = (`${prefix.trim() ? `${prefix.trim()} ` : ''}${tag}`).length + 2; input.focus(); input.setSelectionRange(newCursor, newCursor); hide(); input.dispatchEvent(new Event('input', { bubbles: true })); };
+                
+                input.addEventListener('input', () => {
+                    const textValue = input.value;
+                    const cursor = input.selectionStart;
+                    const before = textValue.substring(0, cursor);
+                    const lastComma = before.lastIndexOf(',');
+                    const lastNewline = Math.max(before.lastIndexOf('\n'), before.lastIndexOf('\r'));
+                    const lastSep = Math.max(lastComma, lastNewline);
+                    const current = before.substring(lastSep + 1).trim();
+                    
+                    if (current.length < 1) { hide(); return; }
+                    const search = current.replace(/\s+/g, '_').toLowerCase();
+                    const matches = tagPredictions.filter(t => t.startsWith(search)).slice(0, 7);
+                    if (matches.length) {
+                        list.innerHTML = matches.map(m => `<li class="tag-autocomplete-item" data-tag="${m}">${m.replace(/_/g, ' ')}</li>`).join('');
+                        list.style.display = 'block';
+                        activeIndex = -1;
+                    } else hide();
+                });
+                
+                const applyTag = tag => {
+                    const textValue = input.value;
+                    const cursor = input.selectionStart;
+                    const before = textValue.substring(0, cursor);
+                    const after = textValue.substring(cursor);
+                    
+                    const lastComma = before.lastIndexOf(',');
+                    const lastNewline = Math.max(before.lastIndexOf('\n'), before.lastIndexOf('\r'));
+                    const lastSep = Math.max(lastComma, lastNewline);
+                    
+                    const nextComma = after.indexOf(',');
+                    const nextNewline = after.indexOf('\n');
+                    const nextCarriageReturn = after.indexOf('\r');
+                    const afterSepIndices = [nextComma, nextNewline, nextCarriageReturn].filter(idx => idx !== -1);
+                    const nextSep = afterSepIndices.length > 0 ? Math.min(...afterSepIndices) : -1;
+                    
+                    let prefix = textValue.substring(0, lastSep + 1);
+                    let suffix = nextSep !== -1 ? after.substring(nextSep) : "";
+                    
+                    // Format prefix spacing
+                    if (prefix.endsWith(',')) {
+                        prefix += ' ';
+                    } else if (prefix.length > 0 && !prefix.endsWith(' ') && !prefix.endsWith('\n') && !prefix.endsWith('\r')) {
+                        prefix += ' ';
+                    }
+                    
+                    // Format suffix to avoid double commas
+                    if (suffix.startsWith(',')) {
+                        suffix = suffix.substring(1).replace(/^\s+/, '');
+                    }
+                    
+                    const insertedTag = tag.replace(/_/g, ' ');
+                    const result = `${prefix}${insertedTag}, ${suffix}`;
+                    
+                    input.value = result;
+                    const newCursor = prefix.length + insertedTag.length + 2;
+                    input.focus();
+                    input.setSelectionRange(newCursor, newCursor);
+                    hide();
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                };
+                
                 list.addEventListener('mousedown', ev => { ev.preventDefault(); if (ev.target.matches('.tag-autocomplete-item')) applyTag(ev.target.dataset.tag); });
                 input.addEventListener('keydown', ev => { const items = list.querySelectorAll('.tag-autocomplete-item'); if (!items.length) return; if (ev.key === 'ArrowDown') { ev.preventDefault(); activeIndex = (activeIndex + 1) % items.length; } else if (ev.key === 'ArrowUp') { ev.preventDefault(); activeIndex = (activeIndex - 1 + items.length) % items.length; } else if ((ev.key === 'Enter' || ev.key === 'Tab') && activeIndex > -1) { ev.preventDefault(); applyTag(items[activeIndex].dataset.tag); } else if (ev.key === 'Escape') { hide(); } items.forEach((it, idx) => it.classList.toggle('active', idx === activeIndex)); });
                 input.addEventListener('blur', () => setTimeout(hide, 150));
