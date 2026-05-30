@@ -15,6 +15,18 @@
             this.currentWordBeingTyped = "";
         }
 
+        _restoreTabBadge(shell) {
+            if (!shell) return;
+            const ghostSug = shell.querySelector(".ghost-suggestion");
+            const tabBadge = shell.querySelector(".live-gen-suggestion-tab-badge");
+            if (tabBadge && ghostSug && ghostSug.contains(tabBadge)) {
+                const wrapper = shell.querySelector(".ghost-suggestion-wrapper");
+                if (wrapper) {
+                    wrapper.appendChild(tabBadge);
+                }
+            }
+        }
+
         openPromptMode() {
             const navibar = window.Yuuka?.services?.navibar;
             if (!navibar) return;
@@ -52,15 +64,53 @@
             this.attachAutocomplete(input);
             this.autoGrow(input);
 
-            shell.querySelector('[data-action="back"]').addEventListener("click", () => navibar.showSearchBar(null));
+            const backBtn = shell.querySelector('[data-action="back"]');
+            const handleBack = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navibar.showSearchBar(null);
+            };
+            backBtn.addEventListener("click", handleBack);
+            backBtn.addEventListener("touchend", handleBack);
+            backBtn.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            backBtn.addEventListener("touchstart", (e) => {
+                e.stopPropagation();
+            });
             
             const diceBtn = shell.querySelector('[data-action="dice"]');
-            diceBtn.addEventListener("click", () => this.component._rerollSeed());
-            diceBtn.addEventListener("mousedown", (e) => e.preventDefault());
+            const handleDice = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.component._rerollSeed();
+            };
+            diceBtn.addEventListener("click", handleDice);
+            diceBtn.addEventListener("touchend", handleDice);
+            diceBtn.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            diceBtn.addEventListener("touchstart", (e) => {
+                e.stopPropagation();
+            });
 
             const autoPromptBtn = shell.querySelector('[data-action="auto-prompt"]');
-            autoPromptBtn.addEventListener("click", () => this.triggerAutoPrompt(input, shell));
-            autoPromptBtn.addEventListener("mousedown", (e) => e.preventDefault());
+            const handleAutoPrompt = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.triggerAutoPrompt(input, shell);
+            };
+            autoPromptBtn.addEventListener("click", handleAutoPrompt);
+            autoPromptBtn.addEventListener("touchend", handleAutoPrompt);
+            autoPromptBtn.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            autoPromptBtn.addEventListener("touchstart", (e) => {
+                e.stopPropagation();
+            });
 
             input.addEventListener("input", () => {
                 this.state.setPrompt(input.value);
@@ -86,6 +136,19 @@
                 const immediate = /[\r\n,]\s*$/.test(trimmed);
                 this.component._scheduleGeneration(immediate ? 200 : 600);
             });
+
+            // Ẩn/xóa gợi ý khi di chuyển con trỏ trực tiếp (click chuột/tap hoặc dùng phím di chuyển)
+            const handleCursorMove = (e) => {
+                if (e.type === "keyup") {
+                    const navigationKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"];
+                    if (!navigationKeys.includes(e.key)) {
+                        return;
+                    }
+                }
+                this.clearSuggestion(shell);
+            };
+            input.addEventListener("click", handleCursorMove);
+            input.addEventListener("keyup", handleCursorMove);
 
             // Lắng nghe phím Tab để hoàn thành gợi ý nhanh hoặc chọn tiên đoán đầu tiên
             input.addEventListener("keydown", (e) => {
@@ -123,6 +186,11 @@
             });
             input.addEventListener("blur", () => {
                 document.body.classList.remove("live-gen-prompt-focused");
+                setTimeout(() => {
+                    if (document.activeElement !== input) {
+                        this.clearSuggestion(shell);
+                    }
+                }, 150);
             });
             
             setTimeout(() => {
@@ -211,6 +279,7 @@
         }
 
         renderAutocompleteSuggestions(tags, currentWord, input, shell) {
+            this._restoreTabBadge(shell);
             const ghost = shell.querySelector(".live-gen-prompt-ghost");
             const ghostSug = shell.querySelector(".ghost-suggestion");
             const tabBadge = shell.querySelector(".live-gen-suggestion-tab-badge");
@@ -305,6 +374,7 @@
 
         async fetchSuggestion(input, shell, val) {
             if (input.value !== val) return;
+            this._restoreTabBadge(shell);
             
             const ghost = shell.querySelector(".live-gen-prompt-ghost");
             const ghostSug = shell.querySelector(".ghost-suggestion");
@@ -484,6 +554,7 @@
         }
 
         clearSuggestion(shell) {
+            this._restoreTabBadge(shell);
             this.activeSuggestion = "";
             this.autocompleteMatches = null;
             this.currentWordBeingTyped = "";
@@ -494,13 +565,6 @@
             const ghost = shell.querySelector(".live-gen-prompt-ghost");
             const ghostSug = shell.querySelector(".ghost-suggestion");
             const tabBadge = shell.querySelector(".live-gen-suggestion-tab-badge");
-            
-            if (tabBadge && ghostSug && ghostSug.contains(tabBadge)) {
-                const wrapper = shell.querySelector(".ghost-suggestion-wrapper");
-                if (wrapper) {
-                    wrapper.appendChild(tabBadge);
-                }
-            }
 
             if (ghost) ghost.style.display = "none";
             if (ghostSug) {

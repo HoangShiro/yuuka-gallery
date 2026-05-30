@@ -211,7 +211,6 @@
                 case "final":
                     this.state.running = false;
                     this._setProgress(100);
-                    this.state.lastFinalImageBase64 = message.image;
 
                     // Detect preview support and update state dynamically
                     const isCached = message.prompt_id && String(message.prompt_id).startsWith("cached_");
@@ -224,16 +223,27 @@
                         }
                     }
 
-                    if (message.snapshot_id && this.state.config) {
-                        this.state.config.snapshot_id = message.snapshot_id;
-                    }
-                    if (message.config && this.state.config) {
-                        this.state.config = { ...this.state.config, ...message.config };
+                    // Only update the core active generation configs if the user is currently viewing the active generation slide
+                    const isViewingActive = this.previewUI.currentIndex === this.previewUI.slides.length - 1 || this.previewUI.currentIndex === -1;
+
+                    if (isViewingActive) {
+                        this.state.lastFinalImageBase64 = message.image;
+                        if (message.snapshot_id && this.state.config) {
+                            this.state.config.snapshot_id = message.snapshot_id;
+                        }
+                        if (message.config && this.state.config) {
+                            this.state.config = { ...this.state.config, ...message.config };
+                        }
                     }
 
+                    // Reset isPreGenerating BEFORE calling showImage
+                    const wasPreGenerating = this.previewUI.isPreGenerating;
+                    this.previewUI.isPreGenerating = false;
+
                     this.previewUI.showImage(message.image, false, {
-                        snapshotId: message.snapshot_id || this.state.config?.snapshot_id,
-                        generationConfig: { ...this.state.config }
+                        snapshotId: message.snapshot_id,
+                        generationConfig: message.config || { ...this.state.config, seed: message.seed, snapshot_id: message.snapshot_id },
+                        isPreGenerated: wasPreGenerating
                     });
 
                     const elapsed = this.state.generationStartTime
@@ -252,10 +262,18 @@
                     this.state.running = false;
                     this._setProgress(0);
                     this._setStatus("Sẵn sàng.", "ready");
+                    if (this.previewUI.isPreGenerating) {
+                        this.previewUI.removePreGenSlide();
+                        this.previewUI.isPreGenerating = false;
+                    }
                     break;
                 case "cancelled":
                     this.state.running = false;
                     this._setStatus("Đã hủy tác vụ cũ.", "idle");
+                    if (this.previewUI.isPreGenerating) {
+                        this.previewUI.removePreGenSlide();
+                        this.previewUI.isPreGenerating = false;
+                    }
                     break;
                 case "user_preferences_updated":
                     if (this.state.config) {
@@ -271,6 +289,10 @@
                     this.state.running = false;
                     this._setStatus(message.message || "Live Gen lỗi.", "error");
                     window.showError?.(`Live Gen: ${message.message || "Lỗi không xác định."}`);
+                    if (this.previewUI.isPreGenerating) {
+                        this.previewUI.removePreGenSlide();
+                        this.previewUI.isPreGenerating = false;
+                    }
                     break;
             }
         }
@@ -308,14 +330,24 @@
             }
             if (this.previewUI) {
                 this.previewUI.userTriggeredGeneration = true;
+                this.previewUI.isPreGenerating = false;
             }
             this.debounceTimer = setTimeout(() => this._generateNow(), delay);
         }
 
-        _generateNow() {
+        async _generateNow() {
             const prompt = this.helpers.normalizePrompt(this.state.prompt);
             if (!prompt) return;
             if (prompt === this.lastGeneratedPrompt) return;
+            
+            const previewUI = this.previewUI;
+            const isViewingOldSlide = previewUI && previewUI.slides && previewUI.currentIndex >= 0 && previewUI.currentIndex < previewUI.slides.length - 1;
+            if (isViewingOldSlide) {
+                const activeSlide = previewUI.slides[previewUI.currentIndex];
+                if (activeSlide && !activeSlide.isPreview && activeSlide.generationConfig) {
+                    await previewUI.applySlideSnapshot(activeSlide, false, true);
+                }
+            }
             
             if (!this.wsClient.ws || this.wsClient.ws.readyState !== WebSocket.OPEN) {
                 this._setStatus("Đang đợi WebSocket...", "idle");
@@ -330,7 +362,7 @@
             const payload = {
                 type: "generate",
                 seq: this.seq,
-                prompt,
+                prompt: this.state.prompt, // Save the raw prompt with newlines
                 seed: this.state.seed,
                 config: {
                     ...(this.state.config || {}),
@@ -474,12 +506,13 @@
             this._setStatus("Upscaling (Hires Fix)...", "running");
             if (this.previewUI) {
                 this.previewUI.userTriggeredGeneration = true;
+                this.previewUI.isPreGenerating = false;
             }
 
             this.wsClient.send({
                 type: "generate",
                 seq: this.seq,
-                prompt: this.helpers.normalizePrompt(slideConfig.prompt),
+                prompt: slideConfig.prompt,
                 seed: slideConfig.seed,
                 input_image_base64: base64,
                 config: {
@@ -504,12 +537,13 @@
             this._setStatus("Upscaling (Hires Fix)...", "running");
             if (this.previewUI) {
                 this.previewUI.userTriggeredGeneration = true;
+                this.previewUI.isPreGenerating = false;
             }
 
             this.wsClient.send({
                 type: "generate",
                 seq: this.seq,
-                prompt: this.helpers.normalizePrompt(this.state.prompt),
+                prompt: this.state.prompt,
                 seed: this.state.seed,
                 input_image_base64: this.state.lastFinalImageBase64,
                 config: {
@@ -539,12 +573,13 @@
             this._setStatus("Refining...", "running");
             if (this.previewUI) {
                 this.previewUI.userTriggeredGeneration = true;
+                this.previewUI.isPreGenerating = false;
             }
             
             this.wsClient.send({
                 type: "generate",
                 seq: this.seq,
-                prompt: this.helpers.normalizePrompt(this.state.prompt),
+                prompt: this.state.prompt,
                 seed: this.state.seed,
                 input_image_base64: this.state.lastFinalImageBase64,
                 config: {
@@ -563,9 +598,20 @@
         }
 
         async _rerollSeed() {
+            const previewUI = this.previewUI;
+            const isViewingOldSlide = previewUI && previewUI.slides && previewUI.currentIndex >= 0 && previewUI.currentIndex < previewUI.slides.length - 1;
+
             const newSeed = Math.floor(Math.random() * 1000000000);
             try {
-                const saved = await this.apiClient.saveConfig({ seed: newSeed });
+                let configToSave = { seed: newSeed };
+                if (isViewingOldSlide) {
+                    const activeSlide = previewUI.slides[previewUI.currentIndex];
+                    if (activeSlide && !activeSlide.isPreview && activeSlide.generationConfig) {
+                        await previewUI.applySlideSnapshot(activeSlide, false);
+                        configToSave = { ...activeSlide.generationConfig, seed: newSeed };
+                    }
+                }
+                const saved = await this.apiClient.saveConfig(configToSave);
                 this._applyConfig(saved.config);
                 this.wsClient.send({ type: "update_config", config: saved.config });
                 // Sync seed input in settings panel if open
@@ -573,10 +619,46 @@
                 if (seedInput) seedInput.value = String(newSeed);
                 this.lastGeneratedPrompt = "";
                 this._scheduleGeneration(15);
-                window.showSuccess?.(`Đã đổi ngẫu nhiên seed mới: ${newSeed}`);
             } catch (err) {
                 window.showError?.(`Không thể lưu seed mới: ${err.message}`);
             }
+        }
+
+        _generatePreGen(baseSlide) {
+            const prompt = this.helpers.normalizePrompt(baseSlide.generationConfig.prompt);
+            if (!prompt) {
+                this.previewUI.isPreGenerating = false;
+                return;
+            }
+
+            if (!this.wsClient.ws || this.wsClient.ws.readyState !== WebSocket.OPEN) {
+                this.previewUI.isPreGenerating = false;
+                return;
+            }
+
+            const preGenSeed = Math.floor(Math.random() * 1000000000);
+
+            this.seq += 1;
+            this.state.latestSeq = this.seq;
+
+            const payload = {
+                type: "generate",
+                seq: this.seq,
+                prompt: baseSlide.generationConfig.prompt,
+                seed: preGenSeed,
+                config: {
+                    ...baseSlide.generationConfig,
+                    seed: preGenSeed,
+                },
+            };
+
+            if (this.state.keepActive && this.state.lastFinalImageBase64) {
+                payload.input_image_base64 = this.state.lastFinalImageBase64;
+                payload.config._workflow_type = "image2image";
+                payload.config.denoise = this.state.config.i2i_keep_denoise != null ? this.state.config.i2i_keep_denoise : 0.45;
+            }
+
+            this.wsClient.send(payload);
         }
 
         _openTimeline() {

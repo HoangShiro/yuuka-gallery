@@ -14,6 +14,7 @@
             // Slides state management
             this.slides = []; // Array of { id, url, pvUrl, isPreview, generationConfig, snapshotId, el }
             this.currentIndex = -1;
+            this.isPreGenerating = false;
 
             // Swiping / Dragging state
             this.dragState = {
@@ -33,6 +34,7 @@
             this.handlePointerUp = this.handlePointerUp.bind(this);
 
             this.userTriggeredGeneration = false;
+            this.isBouncingBack = false;
         }
 
         initDOMElements() {
@@ -121,6 +123,9 @@
                     if (currentSlide.generationConfig?.prompt) {
                         this.component.lastGeneratedPrompt = this.component.helpers.normalizePrompt(currentSlide.generationConfig.prompt);
                     }
+
+                    // Trigger pre-gen!
+                    this.checkAndTriggerPreGen();
                 }
             } catch (e) {
                 console.warn("[LiveGen] Lỗi nạp lịch sử ảnh cho slides:", e);
@@ -141,10 +146,19 @@
             }
 
             this.emptyEl?.classList.add("is-hidden");
+ 
+            // Bất kỳ slide nào từ currentIndex trở về trước đều đã được người dùng duyệt qua/xem,
+            // vì thế chúng không còn đóng vai trò là slide pre-generated ngầm ở tương lai nữa.
+            this.slides.forEach((slide, idx) => {
+                if (idx <= this.currentIndex && slide.isPreGenerated) {
+                    slide.isPreGenerated = false;
+                }
+            });
 
             // Range of slides to render in DOM [currentIndex - 2, currentIndex + 2]
-            const visibleMin = Math.max(0, this.currentIndex - 2);
-            const visibleMax = Math.min(this.slides.length - 1, this.currentIndex + 2);
+            const isSliderOn = this.state.getSliderMode() !== false;
+            const visibleMin = isSliderOn ? Math.max(0, this.currentIndex - 2) : this.currentIndex;
+            const visibleMax = isSliderOn ? Math.min(this.slides.length - 1, this.currentIndex + 2) : this.currentIndex;
 
             // Clean up slides out of view bounds
             this.slides.forEach((slide, idx) => {
@@ -207,6 +221,8 @@
                                     img.onload = () => img.classList.add("is-loaded");
                                 } else {
                                     // Delay loading for adjacent slides to prioritize the active main slide load
+                                    // If we are fading in place (far jump), prioritize the main slide even more by delaying adjacent slides by 500ms
+                                    const delay = this.isFadingInPlace ? 500 : 150;
                                     setTimeout(() => {
                                         if (slide.el && this.slides[idx] === slide) {
                                             const lazyImg = slide.el.querySelector(".live-gen-preview__image");
@@ -215,7 +231,7 @@
                                                 lazyImg.onload = () => lazyImg.classList.add("is-loaded");
                                             }
                                         }
-                                    }, 150);
+                                    }, delay);
                                 }
                             }
                             
@@ -304,18 +320,26 @@
                             void slide.el.offsetWidth;
                             
                             // Re-enable smooth standard transition for subsequent interactions
+                            const useTransform = isSliderOn || this.isBouncingBack;
                             if (diff === 0) {
-                                // Active main slide enters extremely fast in opacity and scale/Z-position to eliminate ghosting
-                                slide.el.style.transition = "transform 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.16s ease-out, scale 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), filter 0.4s ease";
+                                slide.el.style.transition = useTransform
+                                    ? "transform 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.16s ease-out, scale 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), filter 0.4s ease"
+                                    : "opacity 0.3s ease, filter 0.4s ease";
                             } else {
-                                slide.el.style.transition = "transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.4s ease, scale 0.4s ease, filter 0.4s ease";
+                                slide.el.style.transition = useTransform
+                                    ? "transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.4s ease, scale 0.4s ease, filter 0.4s ease"
+                                    : "opacity 0.3s ease, filter 0.4s ease";
                             }
                         } else {
+                            const useTransform = isSliderOn || this.isBouncingBack;
                             if (diff === 0) {
-                                // Active main slide enters extremely fast in opacity and scale/Z-position to eliminate ghosting
-                                slide.el.style.transition = "transform 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.16s ease-out, scale 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), filter 0.4s ease";
+                                slide.el.style.transition = useTransform
+                                    ? "transform 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.16s ease-out, scale 0.2s cubic-bezier(0.25, 0.8, 0.25, 1), filter 0.4s ease"
+                                    : "opacity 0.3s ease, filter 0.4s ease";
                             } else {
-                                slide.el.style.transition = "transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.4s ease, scale 0.4s ease, filter 0.4s ease";
+                                slide.el.style.transition = useTransform
+                                    ? "transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.4s ease, scale 0.4s ease, filter 0.4s ease"
+                                    : "opacity 0.3s ease, filter 0.4s ease";
                             }
                             slide.el.style.transform = `translate3d(${translateX}%, 0, ${translateZ}px) scale(${scale})`;
                             slide.el.style.opacity = opacity;
@@ -437,6 +461,7 @@
             this.container.releasePointerCapture(e.pointerId);
             this.container.classList.remove("is-dragging");
 
+            const isSliderOn = this.state.getSliderMode() !== false;
             const deltaX = this.dragState.deltaX;
             const threshold = this.container.clientWidth * 0.075; // 7.5% swipe threshold
             const duration = Date.now() - this.dragState.startTime;
@@ -445,18 +470,20 @@
             let success = false;
             let dir = 0; // 1: right (prev), -1: left (next)
 
-            if (deltaX > threshold || (isSwipe && deltaX > 0)) {
-                if (this.currentIndex > 0) {
-                    success = true;
-                    dir = 1;
-                }
-            } else if (deltaX < -threshold || (isSwipe && deltaX < 0)) {
-                if (this.currentIndex < this.slides.length - 1) {
-                    success = true;
-                    dir = -1;
-                } else {
-                    // Trigger new image generation with random seed when trying to swipe next past the latest snapshot
-                    this.component._rerollSeed();
+            if (isSliderOn) {
+                if (deltaX > threshold || (isSwipe && deltaX > 0)) {
+                    if (this.currentIndex > 0) {
+                        success = true;
+                        dir = 1;
+                    }
+                } else if (deltaX < -threshold || (isSwipe && deltaX < 0)) {
+                    if (this.currentIndex < this.slides.length - 1) {
+                        success = true;
+                        dir = -1;
+                    } else {
+                        // Trigger new image generation with random seed when trying to swipe next past the latest snapshot
+                        this.component._rerollSeed();
+                    }
                 }
             }
 
@@ -474,6 +501,8 @@
                     // Slide successfully: load temporary snapshot UI configurations without interrupting background tasks
                     const isNewest = this.currentIndex === this.slides.length - 1;
                     this.applySlideSnapshot(activeSlide, !isNewest);
+
+                    this.checkAndTriggerPreGen();
                 }
             } else {
                 // If it's a simple rapid click/tap, trigger Simple Viewer Zoom
@@ -485,12 +514,16 @@
                     }
                 } else {
                     // Bounce back animation
+                    this.isBouncingBack = true;
                     this.renderSlides();
+                    setTimeout(() => {
+                        this.isBouncingBack = false;
+                    }, 400);
                 }
             }
         }
 
-        async applySlideSnapshot(slide, isTemporary = false) {
+        async applySlideSnapshot(slide, isTemporary = false, keepPrompt = false) {
             if (!slide || !slide.generationConfig) return;
             const cfg = { ...slide.generationConfig };
 
@@ -527,11 +560,11 @@
                 // Sync prompt text area
                 const promptStr = cfg.prompt || "";
                 const textarea = document.querySelector(".live-gen-prompt-input");
-                if (textarea) {
+                const isFocused = textarea && document.activeElement === textarea;
+                if (textarea && !keepPrompt && !isFocused) {
                     const isLatest = slide === this.slides[this.slides.length - 1];
-                    const isFocused = document.activeElement === textarea;
                     // Do not overwrite the prompt input if the user is actively focusing and editing the latest slide
-                    if (!isLatest || !isFocused) {
+                    if (!isLatest) {
                         textarea.value = promptStr;
                         this.component.promptUI.autoGrow(textarea);
                     }
@@ -588,7 +621,11 @@
                         }
                     });
                     
-                    matchingItems.forEach(el => el.classList.add("selected"));
+                    if (matchingItems.length > 0) {
+                        matchingItems.forEach(el => el.classList.add("selected"));
+                        // Smoothly scroll the highlighted timeline item into view
+                        matchingItems[0].scrollIntoView({ behavior: "smooth", block: "nearest" });
+                    }
                 }
 
                 // Sync Keep Img2Img badges
@@ -599,8 +636,12 @@
 
                 if (!isTemporary) {
                     // Perform complete state modifications for active generation configs
-                    this.state.prompt = promptStr;
-                    this.state.setPrompt(promptStr);
+                    if (!keepPrompt && !isFocused) {
+                        this.state.prompt = promptStr;
+                        this.state.setPrompt(promptStr);
+                    } else {
+                        cfg.prompt = this.state.prompt;
+                    }
                     this.state.seed = Number(cfg.seed) || 0;
                     this.component._applyConfig(cfg);
 
@@ -628,31 +669,46 @@
             }
         }
 
-        slideToImage(url, snapshotId, generationConfig = null) {
-            if (this.slides.length === 0) return false;
+        slideToImage(url, snapshotId, generationConfig = null, isTemporaryOverride = null) {
+            if (this.slides.length === 0) {
+                return false;
+            }
             
-            const index = this.slides.findIndex(s => {
-                if (snapshotId && s.snapshotId === snapshotId) return true;
+            const index = this.slides.findIndex((s, idx) => {
+                const matchSnap = snapshotId && s.snapshotId === snapshotId;
+                let matchUrl = false;
                 try {
                     const path1 = new URL(s.url, window.location.origin).pathname;
                     const path2 = new URL(url, window.location.origin).pathname;
-                    return path1 === path2;
+                    matchUrl = path1 === path2;
                 } catch (e) {
-                    return s.url === url || s.url.includes(url) || url.includes(s.url);
+                    matchUrl = s.url === url || s.url.includes(url) || url.includes(s.url);
                 }
+                return matchSnap || matchUrl;
             });
 
             if (index !== -1) {
                 const slide = this.slides[index];
                 if (url && slide.url !== url) {
-                    slide.url = url;
-                    slide.pvUrl = url;
-                    if (slide.el) {
-                        const img = slide.el.querySelector(".live-gen-preview__image");
-                        if (img) {
-                            img.src = url;
-                            img.classList.remove("is-loaded");
-                            img.onload = () => img.classList.add("is-loaded");
+                    // Only update url if it's not a giant base64 string replacing a clean server URL
+                    const isBase64 = url.startsWith("data:");
+                    const isCleanUrl = slide.url && (slide.url.startsWith("/") || slide.url.startsWith("http"));
+                    if (!isBase64 || !isCleanUrl) {
+                        const wasBase64 = slide.url && slide.url.startsWith("data:");
+                        slide.url = url;
+                        slide.pvUrl = url;
+                        if (slide.el) {
+                            const img = slide.el.querySelector(".live-gen-preview__image");
+                            if (img) {
+                                if (wasBase64 && !isBase64) {
+                                    // If already loaded as base64 and transitioning to a clean URL, do not remove is-loaded to prevent fade-out opacity flicker
+                                    img.src = url;
+                                } else {
+                                    img.src = url;
+                                    img.classList.remove("is-loaded");
+                                    img.onload = () => img.classList.add("is-loaded");
+                                }
+                            }
                         }
                     }
                 }
@@ -702,7 +758,10 @@
                 const currentSlide = this.slides[this.currentIndex];
                 if (currentSlide && !currentSlide.isPreview && currentSlide.generationConfig) {
                     const isNewest = this.currentIndex === this.slides.length - 1;
-                    this.applySlideSnapshot(currentSlide, !isNewest);
+                    const isTemp = isTemporaryOverride !== null ? isTemporaryOverride : !isNewest;
+                    this.applySlideSnapshot(currentSlide, isTemp);
+
+                    this.checkAndTriggerPreGen();
                 }
                 return true;
             }
@@ -716,15 +775,17 @@
             const isViewingGeneration = this.currentIndex === this.slides.length - 1 || this.currentIndex === -1;
 
             // Check if the image already exists in our historical slides
-            const existingIndex = this.slides.findIndex(s => {
-                if (metadata?.snapshotId && s.snapshotId === metadata.snapshotId) return true;
+            const existingIndex = this.slides.findIndex((s, idx) => {
+                const matchSnap = metadata?.snapshotId && s.snapshotId === metadata.snapshotId;
+                let matchUrl = false;
                 try {
                     const path1 = new URL(s.url, window.location.origin).pathname;
                     const path2 = new URL(src, window.location.origin).pathname;
-                    return path1 === path2;
+                    matchUrl = path1 === path2;
                 } catch (e) {
-                    return s.url === src || s.url.includes(src) || src.includes(s.url);
+                    matchUrl = s.url === src || s.url.includes(src) || src.includes(s.url);
                 }
+                return matchSnap || matchUrl;
             });
 
             // Always allow sliding to existing older historical slides (e.g. clicking timeline).
@@ -732,7 +793,7 @@
             const canSlide = existingIndex !== -1 && (existingIndex < this.slides.length - 1 || isViewingGeneration);
 
             // If we are showing a final image and we can slide to it, do that instead of creating a duplicate
-            if (!isPreview && canSlide && this.slideToImage(src, metadata?.snapshotId, metadata?.generationConfig)) {
+            if (!isPreview && canSlide && this.slideToImage(src, metadata?.snapshotId, metadata?.generationConfig, false)) {
                 return;
             }
 
@@ -746,7 +807,8 @@
                     isPreview: isPreview,
                     generationConfig: metadata?.generationConfig || null,
                     snapshotId: metadata?.snapshotId || null,
-                    el: null
+                    el: null,
+                    isPreGenerated: metadata?.isPreGenerated || this.isPreGenerating
                 };
                 this.slides.push(activeSlide);
             } else {
@@ -756,6 +818,9 @@
                 if (metadata) {
                     activeSlide.generationConfig = metadata.generationConfig;
                     activeSlide.snapshotId = metadata.snapshotId;
+                    if (metadata.isPreGenerated !== undefined) {
+                        activeSlide.isPreGenerated = metadata.isPreGenerated;
+                    }
                 }
             }
 
@@ -766,9 +831,15 @@
 
             this.renderSlides();
 
-            // If the final generation completed and the user is viewing it, fully apply the state snapshot
-            if (!isPreview && this.currentIndex === this.slides.length - 1) {
-                this.applySlideSnapshot(activeSlide, false);
+            // If the final generation completed and the user is viewing the latest snapshot sequence, trigger pre-gen check
+            const isViewingLatest = this.isViewingLatestSnapshot();
+            if (!isPreview && isViewingLatest) {
+                const isActiveSlide = this.currentIndex >= 0 && this.slides[this.currentIndex] === activeSlide;
+                if (isActiveSlide) {
+                    this.applySlideSnapshot(activeSlide, false);
+                }
+
+                this.checkAndTriggerPreGen();
             }
         }
 
@@ -792,7 +863,8 @@
                 isPreview: true,
                 generationConfig: null,
                 snapshotId: null,
-                el: null
+                el: null,
+                isPreGenerated: this.isPreGenerating
             };
 
             const wasAtEnd = this.currentIndex === this.slides.length - 1 || this.currentIndex === -1 || this.userTriggeredGeneration;
@@ -800,7 +872,7 @@
             
             this.slides.push(newSlide);
 
-            if (wasAtEnd) {
+            if (wasAtEnd && !this.isPreGenerating) {
                 this.currentIndex = this.slides.length - 1;
             }
 
@@ -846,11 +918,96 @@
                 if (activeSlide && !activeSlide.isPreview && activeSlide.generationConfig) {
                     const isNewest = this.currentIndex === this.slides.length - 1;
                     this.applySlideSnapshot(activeSlide, !isNewest);
+
+                    this.checkAndTriggerPreGen();
                 }
             } else {
                 this.state.lastFinalImageBase64 = null;
                 if (this.state.config) delete this.state.config.snapshot_id;
             }
+        }
+
+        isViewingLatestSnapshot() {
+            if (this.slides.length === 0) return false;
+            if (this.currentIndex === -1) return true;
+            
+            // Một slide được coi là "mới nhất" nếu phía sau nó (từ currentIndex + 1 đến cuối) 
+            // không có slide nào được tạo chủ động bởi người dùng (tức là tất cả slides phía sau, nếu có, đều là isPreGenerated).
+            for (let i = this.currentIndex + 1; i < this.slides.length; i++) {
+                if (!this.slides[i].isPreGenerated) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        getPreGeneratedCount() {
+            let count = 0;
+            for (let i = this.slides.length - 1; i >= 0; i--) {
+                if (this.slides[i].isPreGenerated) {
+                    count++;
+                } else {
+                    break;
+                }
+            }
+            return count;
+        }
+
+        checkAndTriggerPreGen() {
+            if (this.slides.length === 0) return;
+
+            const isSliderOn = this.state.getSliderMode() !== false;
+            const maxPreGen = isSliderOn ? this.state.getPreGen() : 0;
+            if (maxPreGen === 0) return;
+
+            const lastSlide = this.slides[this.slides.length - 1];
+            if (lastSlide.isPreview) return;
+
+            const isViewingLatest = this.isViewingLatestSnapshot();
+            if (!isViewingLatest) return;
+
+            if (this.component.state.running) return;
+
+            const currentPreGenCount = this.getPreGeneratedCount();
+            if (currentPreGenCount >= maxPreGen) {
+                return;
+            }
+
+            this.triggerPreGen(lastSlide);
+        }
+
+        triggerPreGen(baseSlide) {
+            if (this.isPreGenerating) return;
+            this.isPreGenerating = true;
+            this.component._generatePreGen(baseSlide);
+        }
+
+        removeActivePreviewSlide() {
+            if (this.slides.length === 0) return;
+            const lastSlide = this.slides[this.slides.length - 1];
+            if (lastSlide && lastSlide.isPreview) {
+                if (lastSlide.el) {
+                    lastSlide.el.remove();
+                }
+                this.slides.pop();
+                
+                // If the user was looking at the deleted preview slide, move the index to the new last slide
+                if (this.currentIndex >= this.slides.length) {
+                    this.currentIndex = this.slides.length - 1;
+                }
+                
+                // Make sure the current slide configuration is applied permanently
+                const currentSlide = this.slides[this.currentIndex];
+                if (currentSlide && !currentSlide.isPreview && currentSlide.generationConfig) {
+                    this.applySlideSnapshot(currentSlide, false);
+                }
+                
+                this.renderSlides();
+            }
+        }
+
+        removePreGenSlide() {
+            this.removeActivePreviewSlide();
         }
 
         setStatus(text, mode = "idle") {

@@ -4,7 +4,7 @@ import os
 import time
 import uuid
 import websocket
-from ..utils.snapshot import compute_snapshot_id
+from ..utils.snapshot import compute_snapshot_id, normalize_prompt
 
 class GenerationService:
     def __init__(self, core_api, config_service, history_service):
@@ -37,7 +37,8 @@ class GenerationService:
             if history_images and allow_cache:
                 for img in history_images:
                     cfg = img.get("generationConfig") or {}
-                    if cfg.get("snapshot_id") == snapshot_id:
+                    img_snap_id = cfg.get("snapshot_id")
+                    if img_snap_id == snapshot_id:
                         # Match hires_enabled exactly
                         cached_hires = cfg.get("hires_enabled", False)
                         if isinstance(cached_hires, str):
@@ -238,7 +239,7 @@ class GenerationService:
         base.update(self.config_service.sanitize_config(overrides))
 
         quality = str(base.get("quality") or "").strip()
-        positive_prompt = prompt
+        positive_prompt = normalize_prompt(prompt)
 
         # Append LoRA prompt tags with multi-LoRA awareness
         lora_tags_str = ""

@@ -32,6 +32,23 @@
         setPreviewBlur(val) {
             localStorage.setItem(STORAGE_BLUR, val);
         }
+
+        getSliderMode() {
+            return localStorage.getItem("yuuka.liveGen.sliderMode") !== "false";
+        }
+
+        setSliderMode(val) {
+            localStorage.setItem("yuuka.liveGen.sliderMode", val ? "true" : "false");
+        }
+
+        getPreGen() {
+            const val = localStorage.getItem("yuuka.liveGen.preGen");
+            return val !== null ? parseInt(val) : 1;
+        }
+
+        setPreGen(val) {
+            localStorage.setItem("yuuka.liveGen.preGen", val);
+        }
     }
 
     window.Yuuka.liveGen.State = LiveGenState;

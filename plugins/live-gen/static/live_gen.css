@@ -566,6 +566,11 @@ body.live-gen-active #navibar-tray {
         background: var(--color-accent);
         color: white;
     }
+
+    .live-gen-prompt-input {
+        font-size: 13px;
+        padding: 6px 4px;
+    }
 }
 
 /* Desktop - ẩn mobile nav buttons */

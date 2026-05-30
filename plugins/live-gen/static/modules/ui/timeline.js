@@ -667,6 +667,7 @@
                     });
                 }
                 this.updateHeaderTitle(panel);
+                this.syncHighlightFromPreview();
             } catch (err) {
                 contentEl.innerHTML = `<div style="padding: 20px; color: var(--color-error); text-align: center;">Lỗi tải dữ liệu: ${err.message}</div>`;
             }
@@ -710,7 +711,7 @@
                 this.component.promptUI.autoGrow(textarea);
             }
 
-            if (!this.component.previewUI.slideToImage(item.url, item.generationConfig?.snapshot_id)) {
+            if (!this.component.previewUI.slideToImage(item.url, item.generationConfig?.snapshot_id, null, false)) {
                 this.component.previewUI.showImage(item.url, false);
             }
             this.state.lastFinalImageBase64 = null;
@@ -752,6 +753,45 @@
 
             if (window.innerWidth <= 640) {
                 this.closeTimeline(panel);
+            }
+        }
+
+        syncHighlightFromPreview() {
+            const panel = document.querySelector(".live-gen-timeline-panel");
+            if (!panel) return;
+
+            // Xoá highlight cũ
+            panel.querySelectorAll(".timeline-item").forEach(el => el.classList.remove("selected"));
+
+            if (!this.component.previewUI || this.component.previewUI.slides.length === 0) return;
+            const activeIndex = this.component.previewUI.currentIndex;
+            if (activeIndex < 0 || activeIndex >= this.component.previewUI.slides.length) return;
+            const activeSlide = this.component.previewUI.slides[activeIndex];
+            if (!activeSlide) return;
+
+            const snapId = activeSlide.snapshotId;
+            const targetUrl = activeSlide.pvUrl || activeSlide.url;
+
+            const matchingItems = Array.from(panel.querySelectorAll(".timeline-item")).filter(el => {
+                const elSnapId = el.dataset.snapshotId;
+                if (snapId && elSnapId) {
+                    return elSnapId === snapId;
+                }
+                const imgEl = el.querySelector("img");
+                if (!imgEl) return false;
+                try {
+                    const path1 = new URL(imgEl.src, window.location.href).pathname;
+                    const path2 = new URL(targetUrl, window.location.href).pathname;
+                    return path1 === path2;
+                } catch (e) {
+                    return imgEl.src.includes(targetUrl);
+                }
+            });
+
+            if (matchingItems.length > 0) {
+                matchingItems.forEach(el => el.classList.add("selected"));
+                // Smoothly scroll the highlighted timeline item into view
+                matchingItems[0].scrollIntoView({ behavior: "smooth", block: "nearest" });
             }
         }
     }

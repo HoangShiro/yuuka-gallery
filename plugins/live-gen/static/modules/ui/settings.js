@@ -83,7 +83,7 @@
                 <div class="live-gen-settings-tabs">
                     <button type="button" class="live-gen-tab-btn active" data-tab="style_lora">Style</button>
                     <button type="button" class="live-gen-tab-btn" data-tab="generation">Generation</button>
-                    <button type="button" class="live-gen-tab-btn" data-tab="i2i">I2I</button>
+                    <button type="button" class="live-gen-tab-btn" data-tab="ui">UI</button>
                     <button type="button" class="live-gen-tab-btn" data-tab="llm">LLM</button>
                     <button type="button" class="live-gen-tab-btn" data-tab="suggest">Suggest</button>
                 </div>
@@ -104,9 +104,7 @@
             panel.addEventListener("touchstart", (event) => event.stopPropagation(), { passive: true });
 
             const close = () => {
-                if (typeof executeAutoSave === 'function') {
-                    executeAutoSave();
-                }
+                clearTimeout(saveTimeout);
                 panel.classList.remove("open");
                 document.body.classList.remove("live-gen-settings-open");
                 setTimeout(() => {
@@ -541,6 +539,26 @@
                         <input type="number" inputmode="numeric" step="1" min="0" data-role="seed" value="${String(this.state.seed)}">
                     </label>
 
+                    <div class="live-gen-setting-group">
+                        <label class="live-gen-setting-row">
+                            <div class="live-gen-label-container">
+                                <span>Keep Denoise (Ghim)</span>
+                                <span class="live-gen-slider-value" id="keep-denoise-val">${cfg.i2i_keep_denoise != null ? cfg.i2i_keep_denoise : 0.45}</span>
+                            </div>
+                            <input type="range" min="0.05" max="0.95" step="0.05" data-role="i2i_keep_denoise" value="${cfg.i2i_keep_denoise != null ? cfg.i2i_keep_denoise : 0.45}" oninput="document.getElementById('keep-denoise-val').innerText = this.value">
+                        </label>
+
+                        <label class="live-gen-setting-row">
+                            <div class="live-gen-label-container">
+                                <span>Refine Denoise (Tinh chỉnh)</span>
+                                <span class="live-gen-slider-value" id="refine-denoise-val">${cfg.i2i_refine_denoise != null ? cfg.i2i_refine_denoise : 0.25}</span>
+                            </div>
+                            <input type="range" min="0.05" max="0.95" step="0.05" data-role="i2i_refine_denoise" value="${cfg.i2i_refine_denoise != null ? cfg.i2i_refine_denoise : 0.25}" oninput="document.getElementById('refine-denoise-val').innerText = this.value">
+                        </label>
+                    </div>
+                </div>
+
+                <div class="live-gen-tab-content" data-tab-content="ui">
                      <label class="live-gen-setting-row" style="${this.state.comfySupportsPreview === false ? 'opacity: 0.7;' : ''}">
                          <span style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                              Chế độ Preview (Preview Mode)
@@ -560,23 +578,21 @@
                         </div>
                         <input type="range" min="0" max="5" step="0.5" data-role="preview_blur" value="${this.state.getPreviewBlur()}" oninput="const v = parseFloat(this.value); document.getElementById('preview-blur-val').innerText = v === 0 ? 'OFF' : v.toFixed(1) + 'px'; localStorage.setItem('yuuka.liveGen.previewBlur', this.value);">
                     </label>
-                </div>
 
-                <div class="live-gen-tab-content" data-tab-content="i2i">
-                    <label class="live-gen-setting-row">
-                        <div class="live-gen-label-container">
-                            <span>Keep Denoise (Ghim để sửa)</span>
-                            <span class="live-gen-slider-value" id="keep-denoise-val">${cfg.i2i_keep_denoise != null ? cfg.i2i_keep_denoise : 0.45}</span>
-                        </div>
-                        <input type="range" min="0.05" max="0.95" step="0.05" data-role="i2i_keep_denoise" value="${cfg.i2i_keep_denoise != null ? cfg.i2i_keep_denoise : 0.45}" oninput="document.getElementById('keep-denoise-val').innerText = this.value">
+                    <label class="live-gen-setting-row" style="display: flex; flex-direction: row; justify-content: space-between; align-items: center; cursor: pointer; margin-bottom: var(--spacing-4);">
+                        <span style="font-weight: bold; color: var(--color-accent);">Chế độ Slider (Slider Mode)</span>
+                        <label class="live-gen-switch">
+                            <input type="checkbox" data-role="slider_mode" ${this.state.getSliderMode() !== false ? "checked" : ""}>
+                            <span class="live-gen-switch-slider"></span>
+                        </label>
                     </label>
 
-                    <label class="live-gen-setting-row">
+                    <label class="live-gen-setting-row" id="pre-gen-container">
                         <div class="live-gen-label-container">
-                            <span>Refine Denoise (Tinh chỉnh)</span>
-                            <span class="live-gen-slider-value" id="refine-denoise-val">${cfg.i2i_refine_denoise != null ? cfg.i2i_refine_denoise : 0.25}</span>
+                            <span>Số lượng Pre-gen</span>
+                            <span class="live-gen-slider-value" id="pre-gen-val">${this.state.getPreGen() === 0 ? 'OFF' : this.state.getPreGen()}</span>
                         </div>
-                        <input type="range" min="0.05" max="0.95" step="0.05" data-role="i2i_refine_denoise" value="${cfg.i2i_refine_denoise != null ? cfg.i2i_refine_denoise : 0.25}" oninput="document.getElementById('refine-denoise-val').innerText = this.value">
+                        <input type="range" min="0" max="10" step="1" data-role="pre_gen" value="${this.state.getPreGen()}" oninput="const v = parseInt(this.value); document.getElementById('pre-gen-val').innerText = v === 0 ? 'OFF' : v; localStorage.setItem('yuuka.liveGen.preGen', this.value);">
                     </label>
                 </div>
 
@@ -1154,19 +1170,68 @@
 
                 try {
                     const oldConfig = this.state.config || {};
-                    let needsRegen = !Object.keys(oldConfig).length;
+                    let needsRegen = false;
                     const regenKeys = [
                         'ckpt_name', 'width', 'height', 'sampler_name', 'scheduler', 
-                        'steps', 'cfg', 'seed', 'quality', 'negative', 'i2i_keep_denoise', 'i2i_refine_denoise',
+                        'steps', 'cfg', 'seed', 'quality', 'negative',
                         'lora_name', 'lora_strength_model', 'lora_strength_clip', 
                         'lora_names', 'lora_chain', 'multi_lora_prompt_tags'
                     ];
-                    if (!needsRegen) {
-                        for (const key of regenKeys) {
-                            if (JSON.stringify(oldConfig[key]) !== JSON.stringify(newConfig[key])) {
-                                needsRegen = true;
-                                break;
+
+                    const isEmpty = (v) => {
+                        if (v == null) return true;
+                        if (typeof v === 'string' && v.trim() === '') return true;
+                        if (Array.isArray(v) && v.length === 0) return true;
+                        if (typeof v === 'object' && Object.keys(v).length === 0) return true;
+                        return false;
+                    };
+
+                    const isEqual = (a, b) => {
+                        if (a === b) return true;
+                        if (a == null || b == null) return false;
+                        
+                        const typeA = typeof a;
+                        const typeB = typeof b;
+                        if (typeA !== typeB) return false;
+                        
+                        if (typeA === 'object') {
+                            if (Array.isArray(a)) {
+                                if (!Array.isArray(b)) return false;
+                                if (a.length !== b.length) return false;
+                                for (let i = 0; i < a.length; i++) {
+                                    if (!isEqual(a[i], b[i])) return false;
+                                }
+                                return true;
+                            } else {
+                                if (Array.isArray(b)) return false;
+                                const keysA = Object.keys(a);
+                                const keysB = Object.keys(b);
+                                if (keysA.length !== keysB.length) return false;
+                                for (const k of keysA) {
+                                    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+                                    if (!isEqual(a[k], b[k])) return false;
+                                }
+                                return true;
                             }
+                        }
+                        
+                        if (typeA === 'number' || typeB === 'number') {
+                            return Number(a) === Number(b);
+                        }
+                        
+                        return false;
+                    };
+
+                    const isDifferent = (val1, val2) => {
+                        if (isEmpty(val1) && isEmpty(val2)) return false;
+                        return !isEqual(val1, val2);
+                    };
+
+                    for (const key of regenKeys) {
+                        if (isDifferent(oldConfig[key], newConfig[key])) {
+                            console.log(`[LiveGen Settings] Mismatch found in key "${key}":`, oldConfig[key], "vs", newConfig[key]);
+                            needsRegen = true;
+                            break;
                         }
                     }
 
@@ -1188,7 +1253,7 @@
                     sel.removeEventListener('change', triggerAutoSave);
                     sel.addEventListener('change', triggerAutoSave);
                 });
-                formEl.querySelectorAll('input[type="text"], input[type="number"], textarea').forEach(inp => {
+                formEl.querySelectorAll('input[type="text"], input[type="number"], input[type="password"], textarea').forEach(inp => {
                     inp.removeEventListener('blur', triggerAutoSave);
                     inp.addEventListener('blur', triggerAutoSave);
                     inp.removeEventListener('change', triggerAutoSave);
@@ -1197,12 +1262,14 @@
                     inp.addEventListener('input', triggerAutoSave);
                 });
                 formEl.querySelectorAll('input[type="range"]').forEach(sld => {
+                    if (sld.dataset.role === 'preview_blur' || sld.dataset.role === 'pre_gen') return;
                     sld.removeEventListener('blur', triggerAutoSave);
                     sld.addEventListener('blur', triggerAutoSave);
                     sld.removeEventListener('change', triggerAutoSave);
                     sld.addEventListener('change', triggerAutoSave);
                 });
                 formEl.querySelectorAll('input[type="checkbox"]').forEach(chk => {
+                    if (chk.dataset.role === 'slider_mode') return;
                     chk.removeEventListener('change', triggerAutoSave);
                     chk.addEventListener('change', triggerAutoSave);
                 });
@@ -1244,6 +1311,35 @@
 
             // Run immediately on settings open
             updateLLMFieldsState();
+
+            // Dynamic controller for Slider mode and Pre-gen
+            const updateSliderUIState = () => {
+                const sliderModeInput = formEl.querySelector('[data-role="slider_mode"]');
+                const isSliderEnabled = sliderModeInput ? sliderModeInput.checked : true;
+                
+                const preGenRow = formEl.querySelector('#pre-gen-container');
+                if (preGenRow) {
+                    preGenRow.style.opacity = isSliderEnabled ? "1" : "0.4";
+                    preGenRow.style.pointerEvents = isSliderEnabled ? "auto" : "none";
+                    
+                    const input = preGenRow.querySelector('input');
+                    if (input) input.disabled = !isSliderEnabled;
+                }
+            };
+
+            const sliderModeInput = formEl.querySelector('[data-role="slider_mode"]');
+            if (sliderModeInput) {
+                sliderModeInput.addEventListener('change', () => {
+                    this.state.setSliderMode(sliderModeInput.checked);
+                    updateSliderUIState();
+                    if (this.component.previewUI) {
+                        this.component.previewUI.renderSlides();
+                    }
+                });
+            }
+
+            // Run immediately on settings open
+            updateSliderUIState();
 
             // --- LLM Model Dropdown & Reset Instruct Button Logic ---
             const DEFAULT_LLM_INSTRUCTION = "You are a Danbooru-style Booru tags optimizer and expander for Anime Illustrious models. Analyze the user's existing tags and their style preferences. Suggest up to 15-20 additional high-quality Booru tags to expand the scene (clothing details, camera angle, lighting, background, artistic style, character expression). CRITICAL RULES: 1. Return ONLY the new tags, separated by commas, starting with a comma. No explanations, no conversational text, no markdown. 2. Optimize for high-quality Booru tags (e.g., 'masterpiece, best quality, depth of field'). 3. If the input contains only one character or no characters, prioritize keeping it to a SINGLE character scene (e.g., '1girl, solo' or '1boy, solo') and expand on their actions, features, or background. Do NOT add other characters.";
