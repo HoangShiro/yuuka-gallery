@@ -23,6 +23,7 @@
             if (existingTimeline) {
                 existingTimeline.remove();
                 document.body.classList.remove("live-gen-timeline-open");
+                document.body.classList.add("live-gen-settings-open");
             }
 
             const existingPanel = document.querySelector(".live-gen-settings-panel");

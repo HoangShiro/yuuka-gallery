@@ -17,6 +17,7 @@
             if (existingSettings) {
                 existingSettings.remove();
                 document.body.classList.remove("live-gen-settings-open");
+                document.body.classList.add("live-gen-timeline-open");
             }
 
             const existingPanel = document.querySelector(".live-gen-timeline-panel");
