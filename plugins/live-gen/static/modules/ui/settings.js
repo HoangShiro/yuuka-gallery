@@ -1042,11 +1042,31 @@
                 });
 
                 try {
+                    const oldConfig = this.state.config || {};
+                    let needsRegen = !Object.keys(oldConfig).length;
+                    const regenKeys = [
+                        'ckpt_name', 'width', 'height', 'sampler_name', 'scheduler', 
+                        'steps', 'cfg', 'seed', 'quality', 'negative', 'i2i_keep_denoise', 'i2i_refine_denoise',
+                        'lora_name', 'lora_strength_model', 'lora_strength_clip', 
+                        'lora_names', 'lora_chain', 'multi_lora_prompt_tags'
+                    ];
+                    if (!needsRegen) {
+                        for (const key of regenKeys) {
+                            if (JSON.stringify(oldConfig[key]) !== JSON.stringify(newConfig[key])) {
+                                needsRegen = true;
+                                break;
+                            }
+                        }
+                    }
+
                     const saved = await this.apiClient.saveConfig(newConfig);
                     this.component._applyConfig(saved.config);
                     this.wsClient.send({ type: "update_config", config: saved.config });
-                    this.component.lastGeneratedPrompt = "";
-                    this.component._scheduleGeneration(15);
+                    
+                    if (needsRegen) {
+                        this.component.lastGeneratedPrompt = "";
+                        this.component._scheduleGeneration(15);
+                    }
                 } catch (err) {
                     console.error("Auto-save failed:", err);
                 }
