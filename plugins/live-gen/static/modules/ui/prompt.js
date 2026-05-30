@@ -124,17 +124,8 @@
         }
 
         updateMobileNavButtonsPosition() {
-            const mobileButtons = document.getElementById("live-gen-mobile-nav-buttons");
-            if (!mobileButtons) return;
-            
-            const promptShell = document.querySelector(".live-gen-prompt-shell");
-            if (!promptShell) return;
-            
-            const shellHeight = promptShell.offsetHeight;
-            const gap = 8; // Khoảng cách giữa buttons và prompt shell
-            
-            const bottomPosition = shellHeight + gap;
-            mobileButtons.style.bottom = `${bottomPosition}px`;
+            // Nút hành động di động hiện được định vị chính xác bằng CSS (bottom: 100%)
+            // để tự động điều chỉnh theo chiều cao co giãn của `#navibar-tray`
         }
 
         setupMobileNavButtons() {
@@ -189,7 +180,12 @@
             container.appendChild(settingsBtn);
             container.appendChild(timelineBtn);
             
-            document.body.appendChild(container);
+            const tray = document.getElementById("navibar-tray");
+            if (tray) {
+                tray.appendChild(container);
+            } else {
+                document.body.appendChild(container);
+            }
             this.component._syncMobileNavButtonStates();
         }
 

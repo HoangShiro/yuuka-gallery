@@ -45,8 +45,28 @@
             const wasPreview = this.imageEl.classList.contains("is-preview");
             if (isPreview) {
                 this.imageEl.classList.remove("is-preview-fading");
-                const blur = this.state.getPreviewBlur();
-                this.imageEl.style.setProperty("--preview-blur", `${blur}px`);
+                const baseBlur = this.state.getPreviewBlur();
+                let finalBlur = baseBlur;
+
+                if (baseBlur > 0) {
+                    const totalSteps = Number(this.state.config?.steps) || 12;
+                    const currentStep = Number(this.state.currentStep) || 0;
+                    
+                    if (totalSteps > 1 && currentStep > 0) {
+                        const maxBlurLimit = 20; // Giới hạn max blur vật lý (px)
+                        if (maxBlurLimit > baseBlur) {
+                            // Tỷ lệ tiến trình t từ 0 (step 1) đến 1 (step cuối)
+                            const t = Math.min(1, Math.max(0, (currentStep - 1) / (totalSteps - 1)));
+                            
+                            // Sử dụng đồ thị lũy thừa bậc 3 để cong mạnh ở giai đoạn đầu
+                            const decay = Math.pow(1 - t, 3); 
+                            
+                            finalBlur = baseBlur + (maxBlurLimit - baseBlur) * decay;
+                        }
+                    }
+                }
+
+                this.imageEl.style.setProperty("--preview-blur", `${finalBlur.toFixed(1)}px`);
             } else {
                 this.imageEl.classList.toggle("is-preview-fading", wasPreview);
             }

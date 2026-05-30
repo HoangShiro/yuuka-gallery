@@ -176,6 +176,10 @@ body.live-gen-active #main-nav {
     z-index: 3600;
 }
 
+body.live-gen-active #navibar-tray {
+    position: relative;
+}
+
 .live-gen-prompt-field {
     min-width: 0;
 }
@@ -403,8 +407,9 @@ body.live-gen-active #main-nav {
 
     /* Mobile nav buttons - nằm bên trên navibar */
     .live-gen-mobile-nav-buttons {
-        position: fixed;
-        bottom: calc(var(--nav-height, 56px) + 8px); /* 8px khoảng cách từ navibar */
+        position: absolute;
+        bottom: 100%;
+        margin-bottom: 8px;
         left: 8px;
         right: 8px;
         z-index: 3700; /* Trên navibar (3600) để có thể tương tác */
@@ -418,6 +423,11 @@ body.live-gen-active #main-nav {
 
     body.live-gen-prompt-focused .live-gen-mobile-nav-buttons {
         display: flex;
+    }
+
+    /* Ẩn thanh nút di động khi danh sách tiên đoán đang hiển thị phần tử gợi ý */
+    #navibar-tray:has(.tag-autocomplete-list li) .live-gen-mobile-nav-buttons {
+        display: none !important;
     }
 
     .live-gen-mobile-nav-btn {
