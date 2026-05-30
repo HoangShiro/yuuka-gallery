@@ -1,7 +1,7 @@
 {
     "id": "live-gen",
     "name": "Live Gen",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "author": "Yuuka",
     "description": "Stream preview images from ComfyUI while the prompt is being edited (Restructured Modular Version).",
     "static_folder": "static",

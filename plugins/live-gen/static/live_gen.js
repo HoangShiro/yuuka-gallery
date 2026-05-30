@@ -180,6 +180,7 @@
                     this.state.currentStep = 0;
                     this._setProgress(0);
                     this._setStatus("Đang gửi prompt...", "running");
+                    this.receivedPreviewThisRun = false;
                     break;
                 case "queued":
                     this.state.running = true;
@@ -195,6 +196,7 @@
                     this._setStatus(message.message || "Đang tạo...", "running");
                     break;
                 case "preview":
+                    this.receivedPreviewThisRun = true;
                     const pMode = (this.state.config || {}).preview_mode || "live";
                     if (pMode === "live") {
                         this.previewUI.showImage(message.image, true);
@@ -209,6 +211,14 @@
                     this._setProgress(100);
                     this.previewUI.showImage(message.image, false);
                     this.state.lastFinalImageBase64 = message.image;
+
+                    // Detect preview support and update state dynamically
+                    const supportsPreview = !!this.receivedPreviewThisRun;
+                    if (this.state.comfySupportsPreview !== supportsPreview) {
+                        this.state.comfySupportsPreview = supportsPreview;
+                        localStorage.setItem("yuuka.liveGen.comfySupportsPreview", String(supportsPreview));
+                        this.settingsUI.updatePreviewModeState();
+                    }
 
                     if (message.snapshot_id && this.state.config) {
                         this.state.config.snapshot_id = message.snapshot_id;

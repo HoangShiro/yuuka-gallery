@@ -17,6 +17,7 @@
             this.lastFinalImageBase64 = "";
             this.generationStartTime = 0;
             this.currentStep = 0;
+            this.comfySupportsPreview = localStorage.getItem("yuuka.liveGen.comfySupportsPreview") !== "false";
         }
 
         setPrompt(val) {

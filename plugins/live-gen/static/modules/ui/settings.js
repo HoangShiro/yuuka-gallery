@@ -13,6 +13,35 @@
             this.loraMetadataMap = {};
             this.loraMetadataPromise = null;
         }
+ 
+        updatePreviewModeState() {
+            const panel = document.querySelector(".live-gen-settings-panel");
+            if (!panel) return;
+            const selectEl = panel.querySelector('select[data-role="preview_mode"]');
+            if (!selectEl) return;
+            
+            const isSupported = this.state.comfySupportsPreview !== false;
+            selectEl.disabled = !isSupported;
+            
+            const rowEl = selectEl.closest('.live-gen-setting-row');
+            if (rowEl) {
+                rowEl.style.opacity = isSupported ? '' : '0.7';
+                const spanHeader = rowEl.querySelector('span');
+                if (spanHeader) {
+                    // Remove existing warning if any
+                    const warning = spanHeader.querySelector('.preview-unsupported-warning');
+                    if (warning) warning.remove();
+                    
+                    if (!isSupported) {
+                        const warnSpan = document.createElement('span');
+                        warnSpan.className = 'preview-unsupported-warning';
+                        warnSpan.style.cssText = 'color: var(--color-error); font-size: 11px; font-weight: bold; background: color-mix(in srgb, var(--color-error) 10%, transparent); padding: 2px 6px; border-radius: var(--rounded-sm); margin-left: 8px;';
+                        warnSpan.textContent = 'Không hỗ trợ (ComfyUI tắt preview)';
+                        spanHeader.appendChild(warnSpan);
+                    }
+                }
+            }
+        }
 
         async openSettings() {
             if (document.activeElement && document.activeElement !== document.body) {
@@ -505,14 +534,17 @@
                         <input type="number" inputmode="numeric" step="1" min="0" data-role="seed" value="${String(this.state.seed)}">
                     </label>
 
-                    <label class="live-gen-setting-row">
-                        <span>Chế độ Preview (Preview Mode)</span>
-                        <select data-role="preview_mode">
-                            <option value="live" ${cfg.preview_mode === "live" || !cfg.preview_mode ? "selected" : ""}>Live (Mọi step)</option>
-                            <option value="every_5" ${cfg.preview_mode === "every_5" ? "selected" : ""}>Every 5 steps (5 step 1 lần)</option>
-                            <option value="full" ${cfg.preview_mode === "full" ? "selected" : ""}>Full (Chỉ hiển thị kết quả cuối)</option>
-                        </select>
-                    </label>
+                     <label class="live-gen-setting-row" style="${this.state.comfySupportsPreview === false ? 'opacity: 0.7;' : ''}">
+                         <span style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                             Chế độ Preview (Preview Mode)
+                             ${this.state.comfySupportsPreview === false ? '<span class="preview-unsupported-warning" style="color: var(--color-error); font-size: 11px; font-weight: bold; background: color-mix(in srgb, var(--color-error) 10%, transparent); padding: 2px 6px; border-radius: var(--rounded-sm); margin-left: 8px;">Không hỗ trợ (ComfyUI tắt preview)</span>' : ''}
+                         </span>
+                         <select data-role="preview_mode" ${this.state.comfySupportsPreview === false ? 'disabled' : ''}>
+                             <option value="live" ${cfg.preview_mode === "live" || !cfg.preview_mode ? "selected" : ""}>Live (Mọi step)</option>
+                             <option value="every_5" ${cfg.preview_mode === "every_5" ? "selected" : ""}>Every 5 steps (5 step 1 lần)</option>
+                             <option value="full" ${cfg.preview_mode === "full" ? "selected" : ""}>Full (Chỉ hiển thị kết quả cuối)</option>
+                         </select>
+                     </label>
 
                     <label class="live-gen-setting-row">
                         <div class="live-gen-label-container">
