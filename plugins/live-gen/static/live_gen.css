@@ -30,8 +30,41 @@ body.live-gen-active > .container {
 .live-gen-preview {
     position: absolute;
     inset: 0;
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    perspective: 1200px;
+    perspective-origin: center;
+    touch-action: pan-y;
+    user-select: none;
+}
+
+.live-gen-preview.is-dragging {
+    cursor: grabbing !important;
+}
+
+.live-gen-preview__slide {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform-style: preserve-3d;
+    backface-visibility: hidden;
+    pointer-events: none;
+    transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.4s ease, scale 0.4s ease, filter 0.4s ease;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.live-gen-preview__slide.is-active {
+    pointer-events: auto;
+}
+
+.live-gen-preview__slide.is-active .live-gen-preview__image.is-loaded:not(.is-preview) {
+    cursor: pointer;
 }
 
 .live-gen-preview__image {
@@ -42,21 +75,87 @@ body.live-gen-active > .container {
     max-height: 100dvh;
     object-fit: contain;
     opacity: 0;
-    transform: scale(1);
-    transition: filter 0s linear;
+    transition: opacity 0.3s ease, filter 0s linear;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
 }
 
 .live-gen-preview__image.is-loaded {
     opacity: 1;
-    cursor: pointer;
+    pointer-events: auto;
+}
+
+/* Lightly round the corners of adjacent images, main image/slide doesn't need rounding */
+.live-gen-preview__slide:not(.is-active) .live-gen-preview__image {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 8px;
+    clip-path: inset(0px round 8px);
 }
 
 .live-gen-preview__image.is-preview {
     filter: saturate(0.98) blur(var(--preview-blur, 0px));
+    /* Clip blurry edges and apply premium rounded corners */
+    clip-path: inset(0px round 16px);
 }
 
 .live-gen-preview__image.is-preview-fading {
     transition: filter 0.16s ease;
+}
+
+/* Glassmorphism slide loader card for new generations */
+.live-gen-preview__slide-loader {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    background: color-mix(in srgb, var(--color-card-bg) 60%, transparent);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-lg);
+    padding: 40px;
+    box-sizing: border-box;
+    box-shadow: 0 20px 40px var(--color-shadow);
+    text-align: center;
+    
+    /* Perfect CSS Contain aspect-ratio simulation for non-image DOM elements */
+    width: 100%;
+    height: 100%;
+    max-width: min(100vw, calc(100vh * var(--preview-aspect-ratio-num, 0.777)));
+    max-height: min(100vh, calc(100vw / var(--preview-aspect-ratio-num, 0.777)));
+    aspect-ratio: var(--preview-aspect-ratio, 896 / 1152);
+    
+    /* Smooth opacity breathing animation instead of vertical pulsing */
+    animation: live-gen-loader-breathing 2.2s ease-in-out infinite;
+}
+
+@keyframes live-gen-loader-breathing {
+    0%, 100% {
+        opacity: 0.45;
+        box-shadow: 0 15px 30px var(--color-shadow);
+    }
+    50% {
+        opacity: 0.85;
+        box-shadow: 0 25px 50px var(--color-shadow);
+    }
+}
+
+.live-gen-preview__slide-loader p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--color-secondary-text);
+    font-weight: var(--font-weight-medium);
+}
+
+.live-gen-loader-icon {
+    color: var(--color-accent);
+    font-size: 42px !important;
+    margin-bottom: 4px;
 }
 
 .live-gen-empty {
@@ -163,6 +262,7 @@ body.live-gen-active > .container {
     gap: var(--spacing-1);
     width: 100%;
     box-sizing: border-box;
+    position: relative;
 }
 
 body.live-gen-active #navibar-search-bar,
@@ -1377,5 +1477,465 @@ body.live-gen-active #navibar-tray {
 .timeline-empty-message span {
     font-size: 36px;
     color: var(--color-border);
+}
+/* --- Timeline Grouping & Stack Layout --- */
+.live-gen-timeline-group-controls {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.live-gen-group-btn {
+    border: none;
+    background: transparent;
+    color: var(--color-secondary-text);
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    border-radius: var(--rounded-md);
+    transition: all 0.16s ease;
+}
+
+.live-gen-group-btn:hover {
+    color: var(--color-primary-text);
+    background: var(--color-primary-bg);
+}
+
+.live-gen-group-btn.active {
+    color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.live-gen-group-btn .material-symbols-outlined {
+    font-size: 18px;
+}
+
+/* Stack Thumbnail representation (for collapsed groups) */
+.timeline-group-stack {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border-radius: var(--rounded-md);
+    cursor: pointer;
+    background: transparent;
+}
+
+.timeline-group-stack__layer-back {
+    position: absolute;
+    top: 4px;
+    left: 8px;
+    right: 0;
+    bottom: 8px;
+    transform: rotate(3deg);
+    z-index: 1;
+    border-radius: var(--rounded-md);
+    opacity: 0.85;
+    border: 1px solid var(--color-border);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    background: var(--color-primary-bg);
+    overflow: hidden;
+}
+
+.timeline-group-stack__layer-front {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 8px;
+    bottom: 8px;
+    transform: rotate(-1deg);
+    z-index: 2;
+    border-radius: var(--rounded-md);
+    border: 2px solid var(--color-border);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2);
+    background: var(--color-primary-bg);
+    overflow: hidden;
+    transition: transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1), border-color 0.2s ease;
+}
+
+.timeline-group-stack img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.timeline-group-stack__count {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #fff;
+    font-size: 11px;
+    font-weight: var(--font-weight-bold);
+    padding: 2px 6px;
+    border-radius: 10px;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    line-height: 1;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    z-index: 3;
+}
+
+/* Hover micro-animations for stacked group */
+.timeline-group-stack:hover .timeline-group-stack__layer-back {
+    transform: translate(3px, -1px) rotate(5deg);
+    opacity: 1;
+}
+
+.timeline-group-stack:hover .timeline-group-stack__layer-front {
+    transform: translate(-1px, 1px) rotate(-2deg);
+    border-color: var(--color-accent);
+}
+/* Delete-selected styling for collapsed group stacks */
+.timeline-group-stack.delete-selected .timeline-group-stack__layer-front {
+    border-color: var(--color-error, #f44336) !important;
+    box-shadow: 0 0 12px color-mix(in srgb, var(--color-error, #f44336) 50%, transparent) !important;
+}
+
+.timeline-group-stack.delete-selected .timeline-group-stack__layer-front::after {
+    content: "remove_circle" !important;
+    font-family: "Material Symbols Outlined" !important;
+    position: absolute !important;
+    top: 4px !important;
+    right: 4px !important;
+    font-size: 16px !important;
+    color: var(--color-error, #f44336) !important;
+    background: var(--color-card-bg) !important;
+    border-radius: 50% !important;
+    padding: 1px !important;
+    display: block !important;
+    z-index: 5;
+    line-height: 1;
+}
+/* Spanning Expanded Group Header & Footer */
+.timeline-expanded-group-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    background: color-mix(in srgb, var(--color-accent) 5%, var(--color-primary-bg));
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    padding: 6px 12px;
+    margin: 8px 0 4px 0;
+    font-size: 13px;
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-primary-text);
+}
+
+.timeline-expanded-group-header .material-symbols-outlined {
+    font-size: 20px;
+    color: var(--color-accent);
+}
+
+.timeline-expanded-group-header__char-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    border: 1px solid var(--color-accent);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    display: block;
+}
+
+.timeline-expanded-group-header__char-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.timeline-expanded-group-header .group-title-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.live-gen-collapse-btn,
+.live-gen-select-group-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-accent);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: var(--font-weight-bold);
+    padding: 4px 8px;
+    border-radius: var(--rounded-md);
+    transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.live-gen-collapse-btn:hover,
+.live-gen-select-group-btn:hover {
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.live-gen-collapse-btn:active,
+.live-gen-select-group-btn:active {
+    transform: scale(0.95);
+}
+
+.show-in-delete-mode {
+    display: none !important;
+}
+
+.live-gen-timeline-panel.delete-mode .show-in-delete-mode {
+    display: flex !important;
+}
+
+.live-gen-timeline-panel.delete-mode .hide-in-delete-mode {
+    display: none !important;
+}
+
+/* Fade in animation for smooth transitions */
+@keyframes timeline-fade-in {
+    from {
+        opacity: 0.85;
+        transform: scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.animate-fade-in {
+    animation: timeline-fade-in 0.12s ease-out forwards;
+}
+
+/* --- LLM & Ghost Suggestions Styles --- */
+
+
+.live-gen-prompt-ghost {
+    position: absolute;
+    bottom: 100%;
+    margin-bottom: 8px;
+    left: 8px;
+    right: 8px;
+    z-index: 3750; /* float above navibar tray */
+    background: color-mix(in srgb, var(--color-card-bg) 95%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-border);
+    border-radius: var(--rounded-md);
+    box-shadow: 0 4px 16px var(--color-shadow);
+    padding: 8px 12px;
+    display: none; /* controlled dynamically by JS style.display */
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--spacing-2);
+    box-sizing: border-box;
+    pointer-events: auto; /* interactive */
+    transition: all 0.2s ease;
+}
+
+/* Adjust spacing on widescreen/desktop to give more breathing room above the navibar */
+@media (min-width: 641px) {
+    .live-gen-prompt-ghost {
+        margin-bottom: 12px;
+    }
+}
+
+/* Hide mobile-nav-buttons when suggestion is active */
+body.has-active-suggestion .live-gen-mobile-nav-buttons {
+    display: none !important;
+}
+
+/* Three dots bouncing loading animation styles */
+.live-gen-suggestion-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 18px;
+    padding-left: 4px;
+}
+
+.live-gen-suggestion-dots span {
+    width: 6px;
+    height: 6px;
+    background-color: var(--color-accent);
+    border-radius: 50%;
+    display: inline-block;
+    animation: live-gen-dots-bounce 1.4s infinite ease-in-out both;
+}
+
+.live-gen-suggestion-dots span:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.live-gen-suggestion-dots span:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+@keyframes live-gen-dots-bounce {
+    0%, 80%, 100% { 
+        transform: scale(0.3);
+        opacity: 0.3;
+    } 
+    40% { 
+        transform: scale(1.0);
+        opacity: 1;
+    }
+}
+
+/* Hide when autocomplete is active */
+#navibar-tray:has(.tag-autocomplete-list li) .live-gen-prompt-ghost {
+    display: none !important;
+}
+
+.live-gen-prompt-ghost .ghost-suggestion-label {
+    font-size: 11px;
+    color: var(--color-accent);
+    font-weight: var(--font-weight-bold);
+    text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.live-gen-prompt-ghost .ghost-suggestion-label .material-symbols-outlined {
+    font-size: 16px;
+}
+
+.live-gen-prompt-ghost .ghost-suggestion-wrapper {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex: 1;
+    margin-right: 8px;
+    text-align: left;
+    white-space: normal;
+    line-height: 1.4;
+}
+
+.live-gen-prompt-ghost .ghost-suggestion {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.ghost-tag-btn {
+    background: var(--color-secondary-bg);
+    border: none;
+    border-radius: var(--rounded-sm);
+    padding: 3px 8px;
+    color: var(--color-primary-text);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1.2;
+}
+
+.ghost-tag-btn:hover {
+    background: color-mix(in srgb, var(--color-accent) 15%, var(--color-secondary-bg));
+    color: var(--color-accent);
+}
+
+.ghost-tag-btn:active {
+    transform: scale(0.95);
+}
+
+.ghost-tag-btn.is-first-prediction {
+    outline: 1px solid var(--color-accent);
+    outline-offset: -1px;
+    background: color-mix(in srgb, var(--color-accent) 8%, var(--color-secondary-bg));
+}
+
+
+.live-gen-suggestion-tab-badge {
+    border: 1px solid var(--color-accent);
+    color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: var(--rounded-sm);
+    cursor: pointer;
+    z-index: 5;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 6px;
+    line-height: 1.2;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.live-gen-suggestion-tab-badge:hover {
+    background: var(--color-accent);
+    color: white;
+    box-shadow: 0 0 10px var(--color-accent);
+}
+
+.live-gen-suggestion-tab-badge:active {
+    transform: scale(0.95);
+}
+
+/* Premium toggle switch styles for LLM tab */
+.live-gen-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+}
+
+.live-gen-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.live-gen-switch-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--color-border);
+    transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 24px;
+}
+
+.live-gen-switch-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--color-primary-text);
+    transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 50%;
+    box-shadow: 0 1px 3px var(--color-shadow);
+}
+
+.live-gen-switch input:checked + .live-gen-switch-slider {
+    background-color: var(--color-accent);
+}
+
+.live-gen-switch input:checked + .live-gen-switch-slider:before {
+    transform: translateX(20px);
+}
+
+/* Auto prompt button styling */
+.live-gen-prompt-action[data-action="auto-prompt"] {
+    color: var(--color-accent);
+}
+
+.live-gen-prompt-action[data-action="auto-prompt"]:hover {
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: var(--color-accent);
+    transform: scale(1.05);
 }
 

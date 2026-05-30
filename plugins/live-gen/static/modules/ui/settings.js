@@ -48,6 +48,8 @@
                 document.activeElement.blur();
             }
 
+            let executeAutoSave = null;
+
             const existingTimeline = document.querySelector(".live-gen-timeline-panel");
             if (existingTimeline) {
                 existingTimeline.remove();
@@ -79,9 +81,11 @@
                 </header>
                 
                 <div class="live-gen-settings-tabs">
-                    <button type="button" class="live-gen-tab-btn active" data-tab="style_lora">Style & LoRA</button>
+                    <button type="button" class="live-gen-tab-btn active" data-tab="style_lora">Style</button>
                     <button type="button" class="live-gen-tab-btn" data-tab="generation">Generation</button>
                     <button type="button" class="live-gen-tab-btn" data-tab="i2i">I2I</button>
+                    <button type="button" class="live-gen-tab-btn" data-tab="llm">LLM</button>
+                    <button type="button" class="live-gen-tab-btn" data-tab="suggest">Suggest</button>
                 </div>
 
                 <div class="live-gen-settings-panel__form" style="opacity: 0.6; pointer-events: none;">
@@ -100,6 +104,9 @@
             panel.addEventListener("touchstart", (event) => event.stopPropagation(), { passive: true });
 
             const close = () => {
+                if (typeof executeAutoSave === 'function') {
+                    executeAutoSave();
+                }
                 panel.classList.remove("open");
                 document.body.classList.remove("live-gen-settings-open");
                 setTimeout(() => {
@@ -572,6 +579,97 @@
                         <input type="range" min="0.05" max="0.95" step="0.05" data-role="i2i_refine_denoise" value="${cfg.i2i_refine_denoise != null ? cfg.i2i_refine_denoise : 0.25}" oninput="document.getElementById('refine-denoise-val').innerText = this.value">
                     </label>
                 </div>
+
+                <div class="live-gen-tab-content" data-tab-content="llm">
+                    <label class="live-gen-setting-row" style="display: flex; flex-direction: row; justify-content: space-between; align-items: center; cursor: pointer; margin-bottom: var(--spacing-4); border-bottom: 1px solid var(--color-border); padding-bottom: var(--spacing-3);">
+                        <span style="font-weight: bold; color: var(--color-accent);">Kích hoạt LLM (Enable LLM)</span>
+                        <label class="live-gen-switch">
+                            <input type="checkbox" data-role="llm_enabled" ${cfg.llm_enabled === true ? "checked" : ""}>
+                            <span class="live-gen-switch-slider"></span>
+                        </label>
+                    </label>
+
+                    <label class="live-gen-setting-row">
+                        <span>Provider</span>
+                        <select data-role="llm_provider">
+                            <option value="gemini" ${cfg.llm_provider === "gemini" ? "selected" : ""}>Gemini</option>
+                            <option value="openai" ${cfg.llm_provider === "openai" ? "selected" : ""}>OpenAI</option>
+                            <option value="ollama" ${cfg.llm_provider === "ollama" ? "selected" : ""}>Ollama</option>
+                            <option value="openai-compatible" ${cfg.llm_provider === "openai-compatible" ? "selected" : ""}>OpenAI-compatible</option>
+                            <option value="lmstudio" ${cfg.llm_provider === "lmstudio" ? "selected" : ""}>LM Studio</option>
+                        </select>
+                    </label>
+
+                    <label class="live-gen-setting-row">
+                        <span>Domain / Base URL (Tùy chọn)</span>
+                        <input type="text" data-role="llm_domain" value="${helpers.escapeAttr(cfg.llm_domain || "")}" placeholder="Mặc định">
+                    </label>
+
+                    <label class="live-gen-setting-row">
+                        <span>API Key (Nếu cần)</span>
+                        <input type="password" data-role="llm_api_key" value="${helpers.escapeAttr(cfg.llm_api_key || "")}" placeholder="API Key của bạn">
+                    </label>
+
+                    <label class="live-gen-setting-row">
+                        <span>Model</span>
+                        <select data-role="llm_model">
+                            <option value="${helpers.escapeAttr(cfg.llm_model || "gemini-2.5-flash")}">${helpers.escapeHtml(cfg.llm_model || "gemini-2.5-flash")}</option>
+                        </select>
+                    </label>
+
+                    <div class="live-gen-setting-group">
+                        <label class="live-gen-setting-row">
+                            <div class="live-gen-label-container">
+                                <span>Temperature</span>
+                                <span class="live-gen-slider-value" id="llm-temp-val">${cfg.llm_temperature ?? 0.7}</span>
+                            </div>
+                            <input type="range" min="0" max="2" step="0.1" data-role="llm_temperature" value="${cfg.llm_temperature ?? 0.7}" oninput="document.getElementById('llm-temp-val').innerText = this.value">
+                        </label>
+
+                        <label class="live-gen-setting-row">
+                            <div class="live-gen-label-container">
+                                <span>Chu kỳ phân tích</span>
+                                <span class="live-gen-slider-value" id="llm-pref-interval-val">${(cfg.llm_pref_trigger_interval ?? 10) === 0 ? "OFF" : (cfg.llm_pref_trigger_interval ?? 10) + " ảnh"}</span>
+                            </div>
+                            <input type="range" min="0" max="100" step="10" data-role="llm_pref_trigger_interval" value="${cfg.llm_pref_trigger_interval ?? 10}" oninput="document.getElementById('llm-pref-interval-val').innerText = this.value == 0 ? 'OFF' : this.value + ' ảnh'">
+                        </label>
+                    </div>
+
+                    <label class="live-gen-setting-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <span>Instruction Prompt (Mô tả phong cách)</span>
+                            <button type="button" class="live-gen-secondary-btn" id="llm-reset-instruct-btn" style="padding: 2px 8px; font-size: 11px; min-height: 24px; border: 1px solid var(--color-border); margin: 0; box-sizing: border-box;">Reset</button>
+                        </div>
+                        <textarea data-role="llm_instruction" rows="4" style="width: 100%; resize: vertical; border-radius: var(--rounded-md); padding: 8px; background: var(--color-primary-bg); color: var(--color-primary-text); border: 1px solid var(--color-border); font-family: inherit; font-size: 13px;">${helpers.escapeHtml(cfg.llm_instruction || "")}</textarea>
+                    </label>
+
+                    <label class="live-gen-setting-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <span>User Preferences (Nhận xét sở thích / Blacklist)</span>
+                            <button type="button" class="live-gen-secondary-btn" id="llm-analyze-btn" style="padding: 2px 8px; font-size: 11px; min-height: 24px; border: 1px solid var(--color-border); margin: 0; box-sizing: border-box;">Analysis</button>
+                        </div>
+                        <textarea data-role="llm_user_preferences" rows="4" placeholder="Nhận xét của LLM hoặc ghi chú thủ công về sở thích của bạn..." style="width: 100%; resize: vertical; border-radius: var(--rounded-md); padding: 8px; background: var(--color-primary-bg); color: var(--color-primary-text); border: 1px solid var(--color-border); font-family: inherit; font-size: 13px;">${helpers.escapeHtml(cfg.llm_user_preferences || "")}</textarea>
+                    </label>
+                </div>
+
+                <div class="live-gen-tab-content" data-tab-content="suggest">
+                    <label class="live-gen-setting-row" style="display: flex; flex-direction: row; justify-content: space-between; align-items: center; cursor: pointer; margin-bottom: var(--spacing-4);">
+                        <span>Tự động gợi ý prompt (Ghost Suggestions)</span>
+                        <label class="live-gen-switch">
+                            <input type="checkbox" data-role="llm_suggestions_enabled" ${cfg.llm_suggestions_enabled !== false ? "checked" : ""}>
+                            <span class="live-gen-switch-slider"></span>
+                        </label>
+                    </label>
+
+                    <div class="live-gen-setting-info" style="font-size: 12px; color: var(--color-secondary-text); padding: 12px; border-radius: var(--rounded-md); background: var(--color-secondary-bg); line-height: 1.5;">
+                        <p style="margin: 0 0 8px 0; font-weight: bold; color: var(--color-primary-text);">Thông tin gợi ý (Suggestions Info)</p>
+                        <p style="margin: 0 0 8px 0;">Hệ thống hỗ trợ 2 chế độ gợi ý prompt:</p>
+                        <ul style="margin: 0; padding-left: 18px;">
+                            <li><strong>Chế độ Online:</strong> Sử dụng mô hình ngôn ngữ lớn (LLM) để tự động phân tích ngữ cảnh, phong cách và gợi ý các tag Danbooru phù hợp nhất. Kích hoạt trong tab <strong>LLM</strong>.</li>
+                            <li><strong>Chế độ Offline:</strong> Chạy trực tiếp trên trình duyệt bằng thuật toán tối ưu hóa từ khóa và liên kết thông minh từ cơ sở dữ liệu tag cá nhân. Hoạt động tức thì không cần kết nối mạng.</li>
+                        </ul>
+                    </div>
+                </div>
             `;
 
             formEl.style.opacity = "1";
@@ -964,8 +1062,11 @@
                 saveTimeout = setTimeout(() => executeAutoSave(), 200);
             };
 
-            const executeAutoSave = async () => {
+            executeAutoSave = async () => {
                 if (this.component.destroyed) return;
+                if (this.isApplyingSnapshot || (this.component.previewUI && this.component.previewUI.isApplyingSnapshot)) {
+                    return;
+                }
                 const getVal = (selector) => formEl.querySelector(selector)?.value;
                 const getNum = (selector) => {
                     const val = getVal(selector);
@@ -1032,7 +1133,17 @@
                     lora_names: loraNames,
                     lora_chain: loraChain,
                     multi_lora_prompt_tags: multiLoraPromptTags,
-                    multi_lora_prompt_groups: multiLoraPromptGroups
+                    multi_lora_prompt_groups: multiLoraPromptGroups,
+                    llm_provider: getVal('[data-role="llm_provider"]'),
+                    llm_domain: getVal('[data-role="llm_domain"]'),
+                    llm_api_key: getVal('[data-role="llm_api_key"]'),
+                    llm_model: getVal('[data-role="llm_model"]'),
+                    llm_temperature: getNum('[data-role="llm_temperature"]'),
+                    llm_instruction: getVal('[data-role="llm_instruction"]'),
+                    llm_user_preferences: getVal('[data-role="llm_user_preferences"]'),
+                    llm_enabled: formEl.querySelector('[data-role="llm_enabled"]')?.checked ?? false,
+                    llm_suggestions_enabled: formEl.querySelector('[data-role="llm_suggestions_enabled"]')?.checked ?? true,
+                    llm_pref_trigger_interval: getNum('[data-role="llm_pref_trigger_interval"]'),
                 };
 
                 Object.keys(newConfig).forEach(k => {
@@ -1080,6 +1191,10 @@
                 formEl.querySelectorAll('input[type="text"], input[type="number"], textarea').forEach(inp => {
                     inp.removeEventListener('blur', triggerAutoSave);
                     inp.addEventListener('blur', triggerAutoSave);
+                    inp.removeEventListener('change', triggerAutoSave);
+                    inp.addEventListener('change', triggerAutoSave);
+                    inp.removeEventListener('input', triggerAutoSave);
+                    inp.addEventListener('input', triggerAutoSave);
                 });
                 formEl.querySelectorAll('input[type="range"]').forEach(sld => {
                     sld.removeEventListener('blur', triggerAutoSave);
@@ -1087,9 +1202,138 @@
                     sld.removeEventListener('change', triggerAutoSave);
                     sld.addEventListener('change', triggerAutoSave);
                 });
+                formEl.querySelectorAll('input[type="checkbox"]').forEach(chk => {
+                    chk.removeEventListener('change', triggerAutoSave);
+                    chk.addEventListener('change', triggerAutoSave);
+                });
             };
 
             attachAutoSaveListeners();
+
+            // Dynamic controller to enable/disable and dim LLM fields based on llm_enabled toggle
+            const updateLLMFieldsState = () => {
+                const llmEnabledInput = formEl.querySelector('[data-role="llm_enabled"]');
+                const isLlmEnabled = llmEnabledInput ? llmEnabledInput.checked : false;
+                
+                const llmTab = formEl.querySelector('[data-tab-content="llm"]');
+                if (llmTab) {
+                    const rows = llmTab.querySelectorAll('.live-gen-setting-row, .live-gen-setting-group');
+                    rows.forEach(row => {
+                        if (row.querySelector('[data-role="llm_enabled"]')) return;
+                        
+                        row.style.opacity = isLlmEnabled ? "1" : "0.4";
+                        row.style.pointerEvents = isLlmEnabled ? "auto" : "none";
+                        
+                        const inputs = row.querySelectorAll('input, select, textarea, button');
+                        inputs.forEach(el => {
+                            el.disabled = !isLlmEnabled;
+                        });
+                    });
+                }
+            };
+
+            const llmEnabledInput = formEl.querySelector('[data-role="llm_enabled"]');
+            if (llmEnabledInput) {
+                llmEnabledInput.addEventListener('change', () => {
+                    updateLLMFieldsState();
+                    if (llmEnabledInput.checked) {
+                        setTimeout(updateModelDropdown, 50);
+                    }
+                });
+            }
+
+            // Run immediately on settings open
+            updateLLMFieldsState();
+
+            // --- LLM Model Dropdown & Reset Instruct Button Logic ---
+            const DEFAULT_LLM_INSTRUCTION = "You are a Danbooru-style Booru tags optimizer and expander for Anime Illustrious models. Analyze the user's existing tags and their style preferences. Suggest up to 15-20 additional high-quality Booru tags to expand the scene (clothing details, camera angle, lighting, background, artistic style, character expression). CRITICAL RULES: 1. Return ONLY the new tags, separated by commas, starting with a comma. No explanations, no conversational text, no markdown. 2. Optimize for high-quality Booru tags (e.g., 'masterpiece, best quality, depth of field'). 3. If the input contains only one character or no characters, prioritize keeping it to a SINGLE character scene (e.g., '1girl, solo' or '1boy, solo') and expand on their actions, features, or background. Do NOT add other characters.";
+
+            const providerSelect = formEl.querySelector('[data-role="llm_provider"]');
+            const domainInput = formEl.querySelector('[data-role="llm_domain"]');
+            const apiKeyInput = formEl.querySelector('[data-role="llm_api_key"]');
+            const modelSelect = formEl.querySelector('[data-role="llm_model"]');
+
+            const updateModelDropdown = async () => {
+                if (!providerSelect || !modelSelect) return;
+                
+                const llmEnabledVal = formEl.querySelector('[data-role="llm_enabled"]')?.checked ?? false;
+                if (!llmEnabledVal) return; // Skip fetching models if LLM is disabled
+                
+                const prov = providerSelect.value;
+                const dom = (domainInput?.value || "").trim();
+                const key = (apiKeyInput?.value || "").trim();
+
+                modelSelect.disabled = true;
+                const currentModel = (this.state.config?.llm_model || modelSelect.value || "gemini-2.5-flash");
+
+                try {
+                    const resp = await this.apiClient.pluginApi.get(`/llm/models?provider=${encodeURIComponent(prov)}&domain=${encodeURIComponent(dom)}&api_key=${encodeURIComponent(key)}`);
+                    if (resp && resp.status === "success" && Array.isArray(resp.models)) {
+                        modelSelect.innerHTML = "";
+                        if (resp.models.length === 0) {
+                            modelSelect.innerHTML = `<option value="">Không có model nào</option>`;
+                        } else {
+                            resp.models.forEach(m => {
+                                const opt = document.createElement("option");
+                                opt.value = m.id;
+                                opt.textContent = m.name || m.id;
+                                if (m.id === currentModel) {
+                                    opt.selected = true;
+                                }
+                                modelSelect.appendChild(opt);
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.warn("Không thể tải danh sách model:", err);
+                } finally {
+                    modelSelect.disabled = false;
+                }
+            };
+
+            if (providerSelect) {
+                providerSelect.addEventListener("change", updateModelDropdown);
+                domainInput?.addEventListener("blur", updateModelDropdown);
+                apiKeyInput?.addEventListener("blur", updateModelDropdown);
+                // Tự động tải lần đầu
+                setTimeout(updateModelDropdown, 100);
+            }
+
+            const resetInstructBtn = formEl.querySelector('#llm-reset-instruct-btn');
+            resetInstructBtn?.addEventListener('click', () => {
+                const textarea = formEl.querySelector('[data-role="llm_instruction"]');
+                if (textarea) {
+                    textarea.value = DEFAULT_LLM_INSTRUCTION;
+                    triggerAutoSave();
+                }
+            });
+
+            const analyzeBtn = formEl.querySelector('#llm-analyze-btn');
+            analyzeBtn?.addEventListener('click', async () => {
+                const originalText = analyzeBtn.textContent;
+                analyzeBtn.disabled = true;
+                analyzeBtn.textContent = "Analyzing...";
+                
+                try {
+                    const resp = await this.apiClient.pluginApi.post("/llm/analyze");
+                    if (resp && resp.status === "success") {
+                        const textarea = formEl.querySelector('[data-role="llm_user_preferences"]');
+                        if (textarea) {
+                            textarea.value = resp.preferences;
+                            triggerAutoSave();
+                        }
+                        window.showSuccess?.("Phân tích sở thích người dùng thành công!");
+                    } else {
+                        window.showError?.(resp?.error || "Phân tích sở thích thất bại.");
+                    }
+                } catch (err) {
+                    console.error("Lỗi khi phân tích sở thích:", err);
+                    window.showError?.("Không thể kết nối tới máy chủ để phân tích sở thích.");
+                } finally {
+                    analyzeBtn.disabled = false;
+                    analyzeBtn.textContent = originalText;
+                }
+            });
         }
     }
 

@@ -3,7 +3,7 @@ import threading
 from collections import defaultdict, deque
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 from integrations import gemini_api
 from integrations import openai as openai_integration
@@ -110,11 +110,141 @@ class OpenAIProvider(BaseAIProvider):
                 pass
         except Exception as e:
             print(f"[AIService] Warning: Failed to apply keep_alive for Ollama model {model}: {e}")
+    # Cache: tracks the currently loaded model per LM Studio base URL.
+    _lmstudio_loaded_models: Dict[str, str] = {}
+
+    @classmethod
+    def _resolve_lmstudio_root_url(cls, config) -> str:
+        base_url = config.base_url or "http://localhost:1234/v1"
+        if base_url.endswith("/v1"):
+            return base_url[:-3]
+        elif base_url.endswith("/v1/"):
+            return base_url[:-4]
+        return base_url.rstrip("/")
+
+    @classmethod
+    def _lmstudio_api_request(cls, url: str, config, method: str = "GET", body: dict = None, timeout: int = 5):
+        import json
+        import urllib.request
+        req = urllib.request.Request(url, method=method)
+        if config.api_key and config.api_key != "ollama":
+            req.add_header("Authorization", f"Bearer {config.api_key}")
+        if body is not None:
+            req.add_header("Content-Type", "application/json")
+            req.data = json.dumps(body).encode("utf-8")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    @classmethod
+    def _ensure_lmstudio_model_loaded(cls, task: AIRequestTask, target_provider: str, model: str, overrides: Dict[str, Any]) -> None:
+        """Ensure the requested model is loaded in LM Studio.
+
+        - If the correct model is already loaded, do nothing.
+        - If a different model is loaded, unload it first, then load the requested one.
+        - Uses an in-memory cache for fast-path skipping.
+        """
+        if target_provider != "lmstudio" or not model:
+            return
+
+        try:
+            config = openai_integration.resolve_provider_config(
+                provider=target_provider, overrides=overrides, user_api_key=task.user_api_key
+            )
+            root_url = cls._resolve_lmstudio_root_url(config)
+
+            # Fast path: cache says this model is already loaded
+            if cls._lmstudio_loaded_models.get(root_url) == model:
+                return
+
+            # Query native API to see what's actually loaded
+            try:
+                data = cls._lmstudio_api_request(f"{root_url}/api/v1/models", config, timeout=5)
+            except Exception:
+                # Native API unavailable, skip pre-loading
+                return
+
+            models_list = []
+            if isinstance(data, dict):
+                if "models" in data:
+                    models_list = data["models"]
+                elif "data" in data:
+                    models_list = data["data"]
+            elif isinstance(data, list):
+                models_list = data
+
+            loaded_instances_to_unload = []
+            requested_is_loaded = False
+
+            for m_entry in models_list:
+                if not isinstance(m_entry, dict):
+                    continue
+                
+                m_id = m_entry.get("key") or m_entry.get("id") or ""
+                
+                # Check for "loaded_instances" (LM Studio native API style)
+                loaded_instances = m_entry.get("loaded_instances")
+                
+                is_loaded = False
+                instance_ids = []
+                
+                if isinstance(loaded_instances, list) and len(loaded_instances) > 0:
+                    is_loaded = True
+                    for inst in loaded_instances:
+                        if isinstance(inst, dict) and inst.get("id"):
+                            instance_ids.append(inst["id"])
+                else:
+                    # Fallback for older or other formats
+                    m_state = m_entry.get("state", "")
+                    m_loaded = m_entry.get("loaded", False)
+                    if m_state == "loaded" or m_loaded is True:
+                        is_loaded = True
+                        # If we don't have an instance_id, use the model id as the fallback
+                        instance_ids.append(m_id)
+                
+                if is_loaded:
+                    if m_id == model:
+                        requested_is_loaded = True
+                    else:
+                        for inst_id in instance_ids:
+                            if inst_id:
+                                loaded_instances_to_unload.append(inst_id)
+
+            if requested_is_loaded:
+                cls._lmstudio_loaded_models[root_url] = model
+                return
+
+            # Unload any currently loaded models to free VRAM
+            for inst_id in loaded_instances_to_unload:
+                try:
+                    print(f"[AIService] LM Studio: Unloading model instance '{inst_id}'...")
+                    cls._lmstudio_api_request(
+                        f"{root_url}/api/v1/models/unload", config,
+                        method="POST", body={"instance_id": inst_id}, timeout=15,
+                    )
+                    print(f"[AIService] LM Studio: Model instance '{inst_id}' unloaded.")
+                except Exception as e:
+                    print(f"[AIService] Warning: Failed to unload LM Studio model instance '{inst_id}': {e}")
+
+            # Load the requested model
+            print(f"[AIService] LM Studio: Loading model '{model}'...")
+            cls._lmstudio_api_request(
+                f"{root_url}/api/v1/models/load", config,
+                method="POST", body={"model": model}, timeout=120,
+            )
+            print(f"[AIService] LM Studio: Model '{model}' loaded successfully.")
+            cls._lmstudio_loaded_models[root_url] = model
+        except Exception as e:
+            print(f"[AIService] Warning: Failed to pre-load LM Studio model '{model}': {e}")
 
     def run(self, task: AIRequestTask) -> Any:
         overrides = self._merge_overrides(task)
         target_provider = task.payload.get("provider") or overrides.pop("provider", self.name)
         operation = task.operation.lower()
+
+        # Ensure model is loaded for LM Studio before any operation
+        model = task.payload.get("model")
+        if target_provider == "lmstudio" and model:
+            self._ensure_lmstudio_model_loaded(task, target_provider, model, overrides)
 
         try:
             if operation in ("chat", "chat_completion"):
@@ -495,6 +625,26 @@ class AIService:
     def request(self, timeout: Optional[float] = None, **kwargs) -> Any:
         future = self.submit(**kwargs)
         return future.result(timeout=timeout)
+
+    def list_models(
+        self,
+        *,
+        provider: str,
+        user_api_key: Optional[str] = None,
+        provider_overrides: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """List available models from an AI provider."""
+        provider = provider.strip().lower()
+        if provider == "gemini":
+            return gemini_api.list_models(user_api_key=user_api_key)
+        elif provider in ("openai", "openai-compatible", "lmstudio", "ollama"):
+            return openai_integration.list_models(
+                provider=provider,
+                user_api_key=user_api_key,
+                overrides=provider_overrides,
+            )
+        else:
+            raise ProviderNotRegisteredError(f"Provider '{provider}' is not supported for listing models.")
 
     def get_status(self) -> Dict[str, Any]:
         with self._lock:

@@ -37,6 +37,7 @@
             document.body.classList.add("live-gen-active");
             this.render();
             this.previewUI.initDOMElements();
+            await this.previewUI.loadHistory();
             this._updateNav();
             await this._loadConfig();
             this._loadTags();
@@ -46,7 +47,7 @@
             // Luôn mở prompt field ngay khi truy cập plugin
             this.promptUI.openPromptMode();
             if (this.state.prompt.trim()) {
-                this._scheduleGeneration(120);
+                this._scheduleGeneration(120, false);
             }
         }
 
@@ -181,6 +182,7 @@
                     this._setProgress(0);
                     this._setStatus("Đang gửi prompt...", "running");
                     this.receivedPreviewThisRun = false;
+                    this.previewUI.onGenerationStarting();
                     break;
                 case "queued":
                     this.state.running = true;
@@ -201,7 +203,7 @@
                     if (pMode === "live") {
                         this.previewUI.showImage(message.image, true);
                     } else if (pMode === "every_5") {
-                        if (this.state.currentStep > 0 && this.state.currentStep % 5 === 0) {
+                        if (this.state.currentStep === 1 || (this.state.currentStep > 0 && this.state.currentStep % 5 === 0)) {
                             this.previewUI.showImage(message.image, true);
                         }
                     }
@@ -209,7 +211,6 @@
                 case "final":
                     this.state.running = false;
                     this._setProgress(100);
-                    this.previewUI.showImage(message.image, false);
                     this.state.lastFinalImageBase64 = message.image;
 
                     // Detect preview support and update state dynamically
@@ -229,6 +230,11 @@
                     if (message.config && this.state.config) {
                         this.state.config = { ...this.state.config, ...message.config };
                     }
+
+                    this.previewUI.showImage(message.image, false, {
+                        snapshotId: message.snapshot_id || this.state.config?.snapshot_id,
+                        generationConfig: { ...this.state.config }
+                    });
 
                     const elapsed = this.state.generationStartTime
                         ? ((Date.now() - this.state.generationStartTime) / 1000).toFixed(1)
@@ -250,6 +256,16 @@
                 case "cancelled":
                     this.state.running = false;
                     this._setStatus("Đã hủy tác vụ cũ.", "idle");
+                    break;
+                case "user_preferences_updated":
+                    if (this.state.config) {
+                        this.state.config.llm_user_preferences = message.preferences;
+                    }
+                    const prefTextarea = document.querySelector('.live-gen-settings-panel [data-role="llm_user_preferences"]');
+                    if (prefTextarea) {
+                        prefTextarea.value = message.preferences;
+                    }
+                    window.showSuccess?.("Sở thích người dùng (User Preferences) vừa được LLM tự động cập nhật!");
                     break;
                 case "error":
                     this.state.running = false;
@@ -289,6 +305,9 @@
             clearTimeout(this.debounceTimer);
             if (this.state.config) {
                 delete this.state.config.snapshot_id;
+            }
+            if (this.previewUI) {
+                this.previewUI.userTriggeredGeneration = true;
             }
             this.debounceTimer = setTimeout(() => this._generateNow(), delay);
         }
@@ -340,7 +359,85 @@
             this._syncMobileNavButtonStates();
         }
 
+        async _urlToBase64(url) {
+            try {
+                const response = await fetch(url);
+                const blob = await response.blob();
+                return await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.readAsDataURL(blob);
+                });
+            } catch (err) {
+                console.warn("⚠️ Không thể chuyển đổi ảnh sang Base64: ", err);
+                return null;
+            }
+        }
+
         async _toggleHires() {
+            const previewUI = this.previewUI;
+            const isViewingOldSlide = previewUI && previewUI.slides && previewUI.currentIndex >= 0 && previewUI.currentIndex < previewUI.slides.length - 1;
+
+            if (isViewingOldSlide) {
+                const activeSlide = previewUI.slides[previewUI.currentIndex];
+                if (!activeSlide || activeSlide.isPreview || !activeSlide.generationConfig) return;
+
+                const newHires = !activeSlide.generationConfig.hires_enabled;
+                activeSlide.generationConfig.hires_enabled = newHires;
+
+                if (previewUI.hiresBtn) {
+                    previewUI.hiresBtn.classList.toggle("active", newHires);
+                }
+                this._syncMobileNavButtonStates();
+
+                try {
+                    const updatedConfig = {
+                        ...this.state.config,
+                        ...activeSlide.generationConfig,
+                        hires_enabled: newHires
+                    };
+                    const saved = await this.apiClient.saveConfig(updatedConfig);
+                    this.state.config = { ...this.state.config, ...saved.config };
+                    this.wsClient.send({ type: "update_config", config: saved.config });
+
+                    if (newHires && activeSlide.url) {
+                        this._setStatus("Upscaling (Hires Fix)...", "running");
+                        const base64 = await this._urlToBase64(activeSlide.url);
+                        if (base64) {
+                            this._runHiresOnSlide(base64, activeSlide.generationConfig);
+                        } else {
+                            window.showError?.("Không thể tải dữ liệu ảnh của snapshot cũ này để nâng cấp.");
+                        }
+                    } else if (!newHires && activeSlide.snapshotId) {
+                        try {
+                            const resp = await this.apiClient.getHistory();
+                            const rawImages = resp.images || [];
+                            const lowResImg = rawImages.find(img => 
+                                img.generationConfig?.snapshot_id === activeSlide.snapshotId && 
+                                !(img.generationConfig?.hires_enabled === true || img.generationConfig?.hires_enabled === 'true' || img.generationConfig?.hires_enabled === '1' || img.generationConfig?.hires_enabled === 'yes')
+                            );
+                            if (lowResImg) {
+                                activeSlide.url = lowResImg.url;
+                                activeSlide.pvUrl = lowResImg.pv_url || lowResImg.url;
+                                if (activeSlide.el) {
+                                    const img = activeSlide.el.querySelector(".live-gen-preview__image");
+                                    if (img) {
+                                        img.src = activeSlide.url;
+                                        img.classList.remove("is-loaded");
+                                        img.onload = () => img.classList.add("is-loaded");
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.warn("Không thể tìm phiên bản low-res trong lịch sử:", e);
+                        }
+                    }
+                } catch (err) {
+                    window.showError?.(`Không thể lưu cấu hình Hires: ${err.message}`);
+                }
+                return;
+            }
+
             if (!this.state.config) return;
             const newHires = !this.state.config.hires_enabled;
             
@@ -365,6 +462,35 @@
             }
         }
 
+        _runHiresOnSlide(base64, slideConfig) {
+            if (!this.wsClient.ws || this.wsClient.ws.readyState !== WebSocket.OPEN) {
+                this._setStatus("Đang đợi WebSocket...", "idle");
+                this.wsClient.connect();
+                return;
+            }
+
+            this.seq += 1;
+            this.state.latestSeq = this.seq;
+            this._setStatus("Upscaling (Hires Fix)...", "running");
+            if (this.previewUI) {
+                this.previewUI.userTriggeredGeneration = true;
+            }
+
+            this.wsClient.send({
+                type: "generate",
+                seq: this.seq,
+                prompt: this.helpers.normalizePrompt(slideConfig.prompt),
+                seed: slideConfig.seed,
+                input_image_base64: base64,
+                config: {
+                    ...slideConfig,
+                    seed: slideConfig.seed,
+                    _workflow_type: "image2image",
+                    hires_enabled: true,
+                }
+            });
+        }
+
         _runHiresOnCurrentImage() {
             if (!this.state.lastFinalImageBase64) return;
             if (!this.wsClient.ws || this.wsClient.ws.readyState !== WebSocket.OPEN) {
@@ -376,6 +502,9 @@
             this.seq += 1;
             this.state.latestSeq = this.seq;
             this._setStatus("Upscaling (Hires Fix)...", "running");
+            if (this.previewUI) {
+                this.previewUI.userTriggeredGeneration = true;
+            }
 
             this.wsClient.send({
                 type: "generate",
@@ -408,6 +537,9 @@
             this.seq += 1;
             this.state.latestSeq = this.seq;
             this._setStatus("Refining...", "running");
+            if (this.previewUI) {
+                this.previewUI.userTriggeredGeneration = true;
+            }
             
             this.wsClient.send({
                 type: "generate",
@@ -428,6 +560,23 @@
 
         _openSettings() {
             this.settingsUI.openSettings();
+        }
+
+        async _rerollSeed() {
+            const newSeed = Math.floor(Math.random() * 1000000000);
+            try {
+                const saved = await this.apiClient.saveConfig({ seed: newSeed });
+                this._applyConfig(saved.config);
+                this.wsClient.send({ type: "update_config", config: saved.config });
+                // Sync seed input in settings panel if open
+                const seedInput = document.querySelector('.live-gen-settings-panel [data-role="seed"]');
+                if (seedInput) seedInput.value = String(newSeed);
+                this.lastGeneratedPrompt = "";
+                this._scheduleGeneration(15);
+                window.showSuccess?.(`Đã đổi ngẫu nhiên seed mới: ${newSeed}`);
+            } catch (err) {
+                window.showError?.(`Không thể lưu seed mới: ${err.message}`);
+            }
         }
 
         _openTimeline() {

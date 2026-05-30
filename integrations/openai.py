@@ -358,8 +358,43 @@ def list_models(
     Returns a list of dicts with at least: { id: str, owned_by?: str }.
     Uses the synchronous client for simplicity.
     """
-    client = get_client(provider=provider, user_api_key=user_api_key, overrides=overrides)
     result = []
+    
+    # Try native LM Studio API first to list all downloaded models (even if not loaded yet)
+    if provider.strip().lower() == "lmstudio":
+        try:
+            import urllib.request
+            config = resolve_provider_config(provider=provider, overrides=overrides, user_api_key=user_api_key)
+            base_url = config.base_url or "http://localhost:1234/v1"
+            if base_url.endswith("/v1"):
+                root_url = base_url[:-3]
+            elif base_url.endswith("/v1/"):
+                root_url = base_url[:-4]
+            else:
+                root_url = base_url.rstrip("/")
+            
+            api_url = f"{root_url}/api/v1/models"
+            req = urllib.request.Request(api_url)
+            if config.api_key and config.api_key != "ollama":
+                req.add_header("Authorization", f"Bearer {config.api_key}")
+            
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode("utf-8"))
+                items = data.get("data", [])
+                for m in items:
+                    model_id = m.get("id") or m.get("name")
+                    if model_id:
+                        result.append({
+                            "id": model_id,
+                            "owned_by": m.get("publisher") or m.get("owned_by") or "lmstudio",
+                        })
+                if result:
+                    return result
+        except Exception as e:
+            # Fallback to standard OpenAI compatible list if native API fails
+            print(f"[OpenAIIntegration] Native LM Studio API failed: {e}. Falling back to standard API...")
+
+    client = get_client(provider=provider, user_api_key=user_api_key, overrides=overrides)
     try:
         models = client.models.list()
         # The SDK returns a list-like object with .data

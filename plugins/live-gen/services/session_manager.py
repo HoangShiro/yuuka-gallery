@@ -98,6 +98,16 @@ class SessionManager:
         with self._sessions_lock:
             self._sessions.discard(session)
 
+    def notify_user_preferences_updated(self, user_hash, preferences):
+        with self._sessions_lock:
+            sessions = list(self._sessions)
+        for s in sessions:
+            if s.user_hash == user_hash:
+                s.send({
+                    "type": "user_preferences_updated",
+                    "preferences": preferences
+                })
+
     def shutdown(self):
         with self._sessions_lock:
             sessions = list(self._sessions)

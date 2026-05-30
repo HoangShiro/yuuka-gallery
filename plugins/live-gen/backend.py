@@ -4,6 +4,7 @@ import urllib.parse
 from flask import Blueprint
 
 from .services import ConfigService, HistoryService, GenerationService, SessionManager
+from .services.llm_service import LLMService
 from .api.routes import setup_routes
 
 class LiveGenPlugin:
@@ -17,9 +18,13 @@ class LiveGenPlugin:
         self.generation_service = GenerationService(self.core_api, self.config_service, self.history_service)
         self.session_manager = SessionManager(self.core_api, self.config_service, self.generation_service)
         
+        # Initialize LLMService and link it to HistoryService
+        self.llm_service = LLMService(self.core_api, self.config_service, self.history_service, self)
+        self.history_service.llm_service = self.llm_service
+        
         # Setup API routes
         setup_routes(self.blueprint, self)
-        print("[Plugin:LiveGen] Backend initialized (Restructured version).")
+        print("[Plugin:LiveGen] Backend initialized (Restructured version with LLM Integration).")
 
     def get_blueprint(self):
         return self.blueprint, "/api/plugin/live-gen"

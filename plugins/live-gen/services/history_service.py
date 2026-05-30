@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 class HistoryService:
     def __init__(self, core_api):
         self.core_api = core_api
+        self.llm_service = None
 
     def ensure_live_gen_albums(self, user_hash):
         """Đảm bảo các album 'Live Gen History' và 'Live Gen Favorite' được đăng ký trong danh sách custom albums."""
@@ -181,3 +182,17 @@ class HistoryService:
             0.0 # creation duration
         )
         self.ensure_live_gen_albums(user_hash)
+
+        # Kích hoạt tự động phân tích sở thích định kỳ nếu có cấu hình
+        if self.llm_service:
+            try:
+                # Sẽ import ConfigService hoặc gọi qua core_api hoặc dùng tham chiếu trực tiếp
+                if hasattr(self.llm_service, "config_service"):
+                    cfg = self.llm_service.config_service.get_config()
+                    interval = cfg.get("llm_pref_trigger_interval", 10)
+                    if interval > 0:
+                        history_images = self.get_history_images(user_hash) or []
+                        if len(history_images) > 0 and len(history_images) % interval == 0:
+                            self.llm_service.trigger_user_preferences_analysis(user_hash)
+            except Exception as e:
+                print(f"⚠️ [LiveGen History] Lỗi khi kiểm tra kích hoạt phân tích LLM: {e}")
