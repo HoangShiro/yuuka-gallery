@@ -213,11 +213,14 @@
                     this.state.lastFinalImageBase64 = message.image;
 
                     // Detect preview support and update state dynamically
-                    const supportsPreview = !!this.receivedPreviewThisRun;
-                    if (this.state.comfySupportsPreview !== supportsPreview) {
-                        this.state.comfySupportsPreview = supportsPreview;
-                        localStorage.setItem("yuuka.liveGen.comfySupportsPreview", String(supportsPreview));
-                        this.settingsUI.updatePreviewModeState();
+                    const isCached = message.prompt_id && String(message.prompt_id).startsWith("cached_");
+                    if (!isCached) {
+                        const supportsPreview = !!this.receivedPreviewThisRun;
+                        if (this.state.comfySupportsPreview !== supportsPreview) {
+                            this.state.comfySupportsPreview = supportsPreview;
+                            localStorage.setItem("yuuka.liveGen.comfySupportsPreview", String(supportsPreview));
+                            this.settingsUI.updatePreviewModeState();
+                        }
                     }
 
                     if (message.snapshot_id && this.state.config) {
